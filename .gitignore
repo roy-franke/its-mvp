@@ -1,0 +1,20 @@
+# Geheimnisse – niemals committen (enthält API-Keys)
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Laufzeitdaten (Lernendendaten gehören nicht ins Repo)
+its.db
+its.db-journal
+*.db
+
+# macOS
+.DS_Store
+
+# Sonstiges
+nohup.out
+*.log

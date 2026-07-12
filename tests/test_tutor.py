@@ -1,0 +1,112 @@
+"""Tests für die ITS-Kernlogik (deterministisch, ohne LLM)."""
+
+from app import tutor
+from app.llm import extract_json
+
+
+def _profile(level="intermediate"):
+    p = tutor.new_profile()
+    p["level"] = level
+    return p
+
+
+# ---------------------------------------------------------------- Adaption
+
+def test_richtig_geht_weiter():
+    p = _profile()
+    action, _ = tutor.adapt(p, True)
+    assert action == "next"
+    assert p["step"] == 1 and p["correct"] == 1 and p["streak"] == 1
+
+
+def test_zwei_richtige_erhoehen_level():
+    p = _profile("basic")
+    tutor.adapt(p, True)
+    action, reason = tutor.adapt(p, True)
+    assert action == "advance"
+    assert p["level"] == "intermediate"
+    assert reason  # Adaption muss begründet werden
+    assert p["streak"] == 0  # Serie beginnt neu
+
+
+def test_hoechstes_level_bleibt():
+    p = _profile("advanced")
+    tutor.adapt(p, True)
+    action, _ = tutor.adapt(p, True)
+    assert action == "next"
+    assert p["level"] == "advanced"
+
+
+def test_erster_fehler_gibt_zweiten_versuch():
+    p = _profile()
+    action, reason = tutor.adapt(p, False)
+    assert action == "retry"
+    assert reason
+    assert p["step"] == 0  # Schritt zählt noch nicht als bearbeitet
+    assert p["attempts_current"] == 1
+
+
+def test_zweiter_fehler_vereinfacht_und_senkt_level():
+    p = _profile("intermediate")
+    tutor.adapt(p, False)
+    action, reason = tutor.adapt(p, False)
+    assert action == "simplify"
+    assert p["level"] == "basic"
+    assert p["step"] == 1  # Schritt gilt als bearbeitet
+    assert p["attempts_current"] == 0
+    assert "Grundlagen" in reason
+
+
+def test_tiefstes_level_bleibt():
+    p = _profile("basic")
+    tutor.adapt(p, False)
+    action, _ = tutor.adapt(p, False)
+    assert action == "simplify"
+    assert p["level"] == "basic"
+
+
+def test_fehler_unterbricht_serie():
+    p = _profile()
+    tutor.adapt(p, True)
+    tutor.adapt(p, False)
+    assert p["streak"] == 0
+
+
+def test_richtig_nach_retry_geht_weiter():
+    p = _profile()
+    tutor.adapt(p, False)          # retry
+    action, _ = tutor.adapt(p, True)
+    assert action == "next"
+    assert p["step"] == 1
+    assert p["attempts_current"] == 0
+
+
+def test_correct_rate():
+    p = _profile()
+    assert tutor.correct_rate(p) == 0.0
+    tutor.adapt(p, True)
+    tutor.adapt(p, False)
+    assert tutor.correct_rate(p) == 0.5
+
+
+# ---------------------------------------------------------------- JSON-Parsing
+
+def test_extract_json_plain():
+    assert extract_json('{"a": 1}') == {"a": 1}
+
+
+def test_extract_json_mit_text_drumherum():
+    assert extract_json('Hier die Antwort:\n{"a": 1}\nGruss') == {"a": 1}
+
+
+def test_extract_json_codeblock():
+    assert extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+
+
+def test_extract_json_verschachtelt():
+    assert extract_json('{"a": {"b": 2}}') == {"a": {"b": 2}}
+
+
+def test_extract_json_kaputt():
+    assert extract_json("kein json") is None
+    assert extract_json('{"a": ') is None
