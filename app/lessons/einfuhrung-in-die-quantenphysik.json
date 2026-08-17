@@ -1,0 +1,17 @@
+{
+  "id": "einfuhrung-in-die-quantenphysik",
+  "titel": "Einführung in die Quantenphysik",
+  "lernziele": [
+    "erklären den Welle-Teilchen-Dualismus von Licht und Materie",
+    "anwenden das Konzept der Superposition auf quantenmechanische Systeme",
+    "einordnen die Heisenbergsche Unschärferelation im Kontext von Messungen",
+    "begründen die Bedeutung der Quantenverschränkung für das Verständnis von Quantenphänomenen"
+  ],
+  "material": "Grundlagen und EinstiegFür den Einstieg in die Welt der Quanten sind folgende Kernkonzepte wichtig:Welle-Teilchen-Dualismus: Licht und Materie zeigen sowohl Wellen- als auch Teilstrukturen.Superposition: Teilchen können sich in einer Überlagerung mehrerer Zustände befinden.Heisenbergsche Unschärferelation: Ort und Impuls sind nicht gleichzeitig exakt messbar.Quantenverschränkung: Teilchen bleiben über grosse Distanzen miteinander verbunden.",
+  "tutor_hinweise": "Arbeite mit viel Beispiele aus Arbeitsalltag",
+  "einstufungsfragen_fallback": [
+    "Was weisst du bereits zu diesem Thema? Beschreibe es in eigenen Worten.",
+    "Nenne ein Beispiel aus dem Alltag, das zu diesem Thema passt.",
+    "Welche Fachbegriffe zu diesem Thema kennst du schon?"
+  ]
+}
