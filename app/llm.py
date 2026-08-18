@@ -108,6 +108,12 @@ def _chat_mock(system: str, user: str) -> str:
             "level": "intermediate",
             "begruendung": "Grundbegriffe sind bekannt, Details zur Kausalhaftung fehlen noch.",
         }, ensure_ascii=False)
+    if "THEORIE_SCHRITT" in user:
+        return json.dumps({
+            "titel": "Grundprinzip der Verschuldenshaftung",
+            "inhalt": "Wer einem anderen widerrechtlich Schaden zufügt, muss ihn ersetzen (Art. 41 OR). Damit jemand haftet, braucht es vier Voraussetzungen: einen Schaden, Widerrechtlichkeit, einen Kausalzusammenhang und ein Verschulden. Beispiel: Du spielst im Hof Fussball und schiesst eine Fensterscheibe ein. Der Schaden ist die kaputte Scheibe, widerrechtlich ist die Verletzung fremden Eigentums, dein Schuss ist die Ursache, und fahrlässig gehandelt hast du auch. Also haftest du. (Mock-Theorie – für echten Lerninhalt LLM-Provider konfigurieren.)",
+            "konzept": "Verschuldenshaftung",
+        }, ensure_ascii=False)
     if "NAECHSTE_AUFGABE" in user:
         return json.dumps({
             "titel": "Fallbeispiel Alltagshaftung",

@@ -89,6 +89,42 @@ def test_correct_rate():
     assert tutor.correct_rate(p) == 0.5
 
 
+# ---------------------------------------------------------------- Schrittwahl
+
+def test_sequenz_beginnt_mit_theorie_ausser_advanced():
+    for level, expected in [("basic", "theorie"), ("intermediate", "theorie"),
+                            ("advanced", "aufgabe")]:
+        p = _profile(level)
+        assert tutor.decide_step_type(p, None) == expected, level
+
+
+def test_nie_zwei_theorie_schritte_hintereinander():
+    p = _profile("basic")
+    p["last_type"] = "theorie"
+    assert tutor.decide_step_type(p, None) == "aufgabe"
+
+
+def test_basic_bekommt_theorie_vor_jedem_konzept():
+    p = _profile("basic")
+    p["step"] = 3
+    p["last_type"] = "aufgabe"
+    assert tutor.decide_step_type(p, None) == "theorie"
+
+
+def test_intermediate_nach_start_direkt_aufgaben():
+    p = _profile("intermediate")
+    p["step"] = 3
+    p["last_type"] = "aufgabe"
+    assert tutor.decide_step_type(p, None) == "aufgabe"
+
+
+def test_simplify_erzwingt_theorie():
+    p = _profile("advanced")
+    p["step"] = 5
+    p["last_type"] = "aufgabe"
+    assert tutor.decide_step_type(p, "simplify") == "theorie"
+
+
 # ---------------------------------------------------------------- JSON-Parsing
 
 def test_extract_json_plain():

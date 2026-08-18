@@ -35,14 +35,19 @@ def test_kompletter_durchlauf():
     assert r["level"] in ("basic", "intermediate", "advanced")
     assert r["begruendung"]
 
-    # Lernschritte bis zum Abschluss
+    # Lernschritte bis zum Abschluss (Theorie-Schritte werden nur gelesen)
     finished = False
-    for _ in range(d["total_steps"] + 2):
+    theory_seen = 0
+    for _ in range(d["total_steps"] * 2 + 4):
         t = client.post(f"/api/session/{sid}/next").json()
         if t.get("done"):
             assert t["summary"]["zusammenfassung"]
             finished = True
             break
+        if t["task"].get("typ") == "theorie":
+            theory_seen += 1
+            assert t["task"]["inhalt"] and "frage" not in t["task"]
+            continue
         assert t["task"]["frage"]
         a = client.post(f"/api/session/{sid}/answer",
                         json={"answer": GUTE_ANTWORT}).json()
@@ -53,15 +58,19 @@ def test_kompletter_durchlauf():
             finished = True
             break
     assert finished
+    assert theory_seen >= 1  # Einstieg mit Theorie (Mock stuft intermediate ein)
 
 
 def test_abschluss_ist_idempotent():
     d = _start()
     sid = d["session_id"]
     client.post(f"/api/session/{sid}/assess", json={"answers": ["a", "b", "c"]})
-    for _ in range(d["total_steps"]):
-        client.post(f"/api/session/{sid}/next")
-        client.post(f"/api/session/{sid}/answer", json={"answer": GUTE_ANTWORT})
+    for _ in range(d["total_steps"] * 2 + 4):
+        t = client.post(f"/api/session/{sid}/next").json()
+        if t.get("done"):
+            break
+        if t["task"].get("typ") != "theorie":
+            client.post(f"/api/session/{sid}/answer", json={"answer": GUTE_ANTWORT})
     s1 = client.post(f"/api/session/{sid}/next").json()
     s2 = client.post(f"/api/session/{sid}/next").json()
     assert s1["done"] and s2["done"]
@@ -83,15 +92,52 @@ def test_state_fuer_fortsetzen():
     assert st["progress"]["total_steps"] == d["total_steps"]
 
 
+def _next_aufgabe(sid: str) -> dict:
+    """Ruft /next auf und überspringt allfällige Theorie-Schritte."""
+    for _ in range(4):
+        t = client.post(f"/api/session/{sid}/next").json()
+        if t.get("done") or t["task"].get("typ") != "theorie":
+            return t
+    raise AssertionError("Keine Aufgabe erhalten")
+
+
 def test_falsche_antwort_gibt_retry_dann_simplify():
     d = _start()
     sid = d["session_id"]
     client.post(f"/api/session/{sid}/assess", json={"answers": ["a", "b", "c"]})
-    client.post(f"/api/session/{sid}/next")
+    _next_aufgabe(sid)
     a1 = client.post(f"/api/session/{sid}/answer", json={"answer": KURZE_ANTWORT}).json()
     assert a1["korrekt"] is False and a1["adaption"] == "retry" and a1["hinweis"]
     a2 = client.post(f"/api/session/{sid}/answer", json={"answer": KURZE_ANTWORT}).json()
     assert a2["adaption"] == "simplify" and a2["adaption_begruendung"]
+
+
+def test_theorie_schritt_kommt_zuerst_und_ist_unbewertet():
+    d = _start()
+    sid = d["session_id"]
+    client.post(f"/api/session/{sid}/assess", json={"answers": ["a", "b", "c"]})
+    t = client.post(f"/api/session/{sid}/next").json()
+    # Mock stuft intermediate ein -> Sequenz beginnt mit Theorie
+    assert t["task"]["typ"] == "theorie"
+    assert t["progress"]["theory_steps"] == 1
+    # Antworten auf Theorie gibt 400
+    r = client.post(f"/api/session/{sid}/answer", json={"answer": GUTE_ANTWORT})
+    assert r.status_code == 400
+    # Danach folgt eine Aufgabe, Theorie zählt nicht als Lernschritt
+    t2 = client.post(f"/api/session/{sid}/next").json()
+    assert t2["task"]["typ"] == "aufgabe"
+    assert t2["progress"]["step"] == 0
+
+
+def test_nach_simplify_kommt_theorie():
+    d = _start()
+    sid = d["session_id"]
+    client.post(f"/api/session/{sid}/assess", json={"answers": ["a", "b", "c"]})
+    _next_aufgabe(sid)
+    client.post(f"/api/session/{sid}/answer", json={"answer": KURZE_ANTWORT})   # retry
+    client.post(f"/api/session/{sid}/answer", json={"answer": KURZE_ANTWORT})   # simplify
+    t = client.post(f"/api/session/{sid}/next?adaptation=simplify").json()
+    assert t["task"]["typ"] == "theorie"
 
 
 def test_chat_verstaendnisfrage():

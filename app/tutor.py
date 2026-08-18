@@ -36,7 +36,29 @@ def new_profile() -> dict:
         "attempts_current": 0,  # Versuche für die aktuelle Aufgabe
         "covered": [],          # behandelte Konzepte
         "current_task": None,
+        "last_type": None,      # letzter Schritt-Typ: theorie | aufgabe
+        "theory_steps": 0,      # Anzahl erhaltener Theorie-Schritte (für Analyse)
     }
+
+
+def decide_step_type(profile: dict, adaptation: str | None) -> str:
+    """Entscheidet deterministisch, ob als Nächstes Theorie oder eine Aufgabe kommt.
+
+    Regeln (Input -> Anwendung -> Feedback):
+    - Nie zwei automatische Theorie-Schritte hintereinander.
+    - Nach zwei Fehlversuchen (simplify) wird das Konzept zuerst neu erklärt.
+    - Zu Beginn der Sequenz gibt es Theorie, ausser auf Niveau advanced.
+    - Auf Niveau basic kommt vor jedem neuen Konzept ein Theorie-Schritt.
+    """
+    if profile.get("last_type") == "theorie":
+        return "aufgabe"
+    if adaptation == "simplify":
+        return "theorie"
+    if profile["step"] == 0 and profile["level"] != "advanced":
+        return "theorie"
+    if profile["level"] == "basic":
+        return "theorie"
+    return "aufgabe"
 
 
 def correct_rate(p: dict) -> float:
@@ -122,6 +144,46 @@ def evaluate_assessment(lesson: dict, questions: list[str], answers: list[str]) 
 
 # ---------------------------------------------------------------- Lernschritte
 
+def generate_theory(lesson: dict, profile: dict, history: list[dict],
+                    adaptation: str | None = None) -> dict:
+    """Erzeugt einen Theorie-Schritt: Input ohne Aufgabe und ohne Bewertung."""
+    covered = ", ".join(profile["covered"]) or "noch keine"
+    recent = _recent_history(history)
+    instruction = (
+        "AUFGABE: THEORIE_SCHRITT\n"
+        f"Der Lernende ist auf Niveau '{profile['level']}'.\n"
+        f"Bereits behandelte Konzepte: {covered}.\n"
+        f"Bisheriger Verlauf (Kurzfassung): {recent}\n"
+    )
+    if adaptation == "simplify":
+        instruction += (
+            "Der Lernende hatte zweimal Mühe mit dem zuletzt behandelten Konzept. "
+            "Erkläre GENAU DIESES Konzept noch einmal neu: einfacher, in kleinen "
+            "Schritten, mit einem anderen Alltagsbeispiel als zuvor.\n"
+        )
+    else:
+        instruction += (
+            "Führe das nächste sinnvolle Konzept aus dem Material ein, das noch "
+            "nicht behandelt wurde.\n"
+        )
+    instruction += (
+        "Erkläre verständlich und strukturiert (5-10 Sätze), passend zum Niveau, "
+        "mit einem konkreten Beispiel aus dem Alltag oder der Berufswelt. "
+        "Stelle KEINE Aufgabe und KEINE Frage – dies ist reiner Lern-Input.\n"
+        'Format: {"titel": "kurzer Titel", '
+        '"inhalt": "die Erklärung mit Beispiel", '
+        '"konzept": "behandeltes Konzept in 1-3 Worten"}'
+    )
+    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={
+        "titel": "Theorie",
+        "inhalt": "Lies den entsprechenden Abschnitt im Lektionsmaterial in Ruhe durch. "
+                  "Die Erklärung konnte gerade nicht generiert werden.",
+        "konzept": "Theorie",
+    })
+    data["typ"] = "theorie"
+    return data
+
+
 def generate_task(lesson: dict, profile: dict, history: list[dict],
                   adaptation: str | None = None) -> dict:
     """Erzeugt die nächste Aufgabe basierend auf Profil, Verlauf und Adaption."""
@@ -134,7 +196,13 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         f"Bereits behandelte Konzepte: {covered}.\n"
         f"Bisheriger Verlauf (Kurzfassung): {recent}\n"
     )
-    if adaptation == "simplify":
+    if profile.get("last_type") == "theorie" and profile["covered"]:
+        instruction += (
+            f"Soeben wurde das Konzept '{profile['covered'][-1]}' als Theorie "
+            "erklärt. Stelle jetzt eine dazu passende Aufgabe, damit der Lernende "
+            "das frisch Gelernte anwendet.\n"
+        )
+    elif adaptation == "simplify":
         instruction += (
             "Der Lernende hatte Mühe mit der letzten Aufgabe. Erkläre das Konzept "
             "zuerst kurz und einfach neu und stelle dann eine leichtere Aufgabe "
@@ -159,6 +227,7 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         "frage": "Fasse das Wichtigste in zwei Sätzen zusammen.",
         "konzept": "Wiederholung",
     })
+    data["typ"] = "aufgabe"
     return data
 
 
@@ -296,7 +365,8 @@ def _recent_history(history: list[dict], n: int = 5) -> str:
     items = []
     for ev in history[-n:]:
         if ev["type"] == "task":
-            items.append(f"Aufgabe: {ev['payload'].get('titel', '')}")
+            kind = "Theorie" if ev["payload"].get("typ") == "theorie" else "Aufgabe"
+            items.append(f"{kind}: {ev['payload'].get('titel', '')}")
         elif ev["type"] == "answer_evaluated":
             ok = "richtig" if ev["payload"].get("korrekt") else "falsch"
             items.append(f"Antwort {ok}")

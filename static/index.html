@@ -48,6 +48,7 @@
   .msg.tutor.question { background: #eff6ff; border-color: #bfdbfe; }
   .msg.tutor.good { background: #f0fdf4; border-color: #bbf7d0; }
   .msg.tutor.bad { background: #fef2f2; border-color: #fecaca; }
+  .msg.tutor.theory { background: #fefce8; border-color: #fde047; }
   .msg.user { background: var(--accent); color: #fff; align-self: flex-end;
               border-bottom-right-radius: 4px; }
   .msg.user.ask { background: #7c3aed; }
@@ -124,10 +125,12 @@
         <div class="btnrow">
           <button id="btn-answer">Antwort abschicken</button>
           <button id="btn-ask" class="secondary">💬 Frage stellen</button>
+          <button id="btn-theory" class="secondary">📖 Theorie dazu</button>
+          <button id="btn-deeper" class="secondary hidden">📖 Genauer erklären</button>
           <button id="btn-continue" class="hidden">Weiter</button>
         </div>
         <div class="hint">«Antwort abschicken» beantwortet die Aufgabe und wird bewertet.
-          «Frage stellen» ist für Verständnisfragen an den Tutor – ohne Bewertung.</div>
+          «Frage stellen» und «Theorie dazu» sind für dich – ohne Bewertung.</div>
       </div>
     </div>
   </div>
@@ -188,12 +191,27 @@ function setChatBusy(busy) {
   $("chat-spinner").classList.toggle("hidden", !busy);
   $("btn-answer").disabled = busy || !answerEnabled;
   $("btn-ask").disabled = busy;
+  $("btn-theory").disabled = busy;
+  $("btn-deeper").disabled = busy;
   $("btn-continue").disabled = busy;
 }
 function setAnswerMode(on) {
   answerEnabled = on;
   $("btn-answer").disabled = !on;
+  $("btn-answer").classList.toggle("hidden", !on);
+  $("btn-theory").classList.toggle("hidden", !on);
   $("btn-continue").classList.toggle("hidden", on);
+}
+function setTheoryMode() {
+  // Theorie-Schritt: kein Antwortfeld-Zwang, dafür Weiter + Genauer erklären
+  answerEnabled = false;
+  $("btn-answer").disabled = true;
+  $("btn-answer").classList.add("hidden");
+  $("btn-theory").classList.add("hidden");
+  $("btn-deeper").classList.remove("hidden");
+  $("btn-continue").classList.remove("hidden");
+  $("btn-continue").textContent = "Verstanden, weiter";
+  $("btn-continue").dataset.adaptation = "";
 }
 
 // ---------- Fortsetzen (Session wird lokal gemerkt)
@@ -287,9 +305,15 @@ async function nextTask(adaptation) {
   if (d.done) { renderDone(d); return; }
   renderProgress(d.progress);
   const t = d.task;
-  addMsg("tutor", (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
-  if (t.frage) addMsg("tutor question", "❓ " + t.frage, "Tutor");
-  setAnswerMode(true);
+  if (t.typ === "theorie") {
+    addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor – Theorie");
+    setTheoryMode();
+  } else {
+    addMsg("tutor", (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
+    if (t.frage) addMsg("tutor question", "❓ " + t.frage, "Tutor");
+    $("btn-deeper").classList.add("hidden");
+    setAnswerMode(true);
+  }
   $("chat-input").focus();
 }
 
@@ -319,19 +343,29 @@ $("btn-answer").onclick = async () => {
   setChatBusy(false);
 };
 
-// ---------- Verständnisfragen (jederzeit)
-$("btn-ask").onclick = async () => {
-  const text = $("chat-input").value.trim();
-  if (!text) { $("chat-input").focus(); return; }
+// ---------- Verständnisfragen und Theorie auf Abruf (jederzeit)
+async function sendChat(text) {
   addMsg("user ask", text, "Du (Frage)");
-  $("chat-input").value = "";
   setChatBusy(true);
   try {
     const d = await api(`/session/${sessionId}/chat`, { message: text });
     addMsg("tutor", d.antwort, "Tutor");
   } catch (e) { alert(e.message); }
   setChatBusy(false);
+}
+
+$("btn-ask").onclick = () => {
+  const text = $("chat-input").value.trim();
+  if (!text) { $("chat-input").focus(); return; }
+  $("chat-input").value = "";
+  sendChat(text);
 };
+
+$("btn-theory").onclick = () =>
+  sendChat("Erklär mir zuerst kurz die Theorie zu dieser Aufgabe, ohne die Lösung zu verraten.");
+
+$("btn-deeper").onclick = () =>
+  sendChat("Erklär mir das bitte noch genauer und einfacher, gerne mit einem weiteren Beispiel.");
 
 $("btn-continue").onclick = async () => {
   setChatBusy(true);
@@ -352,6 +386,7 @@ function renderProgress(p) {
   $("prog-badges").innerHTML =
     `<span class="badge">✅ ${p.correct} richtig</span>` +
     `<span class="badge">❌ ${p.wrong} falsch</span>` +
+    (p.theory_steps ? `<span class="badge">📖 ${p.theory_steps} Theorie</span>` : "") +
     p.covered.map(c => `<span class="badge">${esc(c)}</span>`).join("");
 }
 

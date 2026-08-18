@@ -106,6 +106,7 @@ async function loadDetail(sid, name) {
     if (ev.type === "session_started") body = `Session gestartet – Lektion: ${esc(p.lesson)}`;
     else if (ev.type === "assessment_questions") body = `Einstufungsfragen: ${p.questions.map(esc).join(" | ")}`;
     else if (ev.type === "assessment_evaluated") body = `Einstufung: <strong>${LABEL[p.level] || p.level}</strong> – ${esc(p.begruendung)}<br><span class="muted">Antworten: ${p.answers.map(esc).join(" | ")}</span>`;
+    else if (ev.type === "task" && p.typ === "theorie") body = `📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc((p.inhalt || "").slice(0, 200))}…</span>`;
     else if (ev.type === "task") body = `📝 Aufgabe: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc(p.frage)}</span>`;
     else if (ev.type === "answer_submitted") body = `💬 Antwort: <pre>${esc(p.answer)}</pre>`;
     else if (ev.type === "answer_evaluated") {

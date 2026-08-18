@@ -232,8 +232,14 @@ def next_step(sid: str, adaptation: str | None = None):
     if profile["step"] >= tutor.total_steps():
         return _finish(sid, lesson, profile)
     history = store.get_events(sid)
-    task = tutor.generate_task(lesson, profile, history, adaptation)
+    step_type = tutor.decide_step_type(profile, adaptation)
+    if step_type == "theorie":
+        task = tutor.generate_theory(lesson, profile, history, adaptation)
+        profile["theory_steps"] = profile.get("theory_steps", 0) + 1
+    else:
+        task = tutor.generate_task(lesson, profile, history, adaptation)
     profile["current_task"] = task
+    profile["last_type"] = step_type
     concept = task.get("konzept")
     if concept and concept not in profile["covered"]:
         profile["covered"].append(concept)
@@ -254,6 +260,9 @@ def answer(sid: str, req: AnswerRequest):
     task = profile.get("current_task")
     if not task:
         raise HTTPException(400, "Keine aktive Aufgabe – rufe zuerst /next auf")
+    if task.get("typ") == "theorie":
+        raise HTTPException(400, "Der aktuelle Schritt ist Theorie – es gibt "
+                                 "nichts zu bewerten. Weiter mit /next")
     store.log_event(sid, "answer_submitted", {"answer": req.answer})
     result = tutor.evaluate_answer(lesson, profile, task, req.answer)
     action, reason = tutor.adapt(profile, result["korrekt"])
@@ -331,6 +340,7 @@ def _progress(profile: dict) -> dict:
         "wrong": profile["wrong"],
         "correct_rate": tutor.correct_rate(profile),
         "covered": profile["covered"],
+        "theory_steps": profile.get("theory_steps", 0),
     }
 
 
