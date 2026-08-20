@@ -171,6 +171,17 @@ def provider_name() -> str:
     return os.getenv("LLM_PROVIDER", "mock").lower().strip()
 
 
+def current_model() -> str:
+    name = provider_name()
+    if name == "anthropic":
+        return os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    if name == "openai":
+        return os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    if name == "ollama":
+        return os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+    return "mock"
+
+
 def chat(system: str, user: str) -> str:
     """Sendet einen Prompt an den konfigurierten Provider und gibt Text zurück."""
     name = provider_name()

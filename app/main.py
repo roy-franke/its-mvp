@@ -386,7 +386,33 @@ def teacher_session_detail(sid: str):
 
 @app.get("/api/info")
 def info():
-    return {"provider": llm.provider_name(), "lessons": [p.stem for p in sorted(LESSONS_DIR.glob('*.json'))]}
+    return {"provider": llm.provider_name(), "model": llm.current_model(),
+            "lessons": [p.stem for p in sorted(LESSONS_DIR.glob('*.json'))]}
+
+
+@app.get("/api/llm-test")
+def llm_test():
+    """Diagnose: Testet die Verbindung zum konfigurierten LLM und zeigt Fehler an."""
+    import time
+    t0 = time.time()
+    try:
+        text = llm.chat("Du bist ein Verbindungstest.",
+                        "Antworte mit genau einem Wort: OK")
+        return {
+            "ok": True,
+            "provider": llm.provider_name(),
+            "model": llm.current_model(),
+            "antwort": text.strip()[:100],
+            "dauer_sekunden": round(time.time() - t0, 1),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "provider": llm.provider_name(),
+            "model": llm.current_model(),
+            "fehler": f"{type(e).__name__}: {e}",
+            "dauer_sekunden": round(time.time() - t0, 1),
+        }
 
 
 # ---------------------------------------------------------------- Frontend
