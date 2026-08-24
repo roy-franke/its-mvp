@@ -57,7 +57,7 @@
     <table>
       <thead><tr>
         <th>Name</th><th>Lektion</th><th>Status</th><th>Fortschritt</th><th>Niveau</th>
-        <th>Quote</th><th>Konzepte</th><th>Zuletzt aktiv</th>
+        <th>Quote</th><th>Sicherheit</th><th>Konzepte</th><th>Zuletzt aktiv</th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
@@ -90,6 +90,7 @@ async function loadSessions() {
           <span class="muted">${s.step}/${s.total_steps}</span></td>
       <td>${LABEL[s.level] || s.level}</td>
       <td>${Math.round(s.correct_rate * 100)} %</td>
+      <td>${s.confidence_avg != null ? s.confidence_avg + "/10" : "–"}</td>
       <td class="muted">${s.covered.map(esc).join(", ") || "–"}</td>
       <td class="muted">${new Date(s.updated_at * 1000).toLocaleString("de-CH")}</td>
     </tr>`).join("");
@@ -108,10 +109,12 @@ async function loadDetail(sid, name) {
     else if (ev.type === "assessment_evaluated") body = `Einstufung: <strong>${LABEL[p.level] || p.level}</strong> – ${esc(p.begruendung)}<br><span class="muted">Antworten: ${p.answers.map(esc).join(" | ")}</span>`;
     else if (ev.type === "task" && p.typ === "theorie") body = `📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc((p.inhalt || "").slice(0, 200))}…</span>`;
     else if (ev.type === "task") body = `📝 Aufgabe: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc(p.frage)}</span>`;
-    else if (ev.type === "answer_submitted") body = `💬 Antwort: <pre>${esc(p.answer)}</pre>`;
+    else if (ev.type === "answer_submitted") body = `💬 Antwort${p.confidence ? ` <span class="muted">(Sicherheit: ${p.confidence}/10)</span>` : ""}: <pre>${esc(p.answer)}</pre>`;
     else if (ev.type === "answer_evaluated") {
-      cls += p.korrekt ? " ok" : " nok";
-      body = `${p.korrekt ? "✅ richtig" : "❌ falsch"} – ${esc(p.feedback)}`
+      const bew = p.bewertung || (p.korrekt ? "korrekt" : "falsch");
+      cls += bew === "korrekt" ? " ok" : bew === "teilweise" ? "" : " nok";
+      const label = bew === "korrekt" ? "✅ richtig" : bew === "teilweise" ? "🔶 teilweise richtig" : "❌ falsch";
+      body = `${label} – ${esc(p.feedback)}`
         + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "");
     }
     else if (ev.type === "chat_question") body = `❓ Verständnisfrage: <em>${esc(p.frage)}</em>`;

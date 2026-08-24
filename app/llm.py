@@ -123,17 +123,23 @@ def _chat_mock(system: str, user: str) -> str:
         }, ensure_ascii=False)
     if "ANTWORT_BEWERTEN" in user:
         # Heuristik statt fester Antwort, damit die Adaption auch ohne LLM
-        # sichtbar wird: sehr kurze Antworten gelten als falsch.
+        # sichtbar wird: lange Antworten korrekt, mittlere teilweise, kurze falsch.
         m = re.search(r"Antwort des Lernenden:\s*(.+)", user)
         ans = (m.group(1).strip() if m else "")
         if len(ans) >= 40:
             return json.dumps({
-                "korrekt": True,
+                "bewertung": "korrekt",
                 "feedback": "Richtig: Es braucht Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
                 "hinweis": "",
             }, ensure_ascii=False)
+        if len(ans) >= 15:
+            return json.dumps({
+                "bewertung": "teilweise",
+                "feedback": "Der Ansatz stimmt, aber es fehlen wesentliche Voraussetzungen der Haftung. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
+                "hinweis": "Welche vier Voraussetzungen verlangt Art. 41 OR?",
+            }, ensure_ascii=False)
         return json.dumps({
-            "korrekt": False,
+            "bewertung": "falsch",
             "feedback": "Das ist noch zu knapp. Nenne die vier Voraussetzungen der Verschuldenshaftung und wende sie auf den Fall an. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
             "hinweis": "Denk an Art. 41 OR: Schaden, Widerrechtlichkeit, Kausalzusammenhang, Verschulden.",
         }, ensure_ascii=False)

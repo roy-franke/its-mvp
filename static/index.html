@@ -49,6 +49,9 @@
   .msg.tutor.good { background: #f0fdf4; border-color: #bbf7d0; }
   .msg.tutor.bad { background: #fef2f2; border-color: #fecaca; }
   .msg.tutor.theory { background: #fefce8; border-color: #fde047; }
+  .msg.tutor.mid { background: #fff7ed; border-color: #fed7aa; }
+  .confbtn { background: #fff; color: var(--accent); border: 1px solid var(--accent);
+             border-radius: 8px; padding: 8px 0; width: 40px; font-weight: 600; }
   .msg.user { background: var(--accent); color: #fff; align-self: flex-end;
               border-bottom-right-radius: 4px; }
   .msg.user.ask { background: #7c3aed; }
@@ -121,6 +124,12 @@
       <div id="chat"></div>
       <div id="chat-spinner" class="spinner hidden">Dein Tutor überlegt …</div>
       <div class="inputrow">
+        <div id="confidence-box" class="hidden" style="margin-bottom:12px">
+          <div style="font-weight:600;margin-bottom:8px">Bevor dein Tutor bewertet:
+            Wie sicher bist du dir, dass deine Antwort stimmt?
+            <span class="muted">(1 = gar nicht, 10 = völlig sicher)</span></div>
+          <div class="btnrow" id="confidence-buttons"></div>
+        </div>
         <textarea id="chat-input" rows="3" placeholder="Deine Antwort oder Frage …"></textarea>
         <div class="btnrow">
           <button id="btn-answer">Antwort abschicken</button>
@@ -153,6 +162,7 @@
 const $ = id => document.getElementById(id);
 let sessionId = null, questions = [], qIndex = 0, assessAnswers = [];
 let answerEnabled = true;
+let confidenceAsked = false, pendingAnswer = "";
 
 async function api(path, body, method = "POST") {
   const r = await fetch("/api" + path, {
@@ -312,23 +322,56 @@ async function nextTask(adaptation) {
     addMsg("tutor", (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
     if (t.frage) addMsg("tutor question", "❓ " + t.frage, "Tutor");
     $("btn-deeper").classList.add("hidden");
+    confidenceAsked = false;   // Sicherheitsfrage einmal pro Aufgabe
     setAnswerMode(true);
   }
   $("chat-input").focus();
 }
 
-$("btn-answer").onclick = async () => {
+$("btn-answer").onclick = () => {
   const text = $("chat-input").value.trim();
   if (!text) { $("chat-input").focus(); return; }
   addMsg("user", text, "Du (Antwort)");
   $("chat-input").value = "";
+  if (!confidenceAsked) {
+    confidenceAsked = true;
+    pendingAnswer = text;
+    showConfidence(true);
+    return;
+  }
+  submitAnswer(text, null);
+};
+
+function showConfidence(show) {
+  $("confidence-box").classList.toggle("hidden", !show);
+  $("chat-input").disabled = show;
+  $("btn-answer").disabled = show;
+  $("btn-ask").disabled = show;
+  $("btn-theory").disabled = show;
+}
+
+$("confidence-buttons").innerHTML = Array.from({ length: 10 },
+  (_, i) => `<button class="confbtn" data-v="${i + 1}">${i + 1}</button>`).join("");
+$("confidence-buttons").onclick = e => {
+  const v = e.target.dataset && e.target.dataset.v;
+  if (!v) return;
+  showConfidence(false);
+  submitAnswer(pendingAnswer, parseInt(v, 10));
+};
+
+async function submitAnswer(text, confidence) {
   setChatBusy(true);
   try {
-    const d = await api(`/session/${sessionId}/answer`, { answer: text });
+    const d = await api(`/session/${sessionId}/answer`,
+      { answer: text, confidence });
     renderProgress(d.progress);
-    let fb = (d.korrekt ? "✅ Richtig! " : "❌ Noch nicht ganz. ") + (d.feedback || "");
+    const label = d.bewertung === "korrekt" ? "✅ Richtig! "
+      : d.bewertung === "teilweise" ? "🔶 Teilweise richtig. " : "❌ Noch nicht ganz. ";
+    let fb = label + (d.feedback || "");
     if (d.hinweis) fb += "\n💡 Hinweis: " + d.hinweis;
-    addMsg("tutor " + (d.korrekt ? "good" : "bad"), fb, "Tutor");
+    const cls = d.bewertung === "korrekt" ? "good"
+      : d.bewertung === "teilweise" ? "mid" : "bad";
+    addMsg("tutor " + cls, fb, "Tutor");
     if (d.adaption_begruendung) addNote(d.adaption_begruendung);
     if (d.adaption === "retry") {
       setAnswerMode(true);
@@ -385,6 +428,7 @@ function renderProgress(p) {
   $("prog-fill").style.width = (100 * p.step / p.total_steps) + "%";
   $("prog-badges").innerHTML =
     `<span class="badge">✅ ${p.correct} richtig</span>` +
+    (p.partial ? `<span class="badge">🔶 ${p.partial} teilweise</span>` : "") +
     `<span class="badge">❌ ${p.wrong} falsch</span>` +
     (p.theory_steps ? `<span class="badge">📖 ${p.theory_steps} Theorie</span>` : "") +
     p.covered.map(c => `<span class="badge">${esc(c)}</span>`).join("");

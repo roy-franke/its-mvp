@@ -69,6 +69,7 @@ class AssessRequest(BaseModel):
 
 class AnswerRequest(BaseModel):
     answer: str
+    confidence: int | None = None   # Sicherheitsangabe 1-10 vor der Bewertung
 
 
 class ChatRequest(BaseModel):
@@ -263,17 +264,23 @@ def answer(sid: str, req: AnswerRequest):
     if task.get("typ") == "theorie":
         raise HTTPException(400, "Der aktuelle Schritt ist Theorie – es gibt "
                                  "nichts zu bewerten. Weiter mit /next")
-    store.log_event(sid, "answer_submitted", {"answer": req.answer})
+    confidence = req.confidence if req.confidence in range(1, 11) else None
+    if confidence is not None:
+        profile.setdefault("confidence", []).append(confidence)
+    store.log_event(sid, "answer_submitted",
+                    {"answer": req.answer, "confidence": confidence})
     result = tutor.evaluate_answer(lesson, profile, task, req.answer)
-    action, reason = tutor.adapt(profile, result["korrekt"])
+    action, reason = tutor.adapt(profile, result["bewertung"])
     store.log_event(sid, "answer_evaluated", {
-        "korrekt": result["korrekt"], "feedback": result.get("feedback", ""),
+        "bewertung": result["bewertung"], "korrekt": result["korrekt"],
+        "feedback": result.get("feedback", ""),
         "hinweis": result.get("hinweis", ""), "adaption": action,
         "adaption_begruendung": reason, "level": profile["level"],
     })
     store.update_session(sid, profile=profile)
     finished = profile["step"] >= tutor.total_steps() and action != "retry"
     return {
+        "bewertung": result["bewertung"],   # korrekt | teilweise | falsch
         "korrekt": result["korrekt"],
         "feedback": result.get("feedback", ""),
         "hinweis": result.get("hinweis", ""),
@@ -341,6 +348,9 @@ def _progress(profile: dict) -> dict:
         "correct_rate": tutor.correct_rate(profile),
         "covered": profile["covered"],
         "theory_steps": profile.get("theory_steps", 0),
+        "partial": profile.get("partial", 0),
+        "confidence_avg": (round(sum(c) / len(c), 1)
+                           if (c := profile.get("confidence", [])) else None),
     }
 
 
@@ -367,6 +377,8 @@ def teacher_sessions():
             "total_steps": tutor.total_steps(),
             "level": p.get("level", "basic"),
             "correct_rate": tutor.correct_rate(p) if "correct" in p else 0.0,
+            "confidence_avg": (round(sum(c) / len(c), 1)
+                               if (c := p.get("confidence", [])) else None),
             "covered": p.get("covered", []),
             "created_at": s["created_at"],
             "updated_at": s["updated_at"],

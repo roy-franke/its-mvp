@@ -14,15 +14,15 @@ def _profile(level="intermediate"):
 
 def test_richtig_geht_weiter():
     p = _profile()
-    action, _ = tutor.adapt(p, True)
+    action, _ = tutor.adapt(p, "korrekt")
     assert action == "next"
     assert p["step"] == 1 and p["correct"] == 1 and p["streak"] == 1
 
 
 def test_zwei_richtige_erhoehen_level():
     p = _profile("basic")
-    tutor.adapt(p, True)
-    action, reason = tutor.adapt(p, True)
+    tutor.adapt(p, "korrekt")
+    action, reason = tutor.adapt(p, "korrekt")
     assert action == "advance"
     assert p["level"] == "intermediate"
     assert reason  # Adaption muss begründet werden
@@ -31,15 +31,15 @@ def test_zwei_richtige_erhoehen_level():
 
 def test_hoechstes_level_bleibt():
     p = _profile("advanced")
-    tutor.adapt(p, True)
-    action, _ = tutor.adapt(p, True)
+    tutor.adapt(p, "korrekt")
+    action, _ = tutor.adapt(p, "korrekt")
     assert action == "next"
     assert p["level"] == "advanced"
 
 
 def test_erster_fehler_gibt_zweiten_versuch():
     p = _profile()
-    action, reason = tutor.adapt(p, False)
+    action, reason = tutor.adapt(p, "falsch")
     assert action == "retry"
     assert reason
     assert p["step"] == 0  # Schritt zählt noch nicht als bearbeitet
@@ -48,8 +48,8 @@ def test_erster_fehler_gibt_zweiten_versuch():
 
 def test_zweiter_fehler_vereinfacht_und_senkt_level():
     p = _profile("intermediate")
-    tutor.adapt(p, False)
-    action, reason = tutor.adapt(p, False)
+    tutor.adapt(p, "falsch")
+    action, reason = tutor.adapt(p, "falsch")
     assert action == "simplify"
     assert p["level"] == "basic"
     assert p["step"] == 1  # Schritt gilt als bearbeitet
@@ -59,23 +59,23 @@ def test_zweiter_fehler_vereinfacht_und_senkt_level():
 
 def test_tiefstes_level_bleibt():
     p = _profile("basic")
-    tutor.adapt(p, False)
-    action, _ = tutor.adapt(p, False)
+    tutor.adapt(p, "falsch")
+    action, _ = tutor.adapt(p, "falsch")
     assert action == "simplify"
     assert p["level"] == "basic"
 
 
 def test_fehler_unterbricht_serie():
     p = _profile()
-    tutor.adapt(p, True)
-    tutor.adapt(p, False)
+    tutor.adapt(p, "korrekt")
+    tutor.adapt(p, "falsch")
     assert p["streak"] == 0
 
 
 def test_richtig_nach_retry_geht_weiter():
     p = _profile()
-    tutor.adapt(p, False)          # retry
-    action, _ = tutor.adapt(p, True)
+    tutor.adapt(p, "falsch")          # retry
+    action, _ = tutor.adapt(p, "korrekt")
     assert action == "next"
     assert p["step"] == 1
     assert p["attempts_current"] == 0
@@ -84,9 +84,46 @@ def test_richtig_nach_retry_geht_weiter():
 def test_correct_rate():
     p = _profile()
     assert tutor.correct_rate(p) == 0.0
-    tutor.adapt(p, True)
-    tutor.adapt(p, False)
+    tutor.adapt(p, "korrekt")
+    tutor.adapt(p, "falsch")
     assert tutor.correct_rate(p) == 0.5
+
+
+def test_teilweise_gibt_nachbesserung():
+    p = _profile()
+    action, reason = tutor.adapt(p, "teilweise")
+    assert action == "retry"
+    assert reason
+    assert p["partial"] == 1
+    assert p["wrong"] == 0      # zählt nicht als Fehler
+    assert p["step"] == 0
+
+
+def test_teilweise_zweimal_wird_akzeptiert():
+    p = _profile()
+    tutor.adapt(p, "teilweise")
+    action, reason = tutor.adapt(p, "teilweise")
+    assert action == "next"
+    assert reason
+    assert p["step"] == 1
+    assert p["correct"] == 1    # wird als bestanden gewertet
+    assert p["partial"] == 2
+
+
+def test_teilweise_dann_korrekt():
+    p = _profile()
+    tutor.adapt(p, "teilweise")
+    action, _ = tutor.adapt(p, "korrekt")
+    assert action == "next"
+    assert p["step"] == 1 and p["correct"] == 1
+
+
+def test_teilweise_unterbricht_serie():
+    p = _profile("basic")
+    tutor.adapt(p, "korrekt")
+    tutor.adapt(p, "teilweise")
+    assert p["streak"] == 0
+    assert p["level"] == "basic"  # kein Level-Aufstieg über teilweise
 
 
 # ---------------------------------------------------------------- Schrittwahl

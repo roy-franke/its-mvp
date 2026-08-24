@@ -38,6 +38,8 @@ def new_profile() -> dict:
         "current_task": None,
         "last_type": None,      # letzter Schritt-Typ: theorie | aufgabe
         "theory_steps": 0,      # Anzahl erhaltener Theorie-Schritte (für Analyse)
+        "partial": 0,           # Anzahl teilweise korrekter Antworten (für Analyse)
+        "confidence": [],       # Sicherheitsangaben 1-10 vor der Bewertung
     }
 
 
@@ -231,26 +233,53 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
     return data
 
 
+BEWERTUNGEN = ("korrekt", "teilweise", "falsch")
+
+
 def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str) -> dict:
-    """Bewertet eine Antwort und liefert KI-Feedback."""
+    """Bewertet eine Antwort dreistufig und liefert KI-Feedback.
+
+    Bewertungskategorien und Feedback-Regeln nach dem Vorbild des
+    LLMTutor-Projekts von Swiss Learning Analytics.
+    """
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: ANTWORT_BEWERTEN\n"
         f"Aufgabe: {task.get('inhalt', '')}\n"
         f"Frage: {task.get('frage', '')}\n"
         f"Antwort des Lernenden: {answer}\n\n"
-        "Beurteile fachlich streng, aber wohlwollend. Eine Antwort ist korrekt, "
-        "wenn der Kern stimmt, auch wenn sie unvollständig formuliert ist.\n"
-        'Format: {"korrekt": true|false, '
-        '"feedback": "2-4 Sätze direkt an den Lernenden: was stimmt, was fehlt", '
-        '"hinweis": "bei falscher Antwort ein Hinweis für den zweiten Versuch, sonst leer"}',
+        "Bewerte die Antwort mit genau einer dieser Kategorien:\n"
+        "- 'korrekt': Der zentrale inhaltliche Kern ist richtig erfasst und das "
+        "Grundprinzip verstanden, auch wenn Randdetails fehlen oder kleinere "
+        "Ungenauigkeiten vorliegen, die das Verständnis nicht beeinträchtigen.\n"
+        "- 'teilweise': Ein wesentlicher, für das Verständnis entscheidender "
+        "Aspekt fehlt, oder die Antwort ist fachlich unpräzis oder "
+        "missverständlich formuliert.\n"
+        "- 'falsch': Der Kern der Antwort ist nicht richtig.\n"
+        "Faustregel im Zweifel: Wurde das Prinzip verstanden? Wenn ja -> korrekt.\n\n"
+        "Feedback-Regeln:\n"
+        "- korrekt: kurz und präzis bestätigen (max. 1 Satz), dann knapp die "
+        "wichtigsten fehlenden Aspekte ergänzen.\n"
+        "- teilweise: kurz benennen, was unpräzis oder unvollständig ist; im "
+        "Hinweis eine Rückfrage oder einen Denkanstoss geben, OHNE die Antwort "
+        "zu verraten.\n"
+        "- falsch: knapp erklären, was nicht stimmt, ohne die richtige Antwort "
+        "zu nennen; im Hinweis einen gezielten sokratischen Denkanstoss geben. "
+        "Keine positiven Floskeln.\n"
+        "Verrate die Lösung nie, auch nicht implizit.\n\n"
+        'Format: {"bewertung": "korrekt|teilweise|falsch", '
+        '"feedback": "2-4 Sätze direkt an den Lernenden", '
+        '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
         fallback={
-            "korrekt": False,
+            "bewertung": "falsch",
             "feedback": "Deine Antwort konnte gerade nicht automatisch beurteilt werden. Versuch es nochmals.",
             "hinweis": "Formuliere deine Antwort in ganzen Sätzen.",
         },
     )
-    data["korrekt"] = bool(data.get("korrekt"))
+    if data.get("bewertung") not in BEWERTUNGEN:
+        # Rückwärtskompatibilität: alte Antworten mit korrekt=true/false
+        data["bewertung"] = "korrekt" if data.get("korrekt") else "falsch"
+    data["korrekt"] = data["bewertung"] == "korrekt"
     return data
 
 
@@ -310,12 +339,13 @@ def generate_summary(lesson: dict, profile: dict, history: list[dict]) -> dict:
 
 # ---------------------------------------------------------------- Adaption
 
-def adapt(profile: dict, korrekt: bool) -> tuple[str, str]:
+def adapt(profile: dict, bewertung: str) -> tuple[str, str]:
     """Adaptive Kernlogik. Verändert das Profil und gibt (aktion, begruendung) zurück.
 
-    Aktionen: 'next' | 'advance' | 'retry' | 'simplify'
+    Bewertung: 'korrekt' | 'teilweise' | 'falsch'
+    Aktionen:  'next' | 'advance' | 'retry' | 'simplify'
     """
-    if korrekt:
+    if bewertung == "korrekt":
         profile["correct"] += 1
         profile["streak"] += 1
         profile["attempts_current"] = 0
@@ -327,6 +357,25 @@ def adapt(profile: dict, korrekt: bool) -> tuple[str, str]:
                 f"'{LEVEL_LABELS[profile['level']]}', damit es für dich anspruchsvoll bleibt."
             )
         return "next", ""
+    if bewertung == "teilweise":
+        profile["partial"] = profile.get("partial", 0) + 1
+        profile["streak"] = 0
+        profile["attempts_current"] += 1
+        if profile["attempts_current"] == 1:
+            return "retry", (
+                "Da fehlt noch etwas Wichtiges. Schau dir den Hinweis an und "
+                "ergänze deine Antwort."
+            )
+        # Zweite Nachbesserung immer noch unvollständig: akzeptieren und weiter,
+        # ohne den Lernenden in einer Schleife festzuhalten.
+        profile["attempts_current"] = 0
+        profile["correct"] += 1
+        profile["step"] += 1
+        return "next", (
+            "Der Kern stimmt – nimm die Ergänzungen aus dem Feedback mit, "
+            "wir gehen weiter."
+        )
+    # falsch
     profile["wrong"] += 1
     profile["streak"] = 0
     profile["attempts_current"] += 1
