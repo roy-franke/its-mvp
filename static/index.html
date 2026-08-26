@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ITS – Dein Lerntutor</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 <style>
   :root {
     --bg: #f4f6f8; --card: #ffffff; --text: #1c2733; --muted: #64748b;
@@ -179,6 +182,22 @@ function show(view) {
 }
 
 // ---------- Chat-Helfer
+function renderMath(el) {
+  // Rendert LaTeX-Formeln ($...$, $$...$$, \(...\), \[...\]) via KaTeX
+  if (!window.renderMathInElement) return;
+  try {
+    renderMathInElement(el, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false },
+        { left: "\\(", right: "\\)", display: false },
+        { left: "\\[", right: "\\]", display: true },
+      ],
+      throwOnError: false,
+    });
+  } catch { /* Formel im Rohtext anzeigen ist besser als Absturz */ }
+}
+
 function addMsg(cls, text, who) {
   const div = document.createElement("div");
   div.className = "msg " + cls;
@@ -188,6 +207,7 @@ function addMsg(cls, text, who) {
     div.appendChild(w);
   }
   div.appendChild(document.createTextNode(text));
+  renderMath(div);
   $("chat").appendChild(div);
   $("chat").scrollTop = $("chat").scrollHeight;
 }
@@ -290,6 +310,7 @@ $("btn-start").onclick = async () => {
 function renderAssess() {
   $("assess-count").textContent = `(Frage ${qIndex + 1} von ${questions.length})`;
   $("assess-question").textContent = questions[qIndex];
+  renderMath($("assess-question"));
   $("assess-answer").value = "";
   $("assess-answer").focus();
 }
@@ -446,6 +467,7 @@ function renderDone(d) {
     `<span class="badge">✅ ${p.correct} richtig</span>` +
     `<span class="badge">❌ ${p.wrong} falsch</span>` +
     `<span class="badge">Quote: ${Math.round(p.correct_rate * 100)} %</span>`;
+  renderMath($("view-done"));
   show("view-done");
 }
 
