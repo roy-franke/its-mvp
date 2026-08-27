@@ -1,0 +1,5 @@
+# Caddy holt für echte Domains automatisch ein Let's-Encrypt-Zertifikat.
+# Für ITS_DOMAIN=localhost wird ein selbstsigniertes Zertifikat verwendet.
+{$ITS_DOMAIN} {
+	reverse_proxy its:8000
+}

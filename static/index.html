@@ -85,8 +85,14 @@
       Lernsequenz. Zuerst schätzt er mit ein paar Fragen dein Vorwissen ein,
       danach passt er die Aufgaben laufend an dich an. Du kannst ihm jederzeit
       Verständnisfragen stellen.</p>
-    <label>Wie heisst du?</label>
-    <input type="text" id="name" placeholder="Vorname" autocomplete="off">
+    <label>Wie sollen wir dich nennen?</label>
+    <input type="text" id="name" placeholder="Spitzname oder Pseudonym" autocomplete="off">
+    <div class="hint">Bitte verwende einen Spitznamen oder ein Pseudonym, nicht deinen
+      vollen richtigen Namen.</div>
+    <div id="code-box" class="hidden" style="margin-top:12px">
+      <label>Zugangscode</label>
+      <input type="text" id="code" placeholder="Code von deiner Lehrperson" autocomplete="off">
+    </div>
     <div id="lesson-picker" class="hidden" style="margin-top:12px">
       <label>Welche Lektion möchtest du bearbeiten?</label>
       <select id="lesson-select" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font:inherit;margin-top:4px"></select>
@@ -286,15 +292,27 @@ async function loadLessons() {
 }
 loadLessons();
 
+// ---------- Zugangscode (nur sichtbar, wenn auf dem Server konfiguriert)
+let codeRequired = false;
+(async () => {
+  try {
+    const a = await api("/access", null, "GET");
+    codeRequired = a.code_required;
+    $("code-box").classList.toggle("hidden", !codeRequired);
+  } catch { /* im Zweifel ohne Code starten, der Server prüft ohnehin */ }
+})();
+
 // ---------- Start
 $("btn-start").onclick = async () => {
   const name = $("name").value.trim();
   if (!name) { $("name").focus(); return; }
+  const code = $("code").value.trim();
+  if (codeRequired && !code) { $("code").focus(); return; }
   $("btn-start").disabled = true; $("start-spinner").classList.remove("hidden");
   try {
     const lessonId = $("lesson-picker").classList.contains("hidden")
       ? null : $("lesson-select").value;
-    const d = await api("/session/start", { name, lesson_id: lessonId });
+    const d = await api("/session/start", { name, lesson_id: lessonId, code: code || null });
     sessionId = d.session_id;
     localStorage.setItem("its_session", sessionId);
     questions = d.questions;

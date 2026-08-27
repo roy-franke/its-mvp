@@ -1,0 +1,4 @@
+# Zeilenenden: Shell-Skripte brauchen LF (Docker/Linux), Batch-Dateien CRLF (Windows)
+*.sh text eol=lf
+Caddyfile text eol=lf
+*.bat text eol=crlf

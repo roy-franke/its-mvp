@@ -43,6 +43,12 @@ def init_db():
                 created_at REAL NOT NULL
             )
         """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
 
 
 def create_session(name: str, lesson_id: str, profile: dict) -> str:
@@ -110,3 +116,18 @@ def list_sessions() -> list[dict]:
         d["profile"] = json.loads(d["profile"])
         out.append(d)
     return out
+
+
+def get_config(key: str) -> str | None:
+    with _conn() as c:
+        row = c.execute("SELECT value FROM config WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_config(key: str, value: str):
+    with _conn() as c:
+        c.execute(
+            "INSERT INTO config (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )

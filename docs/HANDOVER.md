@@ -5,7 +5,7 @@ zusammen. Es dient als Kontext für eine neue Claude-Session (z.B. auf einem
 anderen Rechner), damit dort ohne Unterbruch weitergearbeitet werden kann.
 Lies zusätzlich das `README.md` im Projektstamm.
 
-Stand: 27. August 2026
+Stand: 27. August 2026 (nachgeführt nach dem Klassentest-Block)
 
 ## 1. Projektkontext
 
@@ -111,7 +111,7 @@ ihre YAML-Tutoren, gemeinsame Evaluationsinstrumente für den Pilot.
 
 ## 7. Nächste Schritte (besprochen und priorisiert)
 
-1. **Klassentest-Block** (von Roy noch nicht beauftragt, aber empfohlen und teils zugesagt): Zugangsschutz für `/teacher` (Login), Zugangscode/Pseudonyme für Lernende, Deployment-Paket (Dockerfile, docker-compose, Reverse-Proxy mit HTTPS). Roy will das System extern verfügbar machen; Empfehlung war: Demo auf Schweizer VPS (z.B. Infomaniak) mit Cloud-LLM, Pilot mit echten Lernenden auf RIB-AI-01 on-premise (ggf. via Tailscale/Cloudflare Tunnel). Zugangsschutz ist Voraussetzung vor jeder Veröffentlichung.
+1. **Klassentest-Block – UMGESETZT (27.8.2026)**: Lehrpersonen-Login (`TEACHER_PASSWORD`, signiertes Cookie, Login-Seite `/teacher/login`, Logout; Passwortwechsel invalidiert alte Logins), Zugangscode für Lernende (`CLASS_CODE`, Prüfung beim Session-Start, Pseudonym-Hinweis im Onboarding), Deployment-Paket (Dockerfile, docker-compose mit Caddy/HTTPS, `docs/DEPLOYMENT.md` mit VPS-Anleitung für Infomaniak). Auth-Logik in `app/auth.py`, Secret in der DB (Tabelle `config`), 11 neue Tests in `tests/test_auth.py`. Leere Variablen deaktivieren den Schutz (lokale Entwicklung); in Roys lokaler `.env` auf a9-mega sind Testwerte gesetzt (`teste-mich` / `BM2026`). Noch offen aus diesem Block: tatsächliches Deployment auf einen VPS bzw. Tunnel-Setup für RIB-AI-01.
 2. **Prompt-Tuning** mit Roys Praxisbeobachtungen (Bewertungsstrenge, Erklärtiefe, Einstufungskalibrierung; Vergleich Ollama vs. Cloud als Evaluationsergebnis).
 3. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
 4. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.

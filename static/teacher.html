@@ -48,7 +48,8 @@
     <h1>👩‍🏫 ITS – Lehrpersonen-Monitoring</h1>
     <span>
       <a href="/teacher/lessons/new" style="margin-right:14px">📚 Neue Lektion erstellen</a>
-      <a href="/">Zur Lernenden-Ansicht</a>
+      <a href="/" style="margin-right:14px">Zur Lernenden-Ansicht</a>
+      <a href="/teacher/logout">Abmelden</a>
     </span>
   </header>
 
@@ -82,6 +83,7 @@ const PHASE = { assessment:"Einstufung", learning:"Am Lernen", finished:"Abgesch
 
 async function loadSessions() {
   const r = await fetch("/api/teacher/sessions");
+  if (r.status === 401) { location.href = "/teacher/login"; return; }
   const list = await r.json();
   document.getElementById("empty").style.display = list.length ? "none" : "block";
   document.getElementById("rows").innerHTML = list.map(s => `
@@ -101,6 +103,7 @@ async function loadSessions() {
 
 async function loadDetail(sid, name) {
   const r = await fetch("/api/teacher/sessions/" + sid);
+  if (r.status === 401) { location.href = "/teacher/login"; return; }
   const d = await r.json();
   document.getElementById("detail-title").textContent = "Lernverlauf von " + name;
   document.getElementById("detail-events").innerHTML = d.events.map(ev => {

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITS – Login Lehrperson</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#1c2733; --muted:#64748b;
+          --accent:#2563eb; --border:#e2e8f0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+         background:var(--bg); color:var(--text);
+         display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px;
+          padding:28px; width:100%; max-width:380px; margin:16px; }
+  h1 { font-size:1.15rem; margin:0 0 6px; }
+  p { color:var(--muted); font-size:.88rem; margin:0 0 18px; }
+  label { font-size:.85rem; font-weight:600; display:block; margin-bottom:6px; }
+  input { width:100%; padding:10px 12px; border:1px solid var(--border);
+          border-radius:8px; font:inherit; }
+  button { margin-top:14px; width:100%; padding:11px; border:none; border-radius:8px;
+           background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; }
+  .error { color:#dc2626; font-size:.85rem; margin-top:10px; display:none; }
+  a { display:block; text-align:center; margin-top:16px; color:var(--muted);
+      font-size:.82rem; text-decoration:none; }
+</style>
+</head>
+<body>
+<form class="card" id="form">
+  <h1>🎓 Lehrpersonen-Sicht</h1>
+  <p>Dieser Bereich ist geschützt. Bitte mit dem Lehrpersonen-Passwort anmelden.</p>
+  <label for="pw">Passwort</label>
+  <input type="password" id="pw" autocomplete="current-password" autofocus>
+  <button id="btn" type="submit">Anmelden</button>
+  <div class="error" id="error"></div>
+  <a href="/">Zur Lernenden-Ansicht</a>
+</form>
+<script>
+document.getElementById("form").onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("btn"), err = document.getElementById("error");
+  btn.disabled = true; err.style.display = "none";
+  try {
+    const r = await fetch("/api/teacher/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: document.getElementById("pw").value }),
+    });
+    if (!r.ok) throw new Error(r.status === 401 ? "Falsches Passwort."
+      : "Serverfehler (" + r.status + ")");
+    location.href = "/teacher";
+  } catch (ex) {
+    err.textContent = ex.message; err.style.display = "block";
+    btn.disabled = false;
+  }
+};
+</script>
+</body>
+</html>

@@ -89,6 +89,7 @@ $("file").addEventListener("change", async () => {
     fd.append("file", f);
     const r = await fetch("/api/teacher/lessons/extract", { method: "POST", body: fd });
     const d = await r.json();
+    if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Extraktion fehlgeschlagen");
     const cur = $("material").value.trim();
     $("material").value = (cur ? cur + "\n\n" : "") + d.text;
@@ -109,6 +110,7 @@ $("btn-suggest").onclick = async () => {
       body: JSON.stringify({ material }),
     });
     const d = await r.json();
+    if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Vorschlag fehlgeschlagen");
     if (d.titel && !$("titel").value.trim()) $("titel").value = d.titel;
     if (d.lernziele && d.lernziele.length) $("ziele").value = d.lernziele.join("\n");
@@ -131,6 +133,7 @@ $("btn-save").onclick = async () => {
       body: JSON.stringify(body),
     });
     const d = await r.json();
+    if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Speichern fehlgeschlagen");
     showResult("success", `✅ Lektion «${esc(d.titel)}» ist veröffentlicht. Lernende können sie
       jetzt auf der <a href="/">Startseite</a> auswählen.`);

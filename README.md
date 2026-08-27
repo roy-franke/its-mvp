@@ -19,6 +19,8 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 - **Pausieren und Fortsetzen**: Browser schliessen genügt – beim nächsten Besuch bietet die Startseite an, die Lernsequenz an der gleichen Stelle fortzusetzen (Session-ID wird lokal im Browser gemerkt, Zustand liegt in der DB).
 - **Lehrpersonen-Sicht** (`/teacher`): Übersicht aller Sessions mit Fortschritt, Niveau und Quote; Klick auf eine Zeile zeigt den vollständigen Lernverlauf (Event-Log).
 - **Lektionen erstellen** (`/teacher/lessons/new`): Lehrpersonen erstellen Lektionen direkt im Browser. Material als Text einfügen oder als Datei hochladen (PDF, Word, Text/Markdown), Titel und Lernziele von der KI vorschlagen lassen, optional Hinweise ans Tutorverhalten («Arbeite mit Alltagsbeispielen», «Sei streng bei Fachbegriffen»). Nach dem Speichern erscheint die Lektion in der Auswahl auf der Lernenden-Startseite.
+- **Zugangsschutz für den Klassentest**: Die Lehrpersonen-Sicht ist per Passwort geschützt (`TEACHER_PASSWORD` in der `.env`, Login unter `/teacher/login`, Abmelden möglich). Lernende brauchen einen Zugangscode (`CLASS_CODE`) und werden angehalten, ein Pseudonym statt des richtigen Namens zu verwenden. Beides lässt sich für die lokale Entwicklung deaktivieren, indem die Variablen leer bleiben.
+- **Deployment-Paket**: Dockerfile und docker-compose mit Caddy-Reverse-Proxy – HTTPS inklusive automatischem Let's-Encrypt-Zertifikat. Schritt-für-Schritt-Anleitung für einen VPS in `docs/DEPLOYMENT.md`.
 - **LLM-Abstraktion**: Provider per `.env` umschaltbar – Cloud (Anthropic, OpenAI-kompatibel) oder lokal (Ollama). `mock` läuft ganz ohne LLM für Demos und Tests.
 
 ## Schnellstart
@@ -97,6 +99,9 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_TOTAL_STEPS` | Anzahl Lernschritte pro Durchlauf (Standard 8) |
 | `ITS_DB_PATH` | Optionaler Pfad zur SQLite-DB |
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |
+| `TEACHER_PASSWORD` | Passwort für `/teacher`; leer = kein Login (nur lokal) |
+| `CLASS_CODE` | Zugangscode für Lernende; leer = kein Code |
+| `ITS_DOMAIN` | Domain für den HTTPS-Betrieb mit Docker/Caddy |
 
 ## Tests
 
@@ -111,13 +116,13 @@ End-to-End über die API mit Mock-Provider – ohne LLM, ohne laufenden Server.
 
 ## Bewusste Grenzen (MVP)
 
-Kein Login/Rollen, keine Authentifizierung der Lehrpersonen-Sicht, kein RAG
-über grosse Dokumente (das Material geht direkt in den Kontext, sehr lange
-Dokumente daher kürzen). Das entspricht den Won't-Haves aus der MVP-Featureliste.
+Kein Benutzerverzeichnis und keine Rollen (nur ein gemeinsames
+Lehrpersonen-Passwort und ein Klassencode), kein RAG über grosse Dokumente
+(das Material geht direkt in den Kontext, sehr lange Dokumente daher kürzen).
 
 ## Sinnvolle nächste Schritte
 
 1. Prompts mit realen Lernenden-Antworten tunen (Bewertungsstrenge, Erklärtiefe).
 2. Eigene Lektionen über den Editor erstellen und mit der Klasse testen.
-3. RAG-Anbindung an P2 für umfangreiches Material.
-4. Einfache Zugangskontrolle vor dem Pilotbetrieb (Datenschutz).
+3. Tutoring-Modi (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept.
+4. RAG-Anbindung an P2 für umfangreiches Material.

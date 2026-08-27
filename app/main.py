@@ -24,12 +24,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import llm, store, tutor
+from . import auth, llm, store, tutor
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("its")
@@ -61,6 +61,7 @@ def default_lesson_id() -> str:
 class StartRequest(BaseModel):
     name: str
     lesson_id: str | None = None
+    code: str | None = None   # Zugangscode der Klasse (falls konfiguriert)
 
 
 class AssessRequest(BaseModel):
@@ -87,6 +88,10 @@ class SuggestGoalsRequest(BaseModel):
     material: str
 
 
+class TeacherLoginRequest(BaseModel):
+    password: str
+
+
 # ---------------------------------------------------------------- Lektionen
 
 @app.get("/api/lessons")
@@ -99,7 +104,7 @@ def lessons_list():
     return out
 
 
-@app.post("/api/teacher/lessons")
+@app.post("/api/teacher/lessons", dependencies=[Depends(auth.require_teacher)])
 def lesson_create(req: LessonCreateRequest):
     """Neue Lektion anlegen (Lehrpersonen-Modul light)."""
     titel = req.titel.strip()
@@ -131,7 +136,7 @@ def lesson_create(req: LessonCreateRequest):
     return {"id": lesson_id, "titel": titel}
 
 
-@app.post("/api/teacher/lessons/extract")
+@app.post("/api/teacher/lessons/extract", dependencies=[Depends(auth.require_teacher)])
 async def lesson_extract(file: UploadFile = File(...)):
     """Extrahiert Text aus einer hochgeladenen Datei (PDF, Word, Text)."""
     data = await file.read()
@@ -145,7 +150,7 @@ async def lesson_extract(file: UploadFile = File(...)):
     return {"filename": file.filename, "text": text, "chars": len(text)}
 
 
-@app.post("/api/teacher/lessons/suggest-goals")
+@app.post("/api/teacher/lessons/suggest-goals", dependencies=[Depends(auth.require_teacher)])
 def lesson_suggest_goals(req: SuggestGoalsRequest):
     """KI-Vorschlag für Titel und Lernziele aus dem Material."""
     if len(req.material.strip()) < 100:
@@ -188,6 +193,9 @@ def _unique_slug(titel: str) -> str:
 
 @app.post("/api/session/start")
 def start_session(req: StartRequest):
+    if not auth.check_class_code(req.code):
+        raise HTTPException(403, "Falscher Zugangscode. Frag deine Lehrperson "
+                                 "nach dem aktuellen Code.")
     lesson_id = req.lesson_id or default_lesson_id()
     lesson = load_lesson(lesson_id)
     profile = tutor.new_profile()
@@ -363,7 +371,7 @@ def _session(sid: str) -> dict:
 
 # ---------------------------------------------------------------- Lehrperson
 
-@app.get("/api/teacher/sessions")
+@app.get("/api/teacher/sessions", dependencies=[Depends(auth.require_teacher)])
 def teacher_sessions():
     out = []
     for s in store.list_sessions():
@@ -386,7 +394,7 @@ def teacher_sessions():
     return out
 
 
-@app.get("/api/teacher/sessions/{sid}")
+@app.get("/api/teacher/sessions/{sid}", dependencies=[Depends(auth.require_teacher)])
 def teacher_session_detail(sid: str):
     s = _session(sid)
     return {
@@ -394,6 +402,31 @@ def teacher_session_detail(sid: str):
                     "profile": s["profile"]},
         "events": store.get_events(sid),
     }
+
+
+@app.get("/api/access")
+def access_info():
+    """Sagt dem Frontend, ob ein Zugangscode nötig ist (den Code selbst nie ausliefern)."""
+    return {"code_required": bool(auth.class_code()),
+            "teacher_login_required": auth.auth_enabled()}
+
+
+@app.post("/api/teacher/login")
+def teacher_login(req: TeacherLoginRequest, response: Response):
+    if not auth.auth_enabled():
+        return {"ok": True, "hinweis": "Zugangsschutz ist deaktiviert (TEACHER_PASSWORD leer)"}
+    if not auth.check_password(req.password):
+        raise HTTPException(401, "Falsches Passwort")
+    response.set_cookie(auth.COOKIE_NAME, auth.make_token(),
+                        max_age=auth.COOKIE_MAX_AGE, httponly=True, samesite="lax")
+    return {"ok": True}
+
+
+@app.get("/teacher/logout")
+def teacher_logout():
+    r = RedirectResponse("/teacher/login")
+    r.delete_cookie(auth.COOKIE_NAME)
+    return r
 
 
 @app.get("/api/info")
@@ -435,12 +468,23 @@ def index():
 
 
 @app.get("/teacher")
-def teacher():
+def teacher(request: Request):
+    if not auth.is_teacher(request):
+        return RedirectResponse("/teacher/login")
     return FileResponse(BASE / "static" / "teacher.html")
 
 
+@app.get("/teacher/login")
+def teacher_login_page(request: Request):
+    if auth.is_teacher(request):
+        return RedirectResponse("/teacher")
+    return FileResponse(BASE / "static" / "teacher_login.html")
+
+
 @app.get("/teacher/lessons/new")
-def lesson_editor():
+def lesson_editor(request: Request):
+    if not auth.is_teacher(request):
+        return RedirectResponse("/teacher/login")
     return FileResponse(BASE / "static" / "lesson_editor.html")
 
 

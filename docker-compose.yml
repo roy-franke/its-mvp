@@ -1,0 +1,27 @@
+# ITS-MVP mit HTTPS-Reverse-Proxy (Caddy).
+# Anleitung: docs/DEPLOYMENT.md
+services:
+  its:
+    build: .
+    env_file: .env
+    volumes:
+      - its-data:/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - ITS_DOMAIN=${ITS_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  its-data:
+  caddy-data:
+  caddy-config:
