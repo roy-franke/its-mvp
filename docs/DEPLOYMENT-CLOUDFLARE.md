@@ -151,6 +151,14 @@ einem Fehler 502.
 
 - **Fehler 502 Bad Gateway** auf tutor.casaai.me: Der Tunnel steht, aber die
   App läuft nicht → `start.bat` starten.
+- **Merkregel zu den Fehlernummern**: 1033 heisst, der Tunnel-Dienst läuft
+  nicht (Cloudflare findet keinen Connector). 502 heisst, der Tunnel steht,
+  aber die App dahinter läuft nicht. Für den Betrieb müssen beide laufen:
+  `start.bat` für das ITS und der Windows-Dienst Cloudflared für den Tunnel.
+  `start.bat` warnt beim Start, wenn der Dienst fehlt.
+- **Dienst startet nicht automatisch mit Windows**: Starttyp einmalig setzen
+  mit `Set-Service Cloudflared -StartupType Automatic` in einer
+  Administrator-PowerShell, danach `Start-Service Cloudflared`.
 - **Fehler 1033 (Cloudflare Tunnel error)**: Der Hostname existiert, aber es
   ist kein Connector verbunden. Im Dashboard steht der Tunnel dann auf
   «Inactive» oder «Down» mit 0 Replicas. Heisst: cloudflared läuft auf dem PC
