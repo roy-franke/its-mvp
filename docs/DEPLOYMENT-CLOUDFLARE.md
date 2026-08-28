@@ -9,6 +9,15 @@ Voraussetzung: Cloudflare-Account, Domain casaai.me liegt bei Cloudflare.
 Die Subdomain muss NICHT von Hand angelegt werden – sie entsteht automatisch,
 sobald der Public Hostname im Tunnel eingetragen wird (Schritt 4).
 
+## Ist-Zustand auf a9-mega (eingerichtet am 28.8.2026)
+
+Ein einziger Tunnel namens `a9-mega`, dashboard-verwaltet, mit zwei Routen:
+tutor.casaai.me auf http://localhost:8010 (ITS) und ollix-free.casaai.me auf
+http://localhost:8000. Der cloudflared-Dienst läuft als Windows-Dienst und
+startet mit dem PC. Die früheren Tunnel `tutor`, `ollix-free` und `ollama`
+wurden gelöscht; der erste war lokal per config.yml verwaltet und liess sich
+im Dashboard nicht erweitern.
+
 ## Schritt 1: Zero-Trust-Dashboard öffnen
 
 1. https://one.dash.cloudflare.com öffnen und anmelden.
@@ -155,6 +164,12 @@ einem Fehler 502.
 - **«Access is denied» bei service install/uninstall**: Die PowerShell läuft
   nicht als Administrator. Fenster mit Strg+Shift+Enter neu öffnen (siehe
   Schritt 3).
+- **Dienst hängt in «StopPending»**: `Get-Service Cloudflared` zeigt
+  StopPending und nichts geht mehr weiter. Prozess hart beenden mit
+  `Get-Process cloudflared | Stop-Process -Force`, danach prüfen mit
+  `sc.exe queryex Cloudflared`. Meldet der Befehl, dass der Dienst nicht
+  existiert, ist alles in Ordnung und die Neuinstallation kann folgen. Zur Not
+  hilft ein Neustart des PCs.
 - **Fehler 530 / Tunnel not found**: cloudflared-Dienst läuft nicht →
   Windows-Dienste prüfen oder PC neu starten.
 - **Seite lädt, aber Tutor antwortet generisch**: Ollama läuft nicht oder
