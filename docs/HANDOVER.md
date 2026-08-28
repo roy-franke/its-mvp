@@ -86,7 +86,8 @@ uvicorn app.main:app --reload
 Auf a9-mega (Ryzen AI Max+ 395, Radeon 8060S, 64 GB nutzbarer Grafikspeicher):
 `OLLAMA_MODEL=qwen3:30b` (MoE, laeuft zu 100 % auf der GPU), `OLLAMA_NUM_CTX=16384`,
 `OLLAMA_KEEP_ALIVE=30m`, `OLLAMA_THINK=false`. Der Denkmodus ist bewusst aus:
-Qwen3 braucht mit Denken rund 11 Sekunden selbst fuer eine Ein-Wort-Antwort,
+Qwen3 braucht mit Denken rund 11 Sekunden selbst fuer eine Ein-Wort-Antwort
+(ohne Denken 3,3 Sekunden, gemessen ueber /api/llm-test auf a9-mega),
 und der Gedankengang wird ohnehin verworfen (`strip_reasoning` in `llm.py`).
 Fuer Qualitaetsvergleiche laesst er sich mit `OLLAMA_THINK=true` einschalten.
 Zugänge (API-Keys, GitHub-Token) stehen bewusst NICHT in diesem Dokument –
