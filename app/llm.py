@@ -19,7 +19,8 @@ import httpx
 
 log = logging.getLogger("its.llm")
 
-TIMEOUT = 120.0
+# Grosse lokale Modelle brauchen beim ersten Aufruf Zeit zum Laden.
+TIMEOUT = float(os.getenv("LLM_TIMEOUT", "300"))
 
 
 class LLMError(Exception):
@@ -86,6 +87,9 @@ def _chat_ollama(system: str, user: str) -> str:
             "model": model,
             "stream": False,
             "options": {"num_ctx": num_ctx},
+            # Modell im Speicher halten, damit es zwischen zwei Aufgaben
+            # nicht neu geladen werden muss (Wartezeit im Unterricht).
+            "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
