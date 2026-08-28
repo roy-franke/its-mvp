@@ -77,11 +77,15 @@ def _chat_openai(system: str, user: str) -> str:
 def _chat_ollama(system: str, user: str) -> str:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
     model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+    # Ollamas Standardkontext (4096 Token) reicht für Lektionsmaterial plus
+    # Lernverlauf nicht aus; zu viel wird sonst still abgeschnitten.
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
     r = httpx.post(
         f"{base}/api/chat",
         json={
             "model": model,
             "stream": False,
+            "options": {"num_ctx": num_ctx},
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -198,7 +202,19 @@ def chat(system: str, user: str) -> str:
     log.debug("SYSTEM: %s\nUSER: %s", system, user)
     text = fn(system, user)
     log.debug("ANTWORT: %s", text)
-    return text
+    return strip_reasoning(text)
+
+
+def strip_reasoning(text: str) -> str:
+    """Entfernt Gedankenblöcke von Reasoning-Modellen (z.B. Qwen3, DeepSeek-R1).
+
+    Diese Modelle stellen ihrer Antwort <think>…</think> voran. Der Block darf
+    weder im JSON-Parsing landen noch als Tutortext bei Lernenden erscheinen.
+    """
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    # Abgeschnittene Antwort mit offenem Block: alles bis zum Tag verwerfen
+    cleaned = re.sub(r"^.*?</think>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    return cleaned.strip() or text.strip()
 
 
 # ---------------------------------------------------------------- JSON-Parsing

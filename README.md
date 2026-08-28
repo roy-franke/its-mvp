@@ -102,6 +102,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `LLM_PROVIDER` | `anthropic`, `openai`, `ollama` oder `mock` |
 | `ITS_TOTAL_STEPS` | Anzahl Lernschritte pro Durchlauf (Standard 8) |
 | `ITS_DB_PATH` | Optionaler Pfad zur SQLite-DB |
+| `OLLAMA_NUM_CTX` | Kontextfenster für Ollama (Standard 16384) |
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |
 | `TEACHER_PASSWORD` | Passwort für `/teacher`; leer = kein Login (nur lokal) |
 | `CLASS_CODE` | Zugangscode für Lernende; leer = kein Code |
