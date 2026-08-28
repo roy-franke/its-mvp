@@ -104,6 +104,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_DB_PATH` | Optionaler Pfad zur SQLite-DB |
 | `OLLAMA_NUM_CTX` | Kontextfenster für Ollama (Standard 16384) |
 | `OLLAMA_KEEP_ALIVE` | Wie lange das Modell geladen bleibt (Standard 30m) |
+| `OLLAMA_THINK` | Denkmodus von Reasoning-Modellen (`false` = schnell, Standard) |
 | `LLM_TIMEOUT` | Zeitlimit pro LLM-Aufruf in Sekunden (Standard 300) |
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |
 | `TEACHER_PASSWORD` | Passwort für `/teacher`; leer = kein Login (nur lokal) |

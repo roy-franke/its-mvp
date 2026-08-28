@@ -83,6 +83,12 @@ uvicorn app.main:app --reload
 ```
 
 `.env` auf Roys MacBook: `LLM_PROVIDER=ollama`, `OLLAMA_MODEL=qwen2.5:7b`.
+Auf a9-mega (Ryzen AI Max+ 395, Radeon 8060S, 64 GB nutzbarer Grafikspeicher):
+`OLLAMA_MODEL=qwen3:30b` (MoE, laeuft zu 100 % auf der GPU), `OLLAMA_NUM_CTX=16384`,
+`OLLAMA_KEEP_ALIVE=30m`, `OLLAMA_THINK=false`. Der Denkmodus ist bewusst aus:
+Qwen3 braucht mit Denken rund 11 Sekunden selbst fuer eine Ein-Wort-Antwort,
+und der Gedankengang wird ohnehin verworfen (`strip_reasoning` in `llm.py`).
+Fuer Qualitaetsvergleiche laesst er sich mit `OLLAMA_THINK=true` einschalten.
 Zugänge (API-Keys, GitHub-Token) stehen bewusst NICHT in diesem Dokument –
 die `.env` ist gitignored und wird pro Rechner neu erstellt.
 

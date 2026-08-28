@@ -75,28 +75,42 @@ def _chat_openai(system: str, user: str) -> str:
     return r.json()["choices"][0]["message"]["content"]
 
 
+def ollama_payload(system: str, user: str) -> dict:
+    """Baut die Anfrage an Ollama zusammen (ausgelagert, damit testbar)."""
+    payload = {
+        "model": os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
+        "stream": False,
+        # Ollamas Standardkontext (4096 Token) reicht für Lektionsmaterial plus
+        # Lernverlauf nicht aus; zu viel wird sonst still abgeschnitten.
+        "options": {"num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "16384"))},
+        # Modell im Speicher halten, damit es zwischen zwei Aufgaben nicht neu
+        # geladen werden muss (Wartezeit im Unterricht).
+        "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    # Reasoning-Modelle denken vor jeder Antwort sichtbar nach. Das kostet
+    # Sekunden pro Schritt, die Lernende als Wartezeit erleben, und der
+    # Gedankengang wird ohnehin verworfen. Standardmässig deshalb aus;
+    # OLLAMA_THINK=true schaltet ihn für Qualitätsvergleiche wieder ein,
+    # ein leerer Wert überlässt die Entscheidung dem Modell.
+    think = os.getenv("OLLAMA_THINK", "false").strip().lower()
+    if think in ("true", "false"):
+        payload["think"] = think == "true"
+    return payload
+
+
 def _chat_ollama(system: str, user: str) -> str:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-    # Ollamas Standardkontext (4096 Token) reicht für Lektionsmaterial plus
-    # Lernverlauf nicht aus; zu viel wird sonst still abgeschnitten.
-    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
-    r = httpx.post(
-        f"{base}/api/chat",
-        json={
-            "model": model,
-            "stream": False,
-            "options": {"num_ctx": num_ctx},
-            # Modell im Speicher halten, damit es zwischen zwei Aufgaben
-            # nicht neu geladen werden muss (Wartezeit im Unterricht).
-            "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        },
-        timeout=TIMEOUT,
-    )
+    payload = ollama_payload(system, user)
+    r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
+    if r.status_code == 400 and "think" in payload:
+        # Modelle ohne Denkmodus lehnen das Feld ab – ohne erneut versuchen
+        log.info("Modell kennt keinen Denkmodus, Anfrage ohne 'think'")
+        payload.pop("think")
+        r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
     r.raise_for_status()
     return r.json()["message"]["content"]
 
