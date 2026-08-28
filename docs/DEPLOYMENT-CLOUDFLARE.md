@@ -61,9 +61,13 @@ Im Tunnel auf **Public Hostname** → **Add a public hostname**:
 | URL | `localhost:8000` |
 
 Speichern. Cloudflare legt damit automatisch den DNS-Eintrag für
-tutor.casaai.me an. Wichtig: Type ist HTTP (nicht HTTPS) – gemeint ist die
-lokale Verbindung vom Tunnel zur App; nach aussen liefert Cloudflare
-trotzdem HTTPS.
+tutor.casaai.me an.
+
+**Wichtig – häufigster Fehler:** Die Service-URL muss `http://localhost:8000`
+lauten, nicht `https://`. Gemeint ist die lokale Verbindung vom Tunnel zur App
+auf demselben PC, und die läuft unverschlüsselt. Nach aussen liefert Cloudflare
+trotzdem HTTPS. Steht dort `https://`, quittiert der Tunnel jede Anfrage mit
+einem Fehler 502.
 
 ## Schritt 5: Testen
 
@@ -91,6 +95,17 @@ trotzdem HTTPS.
 
 - **Fehler 502 Bad Gateway** auf tutor.casaai.me: Der Tunnel steht, aber die
   App läuft nicht → `start.bat` starten.
+- **Fehler 1033 (Cloudflare Tunnel error)**: Der Hostname existiert, aber es
+  ist kein Connector verbunden. Im Dashboard steht der Tunnel dann auf
+  «Inactive» oder «Down» mit 0 Replicas. Heisst: cloudflared läuft auf dem PC
+  nicht. Prüfen mit `Get-Service cloudflared` in einer Administrator-PowerShell;
+  fehlt der Dienst, ist Schritt 3 nicht durchgelaufen.
+- **«Service already exists» beim Installieren**: Auf einem PC kann nur ein
+  cloudflared-Dienst laufen, und er gehört zu genau einem Tunnel. Alten Dienst
+  mit `cloudflared service uninstall` entfernen und den neuen Befehl ausführen.
+  Wer mehrere Anwendungen gleichzeitig veröffentlichen will, legt sie besser
+  als mehrere Public Hostnames auf demselben Tunnel an statt als mehrere
+  Tunnel.
 - **Fehler 530 / Tunnel not found**: cloudflared-Dienst läuft nicht →
   Windows-Dienste prüfen oder PC neu starten.
 - **Seite lädt, aber Tutor antwortet generisch**: Ollama läuft nicht oder
