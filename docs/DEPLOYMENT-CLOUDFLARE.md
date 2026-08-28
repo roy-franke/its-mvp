@@ -30,10 +30,54 @@ einen eigenen Tunnel – dann normal weiter mit Schritt 2.
    Diesen Befehl mit dem Kopier-Symbol kopieren. Der lange Teil ist das
    Tunnel-Token – es gehört nur in dieses Fenster, nicht in Chats oder Mails.
 
+## Grundregel: ein Tunnel pro PC, beliebig viele Hostnamen
+
+Auf einem Rechner läuft genau ein cloudflared-Dienst, und dieser Dienst gehört
+zu genau einem Tunnel. Mehrere Anwendungen gleichzeitig zu veröffentlichen ist
+trotzdem kein Problem: Ein Tunnel kann beliebig viele Public Hostnames haben,
+die je auf einen anderen lokalen Port zeigen.
+
+| Hostname | Service-URL | Anwendung |
+|---|---|---|
+| tutor.casaai.me | http://localhost:8010 | ITS-MVP |
+| ollix-free.casaai.me | http://localhost:8000 | ollix |
+
+**Jede Anwendung braucht einen eigenen Port.** Zwei Programme können nicht
+denselben Port belegen. Das ITS läuft deshalb auf 8010 (in `start.bat`
+festgelegt), Port 8000 bleibt für die andere Anwendung frei.
+
+**Dashboard-verwaltet statt lokal:** Zeigt ein Tunnel im Dashboard den Hinweis
+«This tunnel is locally managed», bezieht er seine Routen aus einer config.yml
+auf dem PC, und «Add route» ist gesperrt. Für den Betrieb mehrerer Anwendungen
+ist ein dashboard-verwalteter Tunnel bequemer, weil alles im Browser
+einstellbar bleibt. Ein Tunnel, dessen Connector mit `service install TOKEN`
+eingerichtet wurde, ist automatisch dashboard-verwaltet.
+
+Ein zweiter Tunnel für dieselbe Maschine bringt nichts – er bliebe «Inactive»,
+weil kein Connector zu ihm gehört. Wer bereits mehrere Tunnel angelegt hat,
+konsolidiert sie: alle Hostnamen auf den Tunnel legen, dessen Dienst läuft, und
+die übrigen Tunnel löschen.
+
+**Achtung Reihenfolge:** Ein Hostname kann immer nur auf einen Tunnel zeigen.
+Also zuerst den alten Tunnel (samt Route) löschen, danach die Route beim
+Ziel-Tunnel neu anlegen.
+
+**Sicherheitshinweis:** Der Token im Installationsbefehl ist ein Geheimnis. Ist
+er einmal sichtbar geworden (Screenshot, Chat, Mail), gilt er als kompromittiert
+und muss ersetzt werden – am einfachsten, indem der Tunnel gelöscht und neu
+angelegt wird.
+
 ## Schritt 3: cloudflared auf dem PC als Dienst installieren
 
-1. Startmenü → «PowerShell» tippen → Rechtsklick →
-   **Als Administrator ausführen**.
+1. Windows-Taste drücken, «powershell» tippen, dann **Strg+Shift+Enter** –
+   das erzwingt Administratorrechte. In der Titelleiste des Fensters muss
+   «Administrator» stehen. Im Zweifel prüfen mit:
+   ```powershell
+   ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+   ```
+   Kommt `False`, ist das Fenster nicht erhöht; Dienstbefehle scheitern dann
+   mit «Cannot establish a connection to the service control manager: Access
+   is denied».
 2. cloudflared installieren:
    ```powershell
    winget install --id Cloudflare.cloudflared
@@ -58,12 +102,15 @@ Im Tunnel auf **Public Hostname** → **Add a public hostname**:
 | Subdomain | `tutor` |
 | Domain | `casaai.me` |
 | Type | `HTTP` |
-| URL | `localhost:8000` |
+| URL | `localhost:8010` |
+
+Weitere Anwendungen kommen als zusätzliche Public Hostnames auf denselben
+Tunnel, je mit ihrem eigenen Port.
 
 Speichern. Cloudflare legt damit automatisch den DNS-Eintrag für
 tutor.casaai.me an.
 
-**Wichtig – häufigster Fehler:** Die Service-URL muss `http://localhost:8000`
+**Wichtig – häufigster Fehler:** Die Service-URL muss `http://localhost:8010`
 lauten, nicht `https://`. Gemeint ist die lokale Verbindung vom Tunnel zur App
 auf demselben PC, und die läuft unverschlüsselt. Nach aussen liefert Cloudflare
 trotzdem HTTPS. Steht dort `https://`, quittiert der Tunnel jede Anfrage mit
@@ -100,16 +147,18 @@ einem Fehler 502.
   «Inactive» oder «Down» mit 0 Replicas. Heisst: cloudflared läuft auf dem PC
   nicht. Prüfen mit `Get-Service cloudflared` in einer Administrator-PowerShell;
   fehlt der Dienst, ist Schritt 3 nicht durchgelaufen.
-- **«Service already exists» beim Installieren**: Auf einem PC kann nur ein
-  cloudflared-Dienst laufen, und er gehört zu genau einem Tunnel. Alten Dienst
-  mit `cloudflared service uninstall` entfernen und den neuen Befehl ausführen.
-  Wer mehrere Anwendungen gleichzeitig veröffentlichen will, legt sie besser
-  als mehrere Public Hostnames auf demselben Tunnel an statt als mehrere
-  Tunnel.
+- **«cloudflared service is already installed»**: Es existiert bereits ein
+  Dienst für einen anderen Tunnel. Entweder den gewünschten Hostname beim
+  bestehenden Tunnel eintragen (empfohlen, siehe Grundregel oben), oder den
+  alten Dienst mit `cloudflared service uninstall` entfernen und danach neu
+  installieren.
+- **«Access is denied» bei service install/uninstall**: Die PowerShell läuft
+  nicht als Administrator. Fenster mit Strg+Shift+Enter neu öffnen (siehe
+  Schritt 3).
 - **Fehler 530 / Tunnel not found**: cloudflared-Dienst läuft nicht →
   Windows-Dienste prüfen oder PC neu starten.
 - **Seite lädt, aber Tutor antwortet generisch**: Ollama läuft nicht oder
-  falsches Modell in der `.env` → auf dem PC http://localhost:8000/api/llm-test
+  falsches Modell in der `.env` → auf dem PC http://localhost:8010/api/llm-test
   aufrufen.
 - Der PC darf nicht in den Ruhezustand gehen, solange Lernende arbeiten
   (Windows-Einstellungen → Energie: Ruhezustand auf «Nie» im Netzbetrieb).

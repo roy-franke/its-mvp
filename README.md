@@ -37,6 +37,10 @@ Dann im Browser:
 - Lernende: http://localhost:8000/
 - Lehrperson: http://localhost:8000/teacher
 
+Auf Windows genügen `setup.bat` (einmalig) und `start.bat`. Letzteres startet
+den Server auf Port **8010**, damit Port 8000 für andere lokale Anwendungen
+frei bleibt (siehe `docs/DEPLOYMENT-CLOUDFLARE.md`).
+
 **Wichtig:** Ohne Anpassung der `.env` läuft der Mock-Provider – ohne KI. Er
 bewertet nur heuristisch (sehr kurze Antworten gelten als falsch) und liefert
 feste Beispieltexte. Echte fachliche Bewertung, echte Aufgaben und echtes

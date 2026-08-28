@@ -8,11 +8,11 @@ if not exist ".venv\Scripts\python.exe" (
     exit /b 1
 )
 
-echo Server laeuft gleich auf http://localhost:8000
-echo Lernende:   http://localhost:8000/
-echo Lehrperson: http://localhost:8000/teacher
+echo Server laeuft gleich auf http://localhost:8010
+echo Lernende:   http://localhost:8010/
+echo Lehrperson: http://localhost:8010/teacher
 echo Dieses Fenster offen lassen. Beenden mit Ctrl+C oder Fenster schliessen.
 echo.
-start "" http://localhost:8000
-".venv\Scripts\python.exe" -m uvicorn app.main:app --reload
+start "" http://localhost:8010
+".venv\Scripts\python.exe" -m uvicorn app.main:app --reload --port 8010
 pause
