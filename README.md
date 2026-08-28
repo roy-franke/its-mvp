@@ -20,7 +20,7 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 - **Lehrpersonen-Sicht** (`/teacher`): Übersicht aller Sessions mit Fortschritt, Niveau und Quote; Klick auf eine Zeile zeigt den vollständigen Lernverlauf (Event-Log).
 - **Lektionen erstellen** (`/teacher/lessons/new`): Lehrpersonen erstellen Lektionen direkt im Browser. Material als Text einfügen oder als Datei hochladen (PDF, Word, Text/Markdown), Titel und Lernziele von der KI vorschlagen lassen, optional Hinweise ans Tutorverhalten («Arbeite mit Alltagsbeispielen», «Sei streng bei Fachbegriffen»). Nach dem Speichern erscheint die Lektion in der Auswahl auf der Lernenden-Startseite.
 - **Zugangsschutz für den Klassentest**: Die Lehrpersonen-Sicht ist per Passwort geschützt (`TEACHER_PASSWORD` in der `.env`, Login unter `/teacher/login`, Abmelden möglich). Lernende brauchen einen Zugangscode (`CLASS_CODE`) und werden angehalten, ein Pseudonym statt des richtigen Namens zu verwenden. Beides lässt sich für die lokale Entwicklung deaktivieren, indem die Variablen leer bleiben.
-- **Deployment-Paket**: Dockerfile und docker-compose mit Caddy-Reverse-Proxy – HTTPS inklusive automatischem Let's-Encrypt-Zertifikat. Schritt-für-Schritt-Anleitung für einen VPS in `docs/DEPLOYMENT.md`.
+- **Deployment-Paket**: Dockerfile und docker-compose mit Caddy-Reverse-Proxy – HTTPS inklusive automatischem Let's-Encrypt-Zertifikat. Schritt-für-Schritt-Anleitung für einen VPS in `docs/DEPLOYMENT.md`; Alternative ohne eigenen Server: lokaler Betrieb mit Cloudflare Tunnel, siehe `docs/DEPLOYMENT-CLOUDFLARE.md`.
 - **LLM-Abstraktion**: Provider per `.env` umschaltbar – Cloud (Anthropic, OpenAI-kompatibel) oder lokal (Ollama). `mock` läuft ganz ohne LLM für Demos und Tests.
 
 ## Schnellstart
