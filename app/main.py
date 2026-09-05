@@ -470,30 +470,44 @@ def llm_test():
 
 # ---------------------------------------------------------------- Frontend
 
+def _page(name: str) -> FileResponse:
+    """HTML-Seite ausliefern, ohne dass der Browser sie zwischenspeichert.
+
+    Ohne Cache-Control darf der Browser die Seite nach eigenem Gutdünken aus
+    dem Cache bedienen. Nach einem Update sieht die Lehrperson dann weiterhin
+    die alte Oberfläche, obwohl der Server längst die neue Datei hat.
+    "no-cache" erlaubt das Zwischenspeichern weiterhin, erzwingt aber jedes
+    Mal eine Rückfrage beim Server – bei unveränderter Datei bleibt es beim
+    schlanken 304.
+    """
+    return FileResponse(BASE / "static" / name,
+                        headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/")
 def index():
-    return FileResponse(BASE / "static" / "index.html")
+    return _page("index.html")
 
 
 @app.get("/teacher")
 def teacher(request: Request):
     if not auth.is_teacher(request):
         return RedirectResponse("/teacher/login")
-    return FileResponse(BASE / "static" / "teacher.html")
+    return _page("teacher.html")
 
 
 @app.get("/teacher/login")
 def teacher_login_page(request: Request):
     if auth.is_teacher(request):
         return RedirectResponse("/teacher")
-    return FileResponse(BASE / "static" / "teacher_login.html")
+    return _page("teacher_login.html")
 
 
 @app.get("/teacher/lessons/new")
 def lesson_editor(request: Request):
     if not auth.is_teacher(request):
         return RedirectResponse("/teacher/login")
-    return FileResponse(BASE / "static" / "lesson_editor.html")
+    return _page("lesson_editor.html")
 
 
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")

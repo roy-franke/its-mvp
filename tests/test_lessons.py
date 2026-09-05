@@ -127,3 +127,11 @@ def test_extraktion_unbekanntes_format():
     r = client.post("/api/teacher/lessons/extract",
                     files={"file": ("bild.png", io.BytesIO(b"x" * 100), "image/png")})
     assert r.status_code == 400
+
+
+def test_html_seiten_werden_nicht_gecacht():
+    """Ohne no-cache liefert der Browser nach einem Update die alte Oberfläche."""
+    for pfad in ("/", "/teacher", "/teacher/lessons/new"):
+        r = client.get(pfad)
+        assert r.status_code == 200, pfad
+        assert r.headers.get("cache-control") == "no-cache", pfad
