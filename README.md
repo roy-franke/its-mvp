@@ -93,6 +93,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `GET /api/session/{id}/state` | Zustand (Basis für Pausieren/Fortsetzen) |
 | `GET /api/teacher/sessions` | Monitoring-Übersicht |
 | `GET /api/teacher/sessions/{id}` | Vollständiger Lernverlauf |
+| `GET /api/teacher/timings` | Antwortzeiten der letzten LLM-Aufrufe |
 | `GET /api/info` | Aktiver Provider, verfügbare Lektionen |
 
 ## Konfiguration (.env)
@@ -104,6 +105,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_DB_PATH` | Optionaler Pfad zur SQLite-DB |
 | `OLLAMA_NUM_CTX` | Kontextfenster für Ollama (Standard 16384) |
 | `OLLAMA_KEEP_ALIVE` | Wie lange das Modell geladen bleibt (Standard 30m) |
+| `OLLAMA_NUM_PREDICT` | Obergrenze für die Antwortlänge in Token (Standard 1024) |
 | `OLLAMA_THINK` | Denkmodus von Reasoning-Modellen (`false` = schnell, Standard) |
 | `LLM_TIMEOUT` | Zeitlimit pro LLM-Aufruf in Sekunden (Standard 300) |
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |

@@ -14,6 +14,9 @@ import json
 import logging
 import os
 import re
+import statistics
+import time
+from collections import deque
 
 import httpx
 
@@ -27,9 +30,83 @@ class LLMError(Exception):
     pass
 
 
+# ---------------------------------------------------------------- Zeitmessung
+#
+# Ohne Zahlen ist jede Optimierung Raten. Jeder LLM-Aufruf landet deshalb in
+# einem Ringpuffer im Arbeitsspeicher: Dauer, Art des Schritts und – bei
+# Ollama – die Aufteilung in Prompt-Verarbeitung und Textgenerierung. Das
+# genügt für die Frage «wo gehen die Sekunden hin», ohne dass dafür eine
+# Tabelle in der Datenbank nötig wäre.
+
+_TIMINGS: deque = deque(maxlen=200)
+
+
+def _label(user: str) -> str:
+    """Liest die Schrittart aus der ersten Zeile des Prompts ("AUFGABE: X")."""
+    m = re.match(r"\s*AUFGABE:\s*([A-Z_]+)", user)
+    return m.group(1) if m else "SONSTIGES"
+
+
+def record_timing(label: str, seconds: float, meta: dict | None = None) -> None:
+    entry = {"schritt": label, "sekunden": round(seconds, 2),
+             "zeitpunkt": time.time(), "modell": current_model()}
+    entry.update(meta or {})
+    _TIMINGS.append(entry)
+    log.info("LLM %s: %.1fs (%s)", label, seconds,
+             ", ".join(f"{k}={v}" for k, v in (meta or {}).items()) or "keine Details")
+
+
+def timings() -> list[dict]:
+    return list(_TIMINGS)
+
+
+def timing_summary() -> list[dict]:
+    """Aggregiert die Messungen je Schrittart – Median und langsamster Fall."""
+    by_label: dict[str, list[float]] = {}
+    for e in _TIMINGS:
+        by_label.setdefault(e["schritt"], []).append(e["sekunden"])
+    out = []
+    for label, werte in by_label.items():
+        out.append({
+            "schritt": label,
+            "anzahl": len(werte),
+            "median_sekunden": round(statistics.median(werte), 1),
+            "max_sekunden": round(max(werte), 1),
+        })
+    return sorted(out, key=lambda r: r["median_sekunden"], reverse=True)
+
+
+def reset_timings() -> None:
+    _TIMINGS.clear()
+
+
+def _ollama_meta(data: dict) -> dict:
+    """Übersetzt Ollamas Nanosekunden-Zähler in etwas Lesbares.
+
+    Interessant ist die Aufteilung: Ist die Prompt-Verarbeitung teuer, hilft
+    ein kürzeres Lektionsmaterial. Ist die Generierung teuer, hilft nur ein
+    schnelleres Modell oder eine kürzere Antwort.
+    """
+    def sek(key: str) -> float | None:
+        v = data.get(key)
+        return round(v / 1e9, 2) if isinstance(v, (int, float)) else None
+
+    meta = {
+        "prompt_tokens": data.get("prompt_eval_count"),
+        "antwort_tokens": data.get("eval_count"),
+        "prompt_sekunden": sek("prompt_eval_duration"),
+        "antwort_sekunden": sek("eval_duration"),
+        "laden_sekunden": sek("load_duration"),
+    }
+    tokens, dauer = data.get("eval_count"), meta["antwort_sekunden"]
+    if tokens and dauer:
+        meta["tokens_pro_sekunde"] = round(tokens / dauer, 1)
+    return {k: v for k, v in meta.items() if v is not None}
+
+
 # ---------------------------------------------------------------- Provider
 
-def _chat_anthropic(system: str, user: str) -> str:
+def _chat_anthropic(system: str, user: str) -> tuple[str, dict]:
     key = os.getenv("ANTHROPIC_API_KEY", "")
     if not key:
         raise LLMError("ANTHROPIC_API_KEY fehlt in .env")
@@ -50,10 +127,15 @@ def _chat_anthropic(system: str, user: str) -> str:
         timeout=TIMEOUT,
     )
     r.raise_for_status()
-    return r.json()["content"][0]["text"]
+    data = r.json()
+    usage = data.get("usage") or {}
+    return data["content"][0]["text"], {
+        "prompt_tokens": usage.get("input_tokens"),
+        "antwort_tokens": usage.get("output_tokens"),
+    }
 
 
-def _chat_openai(system: str, user: str) -> str:
+def _chat_openai(system: str, user: str) -> tuple[str, dict]:
     key = os.getenv("OPENAI_API_KEY", "")
     if not key:
         raise LLMError("OPENAI_API_KEY fehlt in .env")
@@ -72,7 +154,12 @@ def _chat_openai(system: str, user: str) -> str:
         timeout=TIMEOUT,
     )
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    data = r.json()
+    usage = data.get("usage") or {}
+    return data["choices"][0]["message"]["content"], {
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "antwort_tokens": usage.get("completion_tokens"),
+    }
 
 
 def ollama_payload(system: str, user: str) -> dict:
@@ -82,7 +169,13 @@ def ollama_payload(system: str, user: str) -> dict:
         "stream": False,
         # Ollamas Standardkontext (4096 Token) reicht für Lektionsmaterial plus
         # Lernverlauf nicht aus; zu viel wird sonst still abgeschnitten.
-        "options": {"num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "16384"))},
+        "options": {
+            "num_ctx": int(os.getenv("OLLAMA_NUM_CTX", "16384")),
+            # Obergrenze für die Antwortlänge. Der Tutor braucht selten mehr
+            # als 500 Token; die Grenze verhindert nur, dass ein Modell im
+            # Ausnahmefall minutenlang weiterschreibt.
+            "num_predict": int(os.getenv("OLLAMA_NUM_PREDICT", "1024")),
+        },
         # Modell im Speicher halten, damit es zwischen zwei Aufgaben nicht neu
         # geladen werden muss (Wartezeit im Unterricht).
         "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
@@ -102,7 +195,7 @@ def ollama_payload(system: str, user: str) -> dict:
     return payload
 
 
-def _chat_ollama(system: str, user: str) -> str:
+def _chat_ollama(system: str, user: str) -> tuple[str, dict]:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
     payload = ollama_payload(system, user)
     r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
@@ -112,10 +205,11 @@ def _chat_ollama(system: str, user: str) -> str:
         payload.pop("think")
         r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
     r.raise_for_status()
-    return r.json()["message"]["content"]
+    data = r.json()
+    return data["message"]["content"], _ollama_meta(data)
 
 
-def _chat_mock(system: str, user: str) -> str:
+def _mock_text(system: str, user: str) -> str:
     """Deterministischer Fake-Provider für Entwicklung und Demos ohne LLM."""
     if "EINSTUFUNGSFRAGEN" in user:
         return json.dumps({
@@ -187,6 +281,10 @@ def _chat_mock(system: str, user: str) -> str:
     return "{}"
 
 
+def _chat_mock(system: str, user: str) -> tuple[str, dict]:
+    return _mock_text(system, user), {}
+
+
 _PROVIDERS = {
     "anthropic": _chat_anthropic,
     "openai": _chat_openai,
@@ -216,9 +314,10 @@ def chat(system: str, user: str) -> str:
     fn = _PROVIDERS.get(name)
     if fn is None:
         raise LLMError(f"Unbekannter LLM_PROVIDER: {name}")
-    log.info("LLM-Request an Provider=%s", name)
     log.debug("SYSTEM: %s\nUSER: %s", system, user)
-    text = fn(system, user)
+    t0 = time.perf_counter()
+    text, meta = fn(system, user)
+    record_timing(_label(user), time.perf_counter() - t0, meta)
     log.debug("ANTWORT: %s", text)
     return strip_reasoning(text)
 

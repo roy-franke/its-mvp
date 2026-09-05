@@ -348,15 +348,41 @@ $("btn-assess").onclick = async () => {
 };
 
 // ---------- Lernschritte
-async function nextTask(adaptation) {
+//
+// Der nächste Schritt wird schon erzeugt, während der Lernende das Feedback
+// oder den Theorie-Text liest. Beim Klick auf «Weiter» liegt die Antwort des
+// Modells dann meist bereits vor, statt dass die Wartezeit erst dann beginnt.
+let pendingNext = null;
+
+function prefetchNext(adaptation) {
+  if (pendingNext) return;
   const q = adaptation ? "?adaptation=" + adaptation : "";
-  const d = await api(`/session/${sessionId}/next${q}`);
+  // Fehler hier nicht verschlucken, aber auch nicht sofort anzeigen: sie
+  // erreichen den Lernenden erst, wenn er wirklich weitergehen will.
+  pendingNext = api(`/session/${sessionId}/next${q}`)
+    .then(d => ({ data: d }), e => ({ error: e }));
+}
+
+async function nextTask(adaptation) {
+  let d;
+  if (pendingNext) {
+    const r = await pendingNext;
+    pendingNext = null;
+    if (r.error) throw r.error;
+    d = r.data;
+  } else {
+    const q = adaptation ? "?adaptation=" + adaptation : "";
+    d = await api(`/session/${sessionId}/next${q}`);
+  }
   if (d.done) { renderDone(d); return; }
   renderProgress(d.progress);
   const t = d.task;
   if (t.typ === "theorie") {
     addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor – Theorie");
     setTheoryMode();
+    // Auf Theorie folgt immer eine Aufgabe – die kann schon entstehen,
+    // während der Lernende die Erklärung liest.
+    prefetchNext();
   } else {
     addMsg("tutor", (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
     if (t.frage) addMsg("tutor question", "❓ " + t.frage, "Tutor");
@@ -420,6 +446,9 @@ async function submitAnswer(text, confidence) {
       $("btn-continue").textContent = d.finished ? "Zum Abschluss" : "Weiter";
       $("btn-continue").dataset.adaptation =
         d.adaption === "simplify" ? "simplify" : d.adaption === "advance" ? "advance" : "";
+      // Der Weg führt sicher weiter – den nächsten Schritt schon anstossen,
+      // während der Lernende das Feedback liest.
+      prefetchNext($("btn-continue").dataset.adaptation || undefined);
     }
   } catch (e) { alert(e.message); }
   setChatBusy(false);

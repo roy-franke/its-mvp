@@ -1,5 +1,6 @@
 """Tests für die Aufbereitung von LLM-Antworten."""
 
+from app import llm
 from app.llm import extract_json, ollama_payload, strip_reasoning
 
 
@@ -51,3 +52,47 @@ def test_kontextfenster_und_keep_alive(monkeypatch):
     assert p["options"]["num_ctx"] == 8192
     assert p["keep_alive"] == "10m"
     assert p["messages"][0] == {"role": "system", "content": "sys"}
+
+
+# ---------------------------------------------------------------- Zeitmessung
+
+def test_num_predict_begrenzt_antwortlaenge(monkeypatch):
+    monkeypatch.setenv("OLLAMA_NUM_PREDICT", "256")
+    assert ollama_payload("sys", "user")["options"]["num_predict"] == 256
+
+
+def test_schrittart_wird_aus_dem_prompt_gelesen():
+    assert llm._label("AUFGABE: ANTWORT_BEWERTEN\nAntwort: ...") == "ANTWORT_BEWERTEN"
+    assert llm._label("Antworte mit OK") == "SONSTIGES"
+
+
+def test_aufrufe_werden_gemessen():
+    llm.reset_timings()
+    llm.chat("sys", "AUFGABE: NAECHSTE_AUFGABE\nErzeuge Schritt 1")
+    llm.chat("sys", "AUFGABE: ANTWORT_BEWERTEN\nAntwort des Lernenden: ausführlich genug")
+    eintraege = llm.timings()
+    assert [e["schritt"] for e in eintraege] == ["NAECHSTE_AUFGABE", "ANTWORT_BEWERTEN"]
+    assert all(e["sekunden"] >= 0 for e in eintraege)
+
+
+def test_zusammenfassung_gruppiert_nach_schrittart():
+    llm.reset_timings()
+    llm.record_timing("THEORIE_SCHRITT", 10.0)
+    llm.record_timing("THEORIE_SCHRITT", 20.0)
+    llm.record_timing("ANTWORT_BEWERTEN", 4.0)
+    z = {r["schritt"]: r for r in llm.timing_summary()}
+    assert z["THEORIE_SCHRITT"]["anzahl"] == 2
+    assert z["THEORIE_SCHRITT"]["median_sekunden"] == 15.0
+    assert z["THEORIE_SCHRITT"]["max_sekunden"] == 20.0
+    # Der langsamste Schritt steht zuoberst
+    assert llm.timing_summary()[0]["schritt"] == "THEORIE_SCHRITT"
+
+
+def test_ollama_kennzahlen_werden_uebersetzt():
+    meta = llm._ollama_meta({
+        "prompt_eval_count": 3200, "prompt_eval_duration": 4_000_000_000,
+        "eval_count": 400, "eval_duration": 10_000_000_000,
+    })
+    assert meta["prompt_sekunden"] == 4.0
+    assert meta["antwort_sekunden"] == 10.0
+    assert meta["tokens_pro_sekunde"] == 40.0

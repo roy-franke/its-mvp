@@ -93,6 +93,37 @@ Fuer Qualitaetsvergleiche laesst er sich mit `OLLAMA_THINK=true` einschalten.
 Zugänge (API-Keys, GitHub-Token) stehen bewusst NICHT in diesem Dokument –
 die `.env` ist gitignored und wird pro Rechner neu erstellt.
 
+## 4b. Antwortzeiten im Dialog
+
+Die gefuehlte Wartezeit entsteht an drei Stellen, und nur eine davon ist das Modell selbst.
+
+**Messen zuerst.** Jeder LLM-Aufruf wird mitgeschrieben und erscheint im
+Lehrpersonen-Monitoring unter «Antwortzeiten des Sprachmodells» (Rohdaten unter
+`/api/teacher/timings`, nur im Arbeitsspeicher, nach einem Neustart leer). Interessant
+ist die Aufteilung in der Fussnote: Ist `prompt_sekunden` hoch, kostet die Verarbeitung
+des Lektionsmaterials; ist `tokens_pro_sekunde` niedrig, ist das Modell zu gross fuer
+die Maschine.
+
+**Wartezeit verstecken.** Das Frontend erzeugt den naechsten Schritt bereits, waehrend
+der Lernende das Feedback oder den Theorie-Text liest (`prefetchNext` in `index.html`).
+Beim Klick auf «Weiter» liegt die Antwort meist schon vor. Nach einer Nachbesserung
+(`retry`) wird bewusst nicht vorgeladen, weil dort offen ist, wie es weitergeht.
+
+Nebenwirkung: Waehrend die Vorab-Anfrage laeuft, stellt sich eine Verstaendnisfrage bei
+`OLLAMA_NUM_PARALLEL=1` hinten an. Mit `OLLAMA_NUM_PARALLEL=2` laufen beide gleichzeitig,
+zum Preis eines zweiten Kontextfensters im Speicher — auf a9-mega mit 64 GB unproblematisch.
+
+**Systemprompt nicht pro Schrittart kuerzen.** Ollama behaelt den gemeinsamen Anfang
+einer Anfrage im Cache. Weil `_system_prompt` fuer alle Schritte derselben Lektion
+identisch ist, faellt die Verarbeitung des Materials nur beim ersten Aufruf einer Session
+richtig ins Gewicht. Wer das Material je nach Schritt beschneidet, zerstoert genau diesen
+Effekt und macht es insgesamt langsamer.
+
+**Weitere Stellschrauben**, falls die Messung zeigt, dass es am Modell liegt:
+`OLLAMA_NUM_PREDICT` begrenzt Ausreisser nach oben, `OLLAMA_FLASH_ATTENTION=1` und
+`OLLAMA_KV_CACHE_TYPE=q8_0` verkleinern den Speicherbedarf des Kontextfensters, und erst
+danach lohnt sich der Versuch mit einem kleineren Modell.
+
 ## 5. Bekannte Stolpersteine (alle schon erlebt)
 
 - `.env` wird nur beim Serverstart gelesen; nach Änderungen uvicorn neu starten.

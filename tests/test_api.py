@@ -225,3 +225,13 @@ def test_teacher_uebersicht():
     _start()
     rows = client.get("/api/teacher/sessions").json()
     assert rows and {"session_id", "name", "phase", "step", "level"} <= set(rows[0])
+
+
+def test_timings_endpunkt_liefert_zusammenfassung():
+    from app import llm
+    llm.reset_timings()
+    client.post("/api/session/start", json={"name": "Messung"})
+    d = client.get("/api/teacher/timings").json()
+    assert d["provider"] == "mock"
+    assert any(z["schritt"] == "EINSTUFUNGSFRAGEN" for z in d["zusammenfassung"])
+    assert d["letzte"][0]["schritt"] == "EINSTUFUNGSFRAGEN"

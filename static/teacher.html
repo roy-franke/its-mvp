@@ -68,6 +68,25 @@
     <p class="muted" id="empty" style="display:none">Noch keine Sessions vorhanden.</p>
   </div>
 
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <strong>Antwortzeiten des Sprachmodells</strong>
+      <span>
+        <span class="muted" id="timing-model" style="font-size:.8rem;margin-right:10px"></span>
+        <button class="small" onclick="loadTimings()">Aktualisieren</button>
+      </span>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Schritt</th><th>Aufrufe</th><th>Median</th><th>Langsamster</th>
+      </tr></thead>
+      <tbody id="timing-rows"></tbody>
+    </table>
+    <p class="muted" id="timing-empty" style="display:none">
+      Noch keine Aufrufe seit dem letzten Serverstart.</p>
+    <p class="muted" id="timing-last" style="font-size:.8rem;margin-bottom:0"></p>
+  </div>
+
   <div class="card" id="detail" style="display:none">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <strong id="detail-title"></strong>
@@ -149,8 +168,42 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,
     c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
+// ---------- Antwortzeiten: zeigt, wo die Wartezeit im Dialog entsteht
+const SCHRITT = {
+  EINSTUFUNGSFRAGEN: "Einstufungsfragen", EINSTUFUNG_BEWERTEN: "Einstufung bewerten",
+  THEORIE_SCHRITT: "Theorie", NAECHSTE_AUFGABE: "Nächste Aufgabe",
+  ANTWORT_BEWERTEN: "Antwort bewerten", FRAGE_BEANTWORTEN: "Verständnisfrage",
+  ABSCHLUSS: "Abschluss", LERNZIELE_VORSCHLAGEN: "Lernziele vorschlagen",
+};
+
+async function loadTimings() {
+  const r = await fetch("/api/teacher/timings");
+  if (r.status === 401) { location.href = "/teacher/login"; return; }
+  const d = await r.json();
+  document.getElementById("timing-model").textContent = `${d.provider} · ${d.modell}`;
+  const rows = d.zusammenfassung || [];
+  document.getElementById("timing-empty").style.display = rows.length ? "none" : "block";
+  document.getElementById("timing-rows").innerHTML = rows.map(z => `
+    <tr>
+      <td>${esc(SCHRITT[z.schritt] || z.schritt)}</td>
+      <td class="muted">${z.anzahl}</td>
+      <td><strong>${z.median_sekunden} s</strong></td>
+      <td class="muted">${z.max_sekunden} s</td>
+    </tr>`).join("");
+  const l = (d.letzte || [])[0];
+  document.getElementById("timing-last").textContent = l
+    ? `Zuletzt: ${SCHRITT[l.schritt] || l.schritt} in ${l.sekunden} s` +
+      (l.prompt_tokens ? `, ${l.prompt_tokens} Token Prompt` : "") +
+      (l.prompt_sekunden != null ? ` (${l.prompt_sekunden} s Verarbeitung)` : "") +
+      (l.antwort_tokens ? `, ${l.antwort_tokens} Token Antwort` : "") +
+      (l.tokens_pro_sekunde ? ` mit ${l.tokens_pro_sekunde} Token/s` : "")
+    : "";
+}
+
 loadSessions();
+loadTimings();
 setInterval(loadSessions, 15000);
+setInterval(loadTimings, 15000);
 </script>
 </body>
 </html>

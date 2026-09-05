@@ -443,6 +443,21 @@ def info():
             "lessons": [p.stem for p in sorted(LESSONS_DIR.glob('*.json'))]}
 
 
+@app.get("/api/teacher/timings", dependencies=[Depends(auth.require_teacher)])
+def teacher_timings():
+    """Antwortzeiten der letzten LLM-Aufrufe – Grundlage für Optimierungen.
+
+    Die Werte liegen nur im Arbeitsspeicher und sind nach einem Neustart weg.
+    Für die Frage «wo gehen die Sekunden hin» genügt das.
+    """
+    return {
+        "provider": llm.provider_name(),
+        "modell": llm.current_model(),
+        "zusammenfassung": llm.timing_summary(),
+        "letzte": list(reversed(llm.timings()))[:20],
+    }
+
+
 @app.get("/api/llm-test")
 def llm_test():
     """Diagnose: Testet die Verbindung zum konfigurierten LLM und zeigt Fehler an."""
