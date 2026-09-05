@@ -25,14 +25,52 @@
            padding:10px 18px; font:inherit; font-weight:600; cursor:pointer; }
   button:disabled { opacity:.5; cursor:wait; }
   button.secondary { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  button.danger { background:#fff; color:#dc2626; border:1px solid #fca5a5; }
+  button.small { padding:6px 12px; font-size:.85rem; }
   .btnrow { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
   .spinner { color:var(--muted); font-size:.9rem; }
   .success { border-left:4px solid var(--ok); background:#f0fdf4; padding:14px;
              border-radius:0 8px 8px 0; margin-top:14px; }
   .error { border-left:4px solid #dc2626; background:#fef2f2; padding:14px;
            border-radius:0 8px 8px 0; margin-top:14px; }
-  .hidden { display:none; }
+  .hidden { display:none !important; }
   .charcount { font-size:.78rem; color:var(--muted); text-align:right; margin-top:4px; }
+
+  /* Quellenliste */
+  .dropzone { border:2px dashed var(--border); border-radius:10px; padding:22px 16px;
+              text-align:center; color:var(--muted); font-size:.9rem; background:#fbfcfd; }
+  .dropzone.over { border-color:var(--accent); background:#eff6ff; color:var(--accent); }
+  .sources { list-style:none; margin:12px 0 0; padding:0; border:1px solid var(--border);
+             border-radius:10px; overflow:hidden; }
+  .sources li { display:flex; align-items:center; gap:10px; padding:10px 12px;
+                border-top:1px solid var(--border); background:#fff; }
+  .sources li:first-child { border-top:0; }
+  .sources li.checked { background:#eff6ff; }
+  .sources input[type=checkbox] { width:16px; height:16px; flex:none; cursor:pointer; }
+  .src-icon { flex:none; font-size:1.1rem; }
+  .src-main { flex:1 1 auto; min-width:0; }
+  .src-name { font-weight:600; font-size:.92rem; overflow:hidden; text-overflow:ellipsis;
+              white-space:nowrap; }
+  .src-meta { color:var(--muted); font-size:.78rem; margin-top:2px; }
+  .src-actions { flex:none; display:flex; gap:6px; align-items:center; }
+  .linkbtn { background:none; border:0; color:var(--muted); font:inherit; font-size:.8rem;
+             padding:4px 6px; cursor:pointer; text-decoration:underline; font-weight:400; }
+  .linkbtn:hover { color:var(--accent); }
+  .remove { background:none; border:0; color:#94a3b8; font-size:1.2rem; line-height:1;
+            padding:2px 8px; cursor:pointer; font-weight:400; }
+  .remove:hover { color:#dc2626; }
+  .preview { margin:0 12px 12px; padding:10px 12px; background:#f8fafc; border-radius:8px;
+             font-size:.8rem; color:var(--muted); white-space:pre-wrap; max-height:180px;
+             overflow:auto; border:1px solid var(--border); }
+  .listbar { display:flex; justify-content:space-between; align-items:center;
+             gap:10px; flex-wrap:wrap; margin-top:10px; font-size:.85rem; color:var(--muted); }
+  .empty { color:var(--muted); font-size:.88rem; margin-top:10px; }
+  details.paste { margin-top:14px; }
+  details.paste > summary { cursor:pointer; color:var(--accent); font-size:.88rem;
+                            font-weight:600; list-style:none; }
+  details.paste > summary::-webkit-details-marker { display:none; }
+  details.paste > summary::before { content:"▸ "; }
+  details.paste[open] > summary::before { content:"▾ "; }
 </style>
 </head>
 <body>
@@ -43,14 +81,33 @@
   </header>
 
   <div class="card">
-    <label>1. Lernmaterial <span class="sub">– Text einfügen oder Datei hochladen (PDF, Word, Text)</span></label>
-    <textarea id="material" rows="12" placeholder="Unterrichtsmaterial hier einfügen …"></textarea>
-    <div class="charcount"><span id="chars">0</span> Zeichen</div>
-    <div class="btnrow">
-      <input type="file" id="file" accept=".pdf,.docx,.txt,.md" class="hidden">
-      <button class="secondary" onclick="document.getElementById('file').click()">📄 Datei hochladen</button>
-      <span class="spinner hidden" id="file-spinner">Text wird extrahiert …</span>
+    <label>1. Lernmaterial <span class="sub">– Dateien hochladen (PDF, Word, Text) oder Text einfügen</span></label>
+
+    <div class="dropzone" id="dropzone">
+      Dateien hierhin ziehen oder
+      <button class="secondary small" id="btn-upload" style="margin-left:4px">📄 Datei auswählen</button>
+      <div style="margin-top:6px; font-size:.8rem">PDF, Word (.docx), Text (.txt, .md) · max. 10 MB pro Datei</div>
+      <input type="file" id="file" accept=".pdf,.docx,.txt,.md" multiple class="hidden">
     </div>
+    <div class="btnrow"><span class="spinner hidden" id="file-spinner">Datei wird eingelesen …</span></div>
+
+    <ul class="sources hidden" id="source-list"></ul>
+    <p class="empty" id="source-empty">Noch keine Quellen hochgeladen.</p>
+    <div class="listbar hidden" id="listbar">
+      <span id="source-summary"></span>
+      <span>
+        <button class="linkbtn" id="btn-all">Alle markieren</button>
+        <button class="linkbtn" id="btn-none">Auswahl aufheben</button>
+        <button class="danger small" id="btn-remove" disabled>Markierte entfernen</button>
+      </span>
+    </div>
+
+    <details class="paste" id="paste-box">
+      <summary>Zusätzlichen Text direkt einfügen</summary>
+      <textarea id="material" rows="8" style="margin-top:8px"
+        placeholder="Optional: Text hier einfügen, wenn er nicht als Datei vorliegt …"></textarea>
+      <div class="charcount"><span id="chars">0</span> Zeichen</div>
+    </details>
 
     <label>2. Titel und Lernziele
       <span class="sub">– selbst schreiben oder von der KI vorschlagen lassen</span></label>
@@ -77,32 +134,157 @@
 <script>
 const $ = id => document.getElementById(id);
 
+/* ---------------------------------------------------------- Quellenverwaltung */
+let sources = [];          // { uid, name, chars, text, checked, open }
+let uidCounter = 0;
+
+function icon(name) {
+  const n = name.toLowerCase();
+  if (n.endsWith(".pdf")) return "📕";
+  if (n.endsWith(".docx")) return "📘";
+  return "📄";
+}
+
+function renderSources() {
+  const list = $("source-list");
+  list.innerHTML = "";
+  const has = sources.length > 0;
+  list.classList.toggle("hidden", !has);
+  $("listbar").classList.toggle("hidden", !has);
+  $("source-empty").classList.toggle("hidden", has);
+
+  for (const s of sources) {
+    const li = document.createElement("li");
+    li.className = s.checked ? "checked" : "";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = s.checked;
+    cb.title = "Zum Entfernen markieren";
+    cb.onchange = () => { s.checked = cb.checked; renderSources(); };
+
+    const ic = document.createElement("span");
+    ic.className = "src-icon";
+    ic.textContent = icon(s.name);
+
+    const main = document.createElement("div");
+    main.className = "src-main";
+    const nm = document.createElement("div");
+    nm.className = "src-name";
+    nm.textContent = s.name;
+    nm.title = s.name;
+    const meta = document.createElement("div");
+    meta.className = "src-meta";
+    meta.textContent = `${s.chars.toLocaleString("de-CH")} Zeichen erkannt`;
+    main.append(nm, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "src-actions";
+    const prev = document.createElement("button");
+    prev.className = "linkbtn";
+    prev.textContent = s.open ? "Vorschau schliessen" : "Vorschau";
+    prev.onclick = () => { s.open = !s.open; renderSources(); };
+    const del = document.createElement("button");
+    del.className = "remove";
+    del.textContent = "×";
+    del.title = "Diese Quelle entfernen";
+    del.onclick = () => { sources = sources.filter(x => x.uid !== s.uid); renderSources(); };
+    actions.append(prev, del);
+
+    li.append(cb, ic, main, actions);
+    list.append(li);
+
+    if (s.open) {
+      const pv = document.createElement("li");
+      pv.style.display = "block";
+      pv.style.padding = "0";
+      const box = document.createElement("div");
+      box.className = "preview";
+      box.style.margin = "12px";
+      box.textContent = s.text.slice(0, 1200) + (s.text.length > 1200 ? " …" : "");
+      pv.append(box);
+      list.append(pv);
+    }
+  }
+
+  const marked = sources.filter(s => s.checked).length;
+  const total = sources.reduce((n, s) => n + s.chars, 0);
+  $("source-summary").textContent =
+    `${sources.length} ${sources.length === 1 ? "Quelle" : "Quellen"} · ` +
+    `${total.toLocaleString("de-CH")} Zeichen` + (marked ? ` · ${marked} markiert` : "");
+  $("btn-remove").disabled = marked === 0;
+}
+
+$("btn-all").onclick = () => { sources.forEach(s => s.checked = true); renderSources(); };
+$("btn-none").onclick = () => { sources.forEach(s => s.checked = false); renderSources(); };
+$("btn-remove").onclick = () => {
+  const n = sources.filter(s => s.checked).length;
+  sources = sources.filter(s => !s.checked);
+  renderSources();
+  showResult("success", `${n} ${n === 1 ? "Quelle" : "Quellen"} entfernt.`);
+};
+
+/* ------------------------------------------------------------------- Upload */
+$("btn-upload").onclick = () => $("file").click();
+$("file").addEventListener("change", () => { handleFiles($("file").files); $("file").value = ""; });
+
+const dz = $("dropzone");
+["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.add("over");
+}));
+["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => {
+  e.preventDefault(); dz.classList.remove("over");
+}));
+dz.addEventListener("drop", e => handleFiles(e.dataTransfer.files));
+
+async function handleFiles(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  $("file-spinner").classList.remove("hidden");
+  const ok = [], failed = [];
+  for (const f of files) {
+    if (sources.some(s => s.name === f.name)) { failed.push(`${f.name}: bereits vorhanden`); continue; }
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const r = await fetch("/api/teacher/lessons/extract", { method: "POST", body: fd });
+      if (r.status === 401) { location.href = "/teacher/login"; return; }
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || "Einlesen fehlgeschlagen");
+      sources.push({ uid: ++uidCounter, name: f.name, chars: d.chars, text: d.text,
+                     checked: false, open: false });
+      ok.push(f.name);
+    } catch (e) { failed.push(`${f.name}: ${e.message}`); }
+  }
+  $("file-spinner").classList.add("hidden");
+  renderSources();
+  if (ok.length && !failed.length) {
+    showResult("success", `${ok.length === 1 ? "Quelle" : ok.length + " Quellen"} hinzugefügt: ${esc(ok.join(", "))}`);
+  } else if (failed.length) {
+    showResult(ok.length ? "success" : "error",
+      (ok.length ? `Hinzugefügt: ${esc(ok.join(", "))}<br>` : "") +
+      `Nicht übernommen:<br>${failed.map(esc).join("<br>")}`);
+  }
+}
+
+/* ------------------------------------------------------------- Materialtext */
 $("material").addEventListener("input", () =>
   $("chars").textContent = $("material").value.length);
 
-$("file").addEventListener("change", async () => {
-  const f = $("file").files[0];
-  if (!f) return;
-  $("file-spinner").classList.remove("hidden");
-  try {
-    const fd = new FormData();
-    fd.append("file", f);
-    const r = await fetch("/api/teacher/lessons/extract", { method: "POST", body: fd });
-    const d = await r.json();
-    if (r.status === 401) { location.href = "/teacher/login"; return; }
-    if (!r.ok) throw new Error(d.detail || "Extraktion fehlgeschlagen");
-    const cur = $("material").value.trim();
-    $("material").value = (cur ? cur + "\n\n" : "") + d.text;
-    $("chars").textContent = $("material").value.length;
-    showResult("success", `Text aus «${f.name}» übernommen (${d.chars} Zeichen). Bitte kurz prüfen und ggf. kürzen.`);
-  } catch (e) { showResult("error", e.message); }
-  $("file-spinner").classList.add("hidden");
-  $("file").value = "";
-});
+function collectMaterial() {
+  const parts = sources.map(s => `### Quelle: ${s.name}\n\n${s.text}`);
+  const pasted = $("material").value.trim();
+  if (pasted) parts.push(pasted);
+  return parts.join("\n\n---\n\n").trim();
+}
 
+/* -------------------------------------------------------------------- Aktionen */
 $("btn-suggest").onclick = async () => {
-  const material = $("material").value.trim();
-  if (material.length < 100) { showResult("error", "Zuerst Material einfügen (mindestens 100 Zeichen)."); return; }
+  const material = collectMaterial();
+  if (material.length < 100) {
+    showResult("error", "Zuerst mindestens eine Datei hochladen oder Text einfügen (mindestens 100 Zeichen).");
+    return;
+  }
   $("btn-suggest").disabled = true; $("suggest-spinner").classList.remove("hidden");
   try {
     const r = await fetch("/api/teacher/lessons/suggest-goals", {
@@ -120,11 +302,17 @@ $("btn-suggest").onclick = async () => {
 };
 
 $("btn-save").onclick = async () => {
+  const material = collectMaterial();
+  if (material.length < 100) {
+    showResult("error", "Zuerst mindestens eine Datei hochladen oder Text einfügen (mindestens 100 Zeichen).");
+    return;
+  }
   const body = {
     titel: $("titel").value.trim(),
     lernziele: $("ziele").value.split("\n").map(z => z.trim()).filter(Boolean),
-    material: $("material").value.trim(),
+    material,
     tutor_hinweise: $("hinweise").value.trim(),
+    quellen: sources.map(s => ({ name: s.name, chars: s.chars })),
   };
   $("btn-save").disabled = true; $("save-spinner").classList.remove("hidden");
   try {
@@ -150,6 +338,8 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,
     c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
+
+renderSources();
 </script>
 </body>
 </html>

@@ -86,6 +86,36 @@ def test_lernziele_vorschlag():
     assert d["titel"] and len(d["lernziele"]) >= 3
 
 
+def test_quellen_werden_gespeichert():
+    r = client.post("/api/teacher/lessons", json={
+        "titel": "Lektion mit Quellen",
+        "lernziele": ["Ziel"],
+        "material": MATERIAL,
+        "quellen": [{"name": "skript.pdf", "chars": 1200},
+                    {"name": "notizen.docx", "chars": 340}],
+    })
+    assert r.status_code == 200
+    lesson_id = r.json()["id"]
+    try:
+        data = json.loads((LESSONS_DIR / f"{lesson_id}.json").read_text(encoding="utf-8"))
+        assert [q["name"] for q in data["quellen"]] == ["skript.pdf", "notizen.docx"]
+        assert data["quellen"][0]["chars"] == 1200
+    finally:
+        _cleanup(lesson_id)
+
+
+def test_quellen_sind_optional():
+    r = client.post("/api/teacher/lessons", json={
+        "titel": "Lektion ohne Quellen", "lernziele": ["Ziel"], "material": MATERIAL})
+    assert r.status_code == 200
+    lesson_id = r.json()["id"]
+    try:
+        data = json.loads((LESSONS_DIR / f"{lesson_id}.json").read_text(encoding="utf-8"))
+        assert data["quellen"] == []
+    finally:
+        _cleanup(lesson_id)
+
+
 def test_text_extraktion_txt():
     r = client.post("/api/teacher/lessons/extract",
                     files={"file": ("material.txt", io.BytesIO(MATERIAL.encode()), "text/plain")})

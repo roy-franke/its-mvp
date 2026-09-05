@@ -77,11 +77,18 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class LessonSource(BaseModel):
+    """Eine hochgeladene Quelldatei – nur Metadaten, der Text steckt in `material`."""
+    name: str
+    chars: int = 0
+
+
 class LessonCreateRequest(BaseModel):
     titel: str
     lernziele: list[str]
     material: str
     tutor_hinweise: str = ""
+    quellen: list[LessonSource] = []
 
 
 class SuggestGoalsRequest(BaseModel):
@@ -123,6 +130,7 @@ def lesson_create(req: LessonCreateRequest):
         "titel": titel,
         "lernziele": ziele,
         "material": material,
+        "quellen": [{"name": q.name, "chars": q.chars} for q in req.quellen],
         "tutor_hinweise": req.tutor_hinweise.strip(),
         "einstufungsfragen_fallback": [
             "Was weisst du bereits zu diesem Thema? Beschreibe es in eigenen Worten.",
