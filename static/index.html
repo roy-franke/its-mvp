@@ -101,6 +101,12 @@
                 font: inherit; margin-top: 4px; background: #fff; }
   label { display: block; font-weight: 600; margin-top: 12px; }
 
+  .levelbox { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: .85rem; flex-wrap: wrap; }
+  .levelbox label { margin: 0; font-weight: 600; }
+  .levelbox select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; font: inherit;
+                     background: #fff; }
+  .levelq { align-self: stretch; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 12px;
+            padding: 10px 14px; font-size: .9rem; }
   .seqbar { display: flex; justify-content: flex-end; gap: 8px; margin: -8px 0 10px; flex-wrap: wrap; }
   button.danger { background: #fff; color: var(--err); border: 1px solid #fca5a5; }
   .banner { border-left: 4px solid var(--ok); background: #f0fdf4; padding: 10px 14px;
@@ -203,6 +209,17 @@
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
         <strong id="prog-text"></strong>
         <span class="muted" id="prog-level"></span>
+      </div>
+      <!-- Niveau selbst steuern (D-04) -->
+      <div id="level-box" class="levelbox">
+        <label for="level-control">Niveau</label>
+        <select id="level-control" class="action-select">
+          <option value="auto">automatisch anpassen</option>
+          <option value="basic">Grundlagen festhalten</option>
+          <option value="intermediate">Fortgeschritten festhalten</option>
+          <option value="advanced">Vertieft festhalten</option>
+        </select>
+        <span class="muted" id="level-fix" style="font-size:.8rem"></span>
       </div>
       <div class="progressbar"><div id="prog-fill"></div></div>
       <div class="badges" id="prog-badges"></div>
@@ -384,7 +401,7 @@ function hideWaiting() {
 function setChatBusy(on) {
   busy = on;
   if (on) showWaiting(); else hideWaiting();
-  document.querySelectorAll("#view-learn button.action, #confidence-buttons button")
+  document.querySelectorAll("#view-learn button.action, #view-learn select.action-select, #confidence-buttons button")
     .forEach(b => { b.disabled = on; });
   if (!on) $("btn-answer").disabled = !answerEnabled;
 }
@@ -743,6 +760,7 @@ async function submitAnswer(text, confidence) {
       return;
     }
     renderFeedback(d);
+    if (d.niveau_frage) addLevelQuestion(d.niveau_frage);
     if (d.adaption === "retry") {
       setAnswerMode(true);
       $("chat-input").focus();
@@ -772,9 +790,49 @@ async function sendChat(text, art) {
       addMsg("tutor", d.antwort, "Tutor");
     }
     if (d.angebot === "allgemeinwissen") addOffer();
+    if (d.progress) { renderProgress(d.progress); pendingNext = null; }
   } catch (e) { addError(e); }
   finally { setChatBusy(false); }
 }
+
+// ---------- Niveau (D-04): keine Erhöhung ohne Zustimmung
+function addLevelQuestion(text) {
+  const box = document.createElement("div");
+  box.className = "levelq";
+  box.innerHTML = `<div>🎯 ${esc(text)}</div><div class="btnrow" style="margin-top:8px">
+    <button class="small action" data-a="hoeher_ja">Ja, gerne</button>
+    <button class="small secondary action" data-a="hoeher_nein">Lieber so bleiben</button></div>`;
+  box.onclick = async e => {
+    const a = e.target.dataset && e.target.dataset.a;
+    if (!a || busy) return;
+    setChatBusy(true);
+    try {
+      const d = await api(`/session/${sessionId}/niveau`, { aktion: a });
+      box.remove();
+      renderProgress(d.progress);
+      addNote(a === "hoeher_ja" ? (d.hinweis || "Die nächsten Aufgaben werden anspruchsvoller.")
+                                : "Alles klar, wir bleiben auf diesem Niveau.");
+      pendingNext = null;   // vorbereiteter Schritt passt nicht mehr zum Niveau
+    } catch (err) { addError(err); }
+    finally { setChatBusy(false); }
+  };
+  $("chat").insertBefore(box, $("waiting"));
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+$("level-control").onchange = async () => {
+  if (busy) return;
+  const v = $("level-control").value;
+  setChatBusy(true);
+  try {
+    const d = await api(`/session/${sessionId}/niveau`,
+      v === "auto" ? { aktion: "automatisch" } : { aktion: "festhalten", level: v });
+    renderProgress(d.progress);
+    addNote(d.hinweis || "Niveau angepasst.");
+    pendingNext = null;
+  } catch (err) { addError(err); }
+  finally { setChatBusy(false); }
+};
 
 // Angebot nach ausgeschöpftem Material: Erklärung aus Allgemeinwissen
 function addOffer() {
@@ -821,6 +879,11 @@ $("chat-input").addEventListener("keydown", e => {
 });
 
 function renderProgress(p) {
+  // Niveausteuerung: bei «fix» durch die Lehrperson nur Anzeige
+  const fix = p.niveauanpassung === "fix";
+  $("level-control").classList.toggle("hidden", fix);
+  $("level-control").value = p.niveau_fixiert ? p.level : "auto";
+  $("level-fix").textContent = fix ? "Deine Lehrperson hat das Niveau für diese Lektion festgelegt." : "";
   $("prog-text").textContent = `${currentLessonTitle ? currentLessonTitle + " · " : ""}Schritt ${Math.min(p.step + 1, p.total_steps)} von ${p.total_steps}`;
   $("prog-level").textContent = `Niveau: ${p.level_label}`;
   $("prog-fill").style.width = (100 * p.step / p.total_steps) + "%";

@@ -412,6 +412,43 @@ def t07_lektionen(pw):
         check("T-07 AK2 gelöschte Lektion nicht mehr in der Auswahl", lid not in ids)
 
 
+def beantworte(page, text: str, sicherheit: int | None = 7):
+    page.fill("#chat-input", text)
+    page.click("#btn-answer")
+    if sicherheit and page.locator("#confidence-box").is_visible():
+        page.click(f"#confidence-buttons button[data-v='{sicherheit}']")
+    page.wait_for_selector("#waiting", state="detached", timeout=30000)
+
+
+GUT = "Anna haftet, weil Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden vorliegen."
+
+
+@scenario("d04")
+def d04_niveau(pw):
+    """D-04: Frage nach drei richtigen Antworten, Niveau selbst festhalten, Chat-Wunsch."""
+    with server(ITS_TOTAL_STEPS="8") as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Nina")
+        for _ in range(3):
+            zur_aufgabe(page)
+            beantworte(page, GUT)
+            check("D-04 Niveau bleibt ohne Zustimmung", "Fortgeschritten" in page.inner_text("#prog-level"))
+        frage = page.locator(".levelq")
+        expect(frage).to_be_visible()
+        check("D-04 Frage nach anspruchsvolleren Aufgaben", "anspruchsvollere" in frage.inner_text())
+        frage.locator("button[data-a='hoeher_ja']").click()
+        expect(page.locator("#prog-level")).to_contain_text("Vertieft", timeout=10000)
+        check("D-04 «Ja, gerne» erhöht um eine Stufe", True)
+        page.select_option("#level-control", "basic")
+        expect(page.locator("#prog-level")).to_contain_text("Grundlagen", timeout=10000)
+        check("D-04 Bedienelement hält das Niveau fest", page.input_value("#level-control") == "basic")
+        page.fill("#chat-input", "Ich möchte auf dem Grundniveau bleiben.")
+        page.click("#btn-ask")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("D-04 Chat-Wunsch wird bestätigt",
+              "bleiben auf dem Niveau" in page.locator(".msg.tutor").last.inner_text())
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

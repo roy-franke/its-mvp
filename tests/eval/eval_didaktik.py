@@ -313,6 +313,52 @@ def eval_d03(b: Bericht, anzahl: int):
            f"{zitat(genauer.get('antwort'), 900)}\n")
 
 
+# ---------------------------------------------------------------- D-04
+
+@paket("D-04")
+def eval_d04(b: Bericht, anzahl: int):
+    """Niveauwunsch im Chat wird erkannt, bestätigt und hält."""
+    b.abschnitt("D-04 Niveausteuerung",
+                "Der Niveauwunsch wird im Chat geäussert. Neben dem Satz aus dem Auftrag "
+                "werden Umschreibungen getestet, die der feste Mustervergleich nicht kennt; dort "
+                "zählt allein die Einordnung durch das Modell.")
+    c = client()
+    saetze = ["Ich möchte auf dem Grundniveau bleiben.",
+              "Bitte nicht schwieriger machen, ich bin bei dem Thema noch Anfängerin.",
+              "Können wir beim einfachsten Level bleiben?"]
+    for i, satz in enumerate(saetze):
+        c.post("/api/learner/login", json={"name": f"Eval D04 {i}"})
+        sid = c.post("/api/session/start", json={"lesson_id": HAFTUNG, "neu_beginnen": True}).json()["session_id"]
+        c.post(f"/api/session/{sid}/assess", json={"answers": [
+            "Wer einen Schaden verursacht, muss ihn ersetzen, wenn er schuld ist.",
+            "Der Velofahrer haftet, weil er fahrlässig war.",
+            "Bei der Kausalhaftung braucht es kein Verschulden."]})
+        c.post(f"/api/session/{sid}/niveau", json={"aktion": "festhalten", "level": "intermediate"})
+        c.post(f"/api/session/{sid}/niveau", json={"aktion": "automatisch"})
+        c.post(f"/api/session/{sid}/next")
+        r = c.post(f"/api/session/{sid}/chat", json={"message": satz}).json()
+        levels = []
+        for _ in range(3):
+            t = c.post(f"/api/session/{sid}/next").json()
+            if t.get("done"):
+                break
+            levels.append(t["progress"]["level"])
+            if t["task"]["typ"] == "aufgabe":
+                c.post(f"/api/session/{sid}/answer", json={"answer": "weiss nicht"})
+                c.post(f"/api/session/{sid}/answer", json={"answer": "weiss nicht"})
+        events = c.get(f"/api/teacher/sessions/{sid}").json()["events"]
+        wunsch = [e["payload"] for e in events if e["type"] == "niveau_wunsch"]
+        ziel = wunsch[0]["nach"] if wunsch else None
+        if i == 0:
+            ok = ziel == "basic" and set(levels) <= {"basic"}
+            name = "AK 2 Satz aus dem Auftrag: erkannt, bestätigt, bleibt basic"
+        else:
+            ok = ziel is not None and set(levels) <= {ziel}
+            name = f"Umschreibung {i}: erkannt, Niveau bleibt danach gleich"
+        b.ak("D-04", name, ok, f"Wunsch → {ziel or 'nicht erkannt'}; Levels danach: {', '.join(levels) or '–'}")
+        b.text(f"- «{satz}» → {zitat(r.get('antwort'), 300)[2:]}")
+
+
 # ---------------------------------------------------------------- Ablauf
 
 def main():

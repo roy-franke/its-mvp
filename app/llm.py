@@ -318,6 +318,9 @@ def _mock_text(system: str, user: str) -> str:
             }, ensure_ascii=False)
         wunsch = re.search(r"Verständnisfrage:\s*(.+)", user)
         frage = (wunsch.group(1) if wunsch else "").lower()
+        if "grundniveau" in frage and "bleiben" in frage:
+            return json.dumps({"antwort": "Verstanden.", "konzept": "", "ausserhalb_material": False,
+                               "niveau_wunsch": "halten", "niveau_ziel": "basic"}, ensure_ascii=False)
         return json.dumps({
             "antwort": "Gute Frage! Die Verschuldenshaftung nach Art. 41 OR setzt Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden voraus. Überleg dir, welche dieser Voraussetzungen in der aktuellen Aufgabe zu prüfen sind. (Mock-Antwort – für echtes Tutoring LLM-Provider konfigurieren.)",
             "konzept": "", "ausserhalb_material": False,

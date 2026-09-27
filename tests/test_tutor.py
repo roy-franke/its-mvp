@@ -1,5 +1,7 @@
 """Tests für die ITS-Kernlogik (deterministisch, ohne LLM)."""
 
+import pytest
+
 from app import tutor
 from app.llm import extract_json
 
@@ -19,22 +21,117 @@ def test_richtig_geht_weiter():
     assert p["step"] == 1 and p["correct"] == 1 and p["streak"] == 1
 
 
-def test_zwei_richtige_erhoehen_level():
+def test_keine_erhoehung_ohne_zustimmung():
+    """D-04: Drei richtige Antworten zum gleichen Konzept lösen nur eine Frage aus."""
     p = _profile("basic")
-    tutor.adapt(p, "korrekt")
-    action, reason = tutor.adapt(p, "korrekt")
-    assert action == "advance"
-    assert p["level"] == "intermediate"
-    assert reason  # Adaption muss begründet werden
-    assert p["streak"] == 0  # Serie beginnt neu
+    for _ in range(3):
+        action, reason = tutor.adapt(p, "korrekt", {"konzept": "Bruch"})
+        assert action == "next"
+    assert p["level"] == "basic"
+    assert p["niveau_frage_offen"] is True
+    assert tutor.niveau_entscheid(p, "hoeher_ja", None, "automatisch")[0] == "intermediate"
+    assert p["level"] == "intermediate" and not p["niveau_frage_offen"]
 
 
-def test_hoechstes_level_bleibt():
+def test_konzeptwechsel_setzt_zaehlung_zurueck():
+    p = _profile("basic")
+    tutor.adapt(p, "korrekt", {"konzept": "A"})
+    tutor.adapt(p, "korrekt", {"konzept": "A"})
+    tutor.adapt(p, "korrekt", {"konzept": "B"})
+    assert not p.get("niveau_frage_offen") and p["serie"] == 1
+
+
+def test_lieber_so_bleiben():
+    p = _profile("basic")
+    for _ in range(3):
+        tutor.adapt(p, "korrekt", {"konzept": "A"})
+    assert tutor.niveau_entscheid(p, "hoeher_nein", None, "automatisch") is None
+    assert p["level"] == "basic" and not p["niveau_frage_offen"]
+    for _ in range(3):
+        tutor.adapt(p, "korrekt", {"konzept": "A"})
+    assert not p["niveau_frage_offen"]           # für dieses Konzept nicht nochmals fragen
+
+
+def test_hoechstes_level_fragt_nicht():
     p = _profile("advanced")
-    tutor.adapt(p, "korrekt")
-    action, _ = tutor.adapt(p, "korrekt")
-    assert action == "next"
-    assert p["level"] == "advanced"
+    for _ in range(3):
+        tutor.adapt(p, "korrekt", {"konzept": "A"})
+    assert not p.get("niveau_frage_offen") and p["level"] == "advanced"
+
+
+def test_nur_runter_und_fix_fragen_nie():
+    for modus in ("nur_runter", "fix"):
+        p = _profile("basic")
+        for _ in range(4):
+            tutor.adapt(p, "korrekt", {"konzept": "A", "niveauanpassung": modus})
+        assert not p.get("niveau_frage_offen"), modus
+
+
+def test_keine_senkung_nach_nur_einem_fehlversuch():
+    p = _profile("advanced")
+    action, _ = tutor.adapt(p, "falsch")
+    assert action == "retry" and p["level"] == "advanced"
+
+
+def test_teilweise_dann_falsch_senkt_nicht():
+    """Ursache aus dem Testlauf: teilweise und danach falsch zählte als zwei Fehler."""
+    p = _profile("intermediate")
+    tutor.adapt(p, "teilweise")
+    action, _ = tutor.adapt(p, "falsch")
+    assert action == "simplify" and p["level"] == "intermediate"
+
+
+def test_senkung_nur_um_eine_stufe():
+    p = _profile("advanced")
+    tutor.adapt(p, "falsch")
+    tutor.adapt(p, "falsch")
+    assert p["level"] == "intermediate"         # nie direkt auf basic
+    tutor.adapt(p, "falsch")
+    tutor.adapt(p, "falsch")
+    assert p["level"] == "basic"
+
+
+def test_festgehaltenes_niveau_bleibt():
+    p = _profile("intermediate")
+    tutor.niveau_entscheid(p, "festhalten", "intermediate", "automatisch")
+    for _ in range(2):
+        tutor.adapt(p, "falsch")
+    assert p["level"] == "intermediate"
+    for _ in range(3):
+        tutor.adapt(p, "korrekt", {"konzept": "A"})
+    assert p["level"] == "intermediate" and not p.get("niveau_frage_offen")
+    tutor.niveau_entscheid(p, "automatisch", None, "automatisch")
+    tutor.adapt(p, "falsch")
+    tutor.adapt(p, "falsch")
+    assert p["level"] == "basic"
+
+
+def test_fix_aendert_niveau_nie():
+    p = _profile("intermediate")
+    ctx = {"niveauanpassung": "fix", "konzept": "A"}
+    for b in ["falsch", "falsch", "korrekt", "korrekt", "korrekt", "korrekt", "falsch", "falsch"]:
+        tutor.adapt(p, b, ctx)
+    assert p["level"] == "intermediate"
+
+
+@pytest.mark.parametrize("text,erwartet", [
+    ("Ich möchte auf dem Grundniveau bleiben.", ("halten", "basic")),
+    ("Ich möchte aber lieber auf dem Grundniveau bleiben.", ("halten", "basic")),
+    ("Kannst du mir einfachere Aufgaben geben?", ("tiefer", None)),
+    ("Das ist mir zu einfach", ("hoeher", None)),
+    ("Was ist ein Bruch?", None),
+])
+def test_niveauwunsch_im_chat_erkennen(text, erwartet):
+    assert tutor.niveau_wunsch_erkennen(text) == erwartet
+
+
+def test_niveauwunsch_anwenden():
+    p = _profile("intermediate")
+    nach, text = tutor.niveau_wunsch_anwenden(p, "halten", "basic", "automatisch")
+    assert nach == "basic" and p["niveau_fixiert"] and "Grundlagen" in text
+    p = _profile("intermediate")
+    nach, text = tutor.niveau_wunsch_anwenden(p, "halten", "basic", "fix")
+    assert nach is None and p["level"] == "intermediate" and "fest" in text
 
 
 def test_erster_fehler_gibt_zweiten_versuch():

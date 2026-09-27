@@ -483,6 +483,7 @@ def next_step(sid: str, request: Request, adaptation: str | None = None,
         return {"vorabruf": False, "done": False}
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
+    _modus(profile, lesson)
     if profile["step"] >= tutor.total_steps():
         if prefetch:
             return {"vorabruf": True, "done": True}
@@ -587,8 +588,18 @@ def answer(sid: str, req: AnswerRequest, request: Request):
     kontext = {
         "einsatzart": _einsatzart(lesson),
         "konzept_erklaert": tutor.konzept_erklaert(task.get("konzept"), profile.get("erklaert") or []),
+        "niveauanpassung": _modus(profile, lesson),
+        "konzept": task.get("konzept") or "",
     }
+    level_vorher = profile["level"]
+    frage_vorher = bool(profile.get("niveau_frage_offen"))
     action, reason = tutor.adapt(profile, result["bewertung"], kontext)
+    _log_niveau(sid, level_vorher, profile["level"], "zweimal falsch bei derselben Aufgabe")
+    niveau_frage = None
+    if profile.get("niveau_frage_offen") and not frage_vorher:
+        niveau_frage = (f"Du hast drei Aufgaben zu «{task.get('konzept') or 'diesem Thema'}» in Folge "
+                        "richtig gelöst. Möchtest du anspruchsvollere Aufgaben?")
+        store.log_event(sid, "niveau_frage", {"konzept": task.get("konzept"), "level": profile["level"]})
     store.log_event(sid, "answer_evaluated", {
         "bewertung": result["bewertung"], "korrekt": result["korrekt"],
         "feedback": result.get("feedback", ""),
@@ -608,8 +619,9 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         "korrekt": result["korrekt"],
         "feedback": result.get("feedback", ""),
         "hinweis": result.get("hinweis", ""),
-        "adaption": action,           # next | advance | retry | simplify
+        "adaption": action,           # next | retry | simplify | explain
         "adaption_begruendung": reason,
+        "niveau_frage": niveau_frage,
         "finished": finished,
         "progress": _progress(profile),
     }
@@ -637,6 +649,29 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
     result = tutor.answer_question(lesson, profile, task, message, history, art, stufe)
     _log_llm_meta(sid, "FRAGE_BEANTWORTEN", result)
     antwort = result.get("antwort", "")
+    niveau = None
+    if art == "frage":
+        # D-04: Niveauwunsch im Chat. Das Modell ordnet ein, der Code setzt um;
+        # eindeutige Formulierungen erkennt zusätzlich ein fester Mustervergleich.
+        wunsch = result.get("niveau_wunsch")
+        ziel = result.get("niveau_ziel") if result.get("niveau_ziel") in tutor.LEVELS else None
+        if wunsch not in ("halten", "tiefer", "hoeher"):
+            wunsch = None
+        erkannt = tutor.niveau_wunsch_erkennen(message)
+        if not wunsch and erkannt:
+            wunsch, ziel = erkannt[0], ziel or erkannt[1]
+        elif erkannt and not ziel:
+            ziel = erkannt[1]
+        if wunsch:
+            profile = store.get_session(sid)["profile"]
+            von = profile["level"]
+            nach, bestaetigung = tutor.niveau_wunsch_anwenden(profile, wunsch, ziel, _modus(profile, lesson))
+            store.update_session(sid, profile=profile)
+            store.log_event(sid, "niveau_wunsch", {"text": message, "wunsch": wunsch, "ziel": ziel,
+                                                   "von": von, "nach": nach or von})
+            _log_niveau(sid, von, nach or von, "Wunsch der lernenden Person im Chat")
+            antwort = (antwort + "\n\n" if antwort else "") + bestaetigung
+            niveau = _progress(profile)
     ausserhalb = bool(result.get("ausserhalb_material")) and not result.get("_fallback")
     store.log_event(sid, "chat_reply", {
         "antwort": antwort, "art": art, "stufe": stufe, "konzept": result.get("konzept", ""),
@@ -646,7 +681,37 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
         if art in ("theorie", "genauer") and stufe and stufe < 3 else None,
     })
     return {"antwort": antwort, "ausserhalb_material": ausserhalb,
-            "angebot": result.get("angebot"), "stufe": stufe}
+            "angebot": result.get("angebot"), "stufe": stufe, "progress": niveau}
+
+
+class NiveauRequest(BaseModel):
+    aktion: str                 # hoeher_ja | hoeher_nein | festhalten | automatisch
+    level: str | None = None
+
+
+@app.post("/api/session/{sid}/niveau")
+def set_level(sid: str, req: NiveauRequest, request: Request):
+    """Niveau durch die lernende Person steuern (D-04): Antwort auf die Frage nach
+    anspruchsvolleren Aufgaben, Niveau festhalten oder wieder automatisch."""
+    s = _eigene(request, sid)
+    if s["status"] in ("abgebrochen", "archiviert"):
+        raise HTTPException(409, "Diese Lernsequenz ist beendet.")
+    lesson = load_lesson(s["lesson_id"])
+    profile = s["profile"]
+    modus = _modus(profile, lesson)
+    if req.aktion not in ("hoeher_ja", "hoeher_nein", "festhalten", "automatisch"):
+        raise HTTPException(400, "Unbekannte Aktion")
+    if modus == "fix" and req.aktion in ("festhalten", "automatisch"):
+        raise HTTPException(409, "Deine Lehrperson hat das Niveau für diese Lektion fest eingestellt.")
+    von = profile["level"]
+    ergebnis = tutor.niveau_entscheid(profile, req.aktion, req.level, modus)
+    store.update_session(sid, profile=profile)
+    store.log_event(sid, "niveau_entscheid", {"aktion": req.aktion, "level": req.level,
+                                              "von": von, "nach": profile["level"]})
+    grund = {"hoeher_ja": "Zustimmung zu anspruchsvolleren Aufgaben",
+             "festhalten": "von der lernenden Person festgelegt"}.get(req.aktion, "")
+    _log_niveau(sid, von, profile["level"], grund)
+    return {"progress": _progress(profile), "hinweis": ergebnis[1] if ergebnis else ""}
 
 
 @app.get("/api/session/{sid}/state")
@@ -664,6 +729,7 @@ def state(sid: str, request: Request):
 def _state(s: dict) -> dict:
     lesson = load_lesson(s["lesson_id"])
     p = s["profile"]
+    _modus(p, lesson)
     if s["phase"] == "assessment":
         wartet = "einstufung"
     elif s["phase"] == "finished":
@@ -789,7 +855,21 @@ def _progress(profile: dict) -> dict:
         "partial": profile.get("partial", 0),
         "confidence_avg": (round(sum(c) / len(c), 1)
                            if (c := profile.get("confidence", [])) else None),
+        "niveauanpassung": profile.get("niveauanpassung", "automatisch"),
+        "niveau_fixiert": bool(profile.get("niveau_fixiert")),
+        "niveau_frage_offen": bool(profile.get("niveau_frage_offen")),
     }
+
+
+def _modus(profile: dict, lesson: dict) -> str:
+    """Niveauanpassung der Lektion; im Profil gespiegelt für die Oberfläche."""
+    profile["niveauanpassung"] = einstellungen.settings(lesson)["niveauanpassung"]
+    return profile["niveauanpassung"]
+
+
+def _log_niveau(sid: str, von: str, nach: str, grund: str):
+    if von != nach:
+        store.log_event(sid, "niveau_geaendert", {"von": von, "nach": nach, "grund": grund})
 
 
 def _session(sid: str) -> dict:

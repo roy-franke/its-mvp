@@ -470,6 +470,14 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str) -> dic
     return data
 
 
+NIVEAU_EINORDNUNG = (
+    "Äussert der Lernende einen Wunsch zum Schwierigkeitsniveau (zum Beispiel «Ich möchte "
+    "auf dem Grundniveau bleiben» oder «Das ist mir zu schwer»), ordne ihn in niveau_wunsch "
+    "und niveau_ziel ein (basic = Grundlagen, intermediate = Fortgeschritten, advanced = "
+    "Vertieft). Die Umsetzung und Bestätigung übernimmt das System, bestätige den Wunsch "
+    "nicht selbst. Ohne Wunsch: niveau_wunsch keiner, niveau_ziel keins.\n")
+
+
 ESKALATION = {
     ("theorie", 1): "Bring einen NEUEN Zugang zum Konzept: eine andere Erklärung oder ein neues "
                     "Beispiel aus einem anderen Lebensbereich als bisher.",
@@ -573,8 +581,11 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
         f"Niveau des Lernenden: {profile['level']}.\n"
         f"Bisheriger Dialog (Kurzfassung): {_recent_history(history)}\n"
         f"{gezeigt}\n{auftrag}"
+        + (NIVEAU_EINORDNUNG if art == "frage" else "") +
         'Format: {"antwort": "...", "konzept": "worum es geht, 1-3 Worte", '
-        '"ausserhalb_material": false}',
+        '"ausserhalb_material": false'
+        + (', "niveau_wunsch": "keiner|halten|tiefer|hoeher", '
+           '"niveau_ziel": "basic|intermediate|advanced|keins"' if art == "frage" else "") + '}',
         fallback=dict(FALLBACK_TEXTE["frage"]),
         check=lambda d: (didaktik.pruefe_felder(d, ("antwort",))
                          or didaktik.defensiver_einstieg(d.get("antwort", ""))
@@ -745,42 +756,67 @@ def task_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dic
 
 # ---------------------------------------------------------------- Adaption
 
+SERIE_FUER_NIVEAUFRAGE = 3
+
+
 def adapt(profile: dict, bewertung: str, kontext: dict | None = None) -> tuple[str, str]:
     """Adaptive Kernlogik. Verändert das Profil und gibt (aktion, begruendung) zurück.
 
     Bewertung: 'korrekt' | 'teilweise' | 'falsch'
-    Aktionen:  'next' | 'advance' | 'retry' | 'simplify' | 'explain'
-    kontext:   einsatzart ('einfuehrung' | 'vertiefung') und konzept_erklaert
-               (wurde das Konzept der Aufgabe in dieser Sequenz schon erklärt?)
+    Aktionen:  'next' | 'retry' | 'simplify' | 'explain'
+    kontext:   einsatzart ('einfuehrung' | 'vertiefung'), konzept_erklaert (D-02),
+               niveauanpassung ('automatisch' | 'nur_runter' | 'fix') und konzept (D-04)
+
+    Niveausteuerung (D-04):
+    - Keine Erhöhung ohne Zustimmung: Nach drei richtigen Antworten in Folge zum
+      gleichen Konzept setzt die Logik profile['niveau_frage_offen']; die
+      lernende Person entscheidet (siehe niveau_entscheid). Beim Wechsel zu
+      einem neuen Konzept beginnt die Zählung neu.
+    - Senkung nur um eine Stufe und erst, wenn dieselbe Aufgabe auch im zweiten
+      Versuch falsch ist. «Teilweise» und danach «falsch» senkt nicht.
+    - «fix» und ein von der lernenden Person festgehaltenes Niveau haben
+      Vorrang: dann ändert sich das Niveau automatisch gar nicht.
     """
     k = kontext or {}
+    modus = k.get("niveauanpassung", "automatisch")
+    fixiert = bool(profile.get("niveau_fixiert"))
+    konzept = (k.get("konzept") or "").strip()
+    darf_runter = modus in ("automatisch", "nur_runter") and not fixiert
+    darf_fragen = modus == "automatisch" and not fixiert
+    versuche = profile.setdefault("versuche_aktuell", [])
+
     if (bewertung == "falsch" and k.get("einsatzart") == "vertiefung"
             and k.get("konzept_erklaert") is False):
         # D-02: In der Vertiefung darf eine Aufgabe Unerklärtes voraussetzen.
         # Eine falsche Antwort dazu führt zu einer Erklärung, nicht zu einer
         # Niveausenkung und nicht zu einem zweiten Versuch ohne Erklärung.
         profile["wrong"] += 1
-        profile["streak"] = 0
+        _serie_zuruecksetzen(profile)
         profile["attempts_current"] = 0
+        versuche.clear()
         profile["step"] += 1
         return "explain", ("Dieses Konzept haben wir noch nicht angeschaut. Ich erkläre es dir "
                            "zuerst, das zählt nicht gegen dein Niveau.")
     if bewertung == "korrekt":
         profile["correct"] += 1
-        profile["streak"] += 1
         profile["attempts_current"] = 0
+        versuche.clear()
         profile["step"] += 1
-        if profile["streak"] >= 2 and _level_up(profile):
-            profile["streak"] = 0
-            return "advance", (
-                f"Zwei richtige Antworten in Folge – ich erhöhe das Niveau auf "
-                f"'{LEVEL_LABELS[profile['level']]}', damit es für dich anspruchsvoll bleibt."
-            )
+        if konzept and profile.get("serie_konzept") == konzept:
+            profile["serie"] = profile.get("serie", 0) + 1
+        else:
+            profile["serie"], profile["serie_konzept"] = 1, konzept
+        profile["streak"] = profile["serie"]
+        if (profile["serie"] >= SERIE_FUER_NIVEAUFRAGE and darf_fragen
+                and profile["level"] != LEVELS[-1]
+                and konzept not in profile.get("hoeher_abgelehnt", [])):
+            profile["niveau_frage_offen"] = True
         return "next", ""
     if bewertung == "teilweise":
         profile["partial"] = profile.get("partial", 0) + 1
-        profile["streak"] = 0
+        _serie_zuruecksetzen(profile)
         profile["attempts_current"] += 1
+        versuche.append("teilweise")
         if profile["attempts_current"] == 1:
             return "retry", (
                 "Da fehlt noch etwas Wichtiges. Schau dir den Hinweis an und "
@@ -789,6 +825,7 @@ def adapt(profile: dict, bewertung: str, kontext: dict | None = None) -> tuple[s
         # Zweite Nachbesserung immer noch unvollständig: akzeptieren und weiter,
         # ohne den Lernenden in einer Schleife festzuhalten.
         profile["attempts_current"] = 0
+        versuche.clear()
         profile["correct"] += 1
         profile["step"] += 1
         return "next", (
@@ -797,21 +834,114 @@ def adapt(profile: dict, bewertung: str, kontext: dict | None = None) -> tuple[s
         )
     # falsch
     profile["wrong"] += 1
-    profile["streak"] = 0
+    _serie_zuruecksetzen(profile)
     profile["attempts_current"] += 1
+    versuche.append("falsch")
     if profile["attempts_current"] == 1:
         return "retry", (
             "Das war noch nicht ganz richtig. Schau dir den Hinweis an und "
             "versuch es gleich nochmals."
         )
-    # Zweiter Fehlversuch: vereinfachen, Level ggf. senken, Schritt zählt als bearbeitet
+    # Zweiter Versuch: vereinfachen, Schritt zählt als bearbeitet. Gesenkt wird
+    # nur, wenn beide Versuche falsch waren, und nur um eine Stufe.
+    beide_falsch = versuche[-2:] == ["falsch", "falsch"]
     profile["attempts_current"] = 0
+    versuche.clear()
     profile["step"] += 1
-    lowered = _level_down(profile)
     reason = "Ich erkläre dir das Konzept nochmals einfacher und stelle dir eine leichtere Aufgabe."
-    if lowered:
-        reason += f" Wir arbeiten vorerst auf Niveau '{LEVEL_LABELS[profile['level']]}' weiter."
+    if beide_falsch and darf_runter:
+        von = profile["level"]
+        if _level_down(profile):
+            profile.setdefault("niveau_verlauf", []).append(
+                {"von": von, "nach": profile["level"], "grund": "zweimal falsch bei derselben Aufgabe"})
+            reason += f" Wir arbeiten vorerst auf Niveau '{LEVEL_LABELS[profile['level']]}' weiter."
     return "simplify", reason
+
+
+def _serie_zuruecksetzen(profile: dict):
+    profile["serie"] = 0
+    profile["streak"] = 0
+
+
+def niveau_entscheid(profile: dict, aktion: str, level: str | None, modus: str) -> tuple[str, str] | None:
+    """Wendet eine Entscheidung der lernenden Person zum Niveau an (D-04).
+
+    aktion: hoeher_ja | hoeher_nein (Antwort auf die Niveaufrage),
+            festhalten (mit level: festhalten oder wechseln), automatisch.
+    Gibt (neues_level, begründung) zurück oder None, wenn sich nichts ändert.
+    """
+    von = profile["level"]
+    konzept = profile.get("serie_konzept") or ""
+    if aktion == "hoeher_ja":
+        profile["niveau_frage_offen"] = False
+        _serie_zuruecksetzen(profile)
+        if modus == "automatisch" and not profile.get("niveau_fixiert") and _level_up(profile):
+            return profile["level"], (f"Auf deinen Wunsch geht es jetzt auf Niveau "
+                                      f"'{LEVEL_LABELS[profile['level']]}' weiter.")
+        return None
+    if aktion == "hoeher_nein":
+        profile["niveau_frage_offen"] = False
+        _serie_zuruecksetzen(profile)
+        if konzept:
+            profile.setdefault("hoeher_abgelehnt", []).append(konzept)
+        return None
+    if aktion == "automatisch":
+        profile["niveau_fixiert"] = False
+        return von, "Das Niveau passt sich wieder automatisch an."
+    if aktion == "festhalten":
+        ziel = level if level in LEVELS else von
+        profile["niveau_fixiert"] = True
+        profile["niveau_frage_offen"] = False
+        profile["level"] = ziel
+        return ziel, f"Das Niveau bleibt auf '{LEVEL_LABELS[ziel]}', bis du es änderst."
+    return None
+
+
+# Einfache, eindeutige Formulierungen werden zusätzlich deterministisch erkannt,
+# falls das Modell den Wunsch nicht einordnet.
+_WUNSCH_MUSTER = [
+    (re.compile(r"(grund(niveau|lagen)|einfachen niveau|basic).{0,40}\b(bleiben|bleibe|lassen)\b|"
+                r"\b(bleiben|bleibe)\b.{0,40}(grund(niveau|lagen)|einfachen niveau|basic)", re.I),
+     "halten", "basic"),
+    (re.compile(r"\b(einfachere|leichtere|einfacher|leichter)e?\s+(aufgaben|fragen)\b|"
+                r"\bzu (schwer|schwierig)\b", re.I), "tiefer", None),
+    (re.compile(r"\b(schwierigere|anspruchsvollere|schwerere|schwieriger|anspruchsvoller)\s+"
+                r"(aufgaben|fragen)\b|\bzu (einfach|leicht)\b", re.I), "hoeher", None),
+    (re.compile(r"(einfachst|tiefst|unterst|niedrigst)\w*\s+(level|niveau|stufe)", re.I), "halten", "basic"),
+    (re.compile(r"\b(niveau|stufe|level)\b.{0,30}\b(halten|behalten|bleiben|nicht (erhöhen|ändern))\b", re.I),
+     "halten", None),
+    (re.compile(r"\bnicht (schwieriger|schwerer|anspruchsvoller)\b", re.I), "halten", None),
+]
+
+
+def niveau_wunsch_erkennen(text: str) -> tuple[str, str | None] | None:
+    for muster, wunsch, ziel in _WUNSCH_MUSTER:
+        if muster.search(text or ""):
+            return wunsch, ziel
+    return None
+
+
+def niveau_wunsch_anwenden(profile: dict, wunsch: str, ziel: str | None,
+                           modus: str) -> tuple[str | None, str]:
+    """Setzt einen im Chat geäusserten Niveauwunsch um. Gibt (neues_level, Bestätigung) zurück."""
+    von = profile["level"]
+    if modus == "fix":
+        return None, (f"Deine Lehrperson hat das Niveau für diese Lektion fest auf "
+                      f"'{LEVEL_LABELS[von]}' eingestellt.")
+    if ziel in LEVELS:
+        profile["level"] = ziel
+    elif wunsch == "tiefer":
+        _level_down(profile)
+    elif wunsch == "hoeher":
+        _level_up(profile)
+    profile["niveau_fixiert"] = True
+    profile["niveau_frage_offen"] = False
+    nach = profile["level"]
+    if nach == von:
+        return nach, (f"Alles klar: Wir bleiben auf dem Niveau «{LEVEL_LABELS[nach]}». "
+                      "Du kannst das oben jederzeit ändern.")
+    return nach, (f"Alles klar: Wir arbeiten ab jetzt auf dem Niveau «{LEVEL_LABELS[nach]}» "
+                  "und bleiben dort. Du kannst das oben jederzeit ändern.")
 
 
 def _level_up(p: dict) -> bool:
