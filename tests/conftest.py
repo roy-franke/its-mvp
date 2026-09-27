@@ -13,7 +13,10 @@ os.environ["LLM_PROVIDER"] = "mock"
 # überschreibt gesetzte Variablen nicht) darf die Tests nicht beeinflussen.
 os.environ["TEACHER_PASSWORD"] = ""
 os.environ["CLASS_CODE"] = ""
-os.environ["ITS_DB_PATH"] = os.path.join(tempfile.gettempdir(), "its_test.db")
+# Frische Datenbank pro Testlauf: Seit T-05 gibt es pro Person und Lektion
+# nur eine offene Sequenz, Reste eines früheren Laufs würden stören.
+_db_tmp = Path(tempfile.mkdtemp(prefix="its_db_"))
+os.environ["ITS_DB_PATH"] = str(_db_tmp / "its_test.db")
 
 _lessons_tmp = Path(tempfile.mkdtemp(prefix="its_lessons_"))
 _default = Path(__file__).resolve().parent.parent / "app" / "lessons" / "haftungsrecht.json"

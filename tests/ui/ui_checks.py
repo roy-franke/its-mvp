@@ -78,6 +78,11 @@ def server(extra_lessons: dict | None = None, **env):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def launch(pw):
+    # KaTeX vom CDN ist für diese Prüfungen unwichtig; ohne Netz sofort abbrechen
+    return pw.chromium.launch(args=["--host-resolver-rules=MAP cdn.jsdelivr.net 127.0.0.1:9"])
+
+
 def check(name: str, cond: bool, detail: str = ""):
     RESULTS.append((name, bool(cond), detail))
     print(("  OK   " if cond else "  FEHLER ") + name + (f" – {detail}" if detail and not cond else ""))
@@ -92,11 +97,22 @@ def api_requests(page, pattern: str) -> list:
 
 # ---------------------------------------------------------------- Hilfen
 
-def start_lernsequenz(page, base: str, name: str = "UI-Test", lesson: str = "haftungsrecht"):
-    """Meldet sich auf der Startseite an und startet eine Lektion bis zum Chat."""
-    page.goto(base + "/")
+def abmelden(page):
+    page.click("#btn-logout")
+    expect(page.locator("#view-start")).to_be_visible(timeout=10000)
+
+
+def anmelden(page, base: str, name: str):
+    if not page.locator("#view-start").is_visible():
+        page.goto(base + "/")
     page.fill("#name", name)
-    expect(page.locator("#lesson-picker")).to_be_visible()
+    page.click("#btn-login")
+    expect(page.locator("#view-home")).to_be_visible(timeout=10000)
+
+
+def start_lernsequenz(page, base: str, name: str = "UI-Test", lesson: str = "haftungsrecht"):
+    """Meldet sich an, startet eine Lektion und beantwortet die Einstufung."""
+    anmelden(page, base, name)
     page.select_option("#lesson-select", lesson)
     page.click("#btn-start")
     expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
@@ -104,6 +120,7 @@ def start_lernsequenz(page, base: str, name: str = "UI-Test", lesson: str = "haf
         page.fill("#assess-answer", "weiss ich nicht")
         page.click("#btn-assess")
     expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
+    page.wait_for_selector("#waiting", state="detached", timeout=60000)
 
 
 # ---------------------------------------------------------------- Szenarien
@@ -112,7 +129,7 @@ def start_lernsequenz(page, base: str, name: str = "UI-Test", lesson: str = "haf
 def t01_nochmals_versuchen(pw):
     """T-01 AK2: Scheitern beide Aufrufe, erscheint eine brauchbare Ausgabe."""
     with server(ITS_MOCK_FAIL="THEORIE_SCHRITT") as base:
-        page = pw.chromium.launch().new_page()
+        page = launch(pw).new_page()
         start_lernsequenz(page, base)
         theorie = page.locator(".msg.tutor.theory").last
         expect(theorie).to_be_visible(timeout=30000)
@@ -128,7 +145,7 @@ def t01_button_nochmals_versuchen(pw):
     leer = {"id": "leer", "titel": "Leere Lektion", "lernziele": ["Etwas verstehen"],
             "material": "Kurz.", "einstufungsfragen_fallback": ["a?", "b?", "c?"]}
     with server(extra_lessons={"leer": leer}, ITS_MOCK_FAIL="THEORIE_SCHRITT") as base:
-        page = pw.chromium.launch().new_page()
+        page = launch(pw).new_page()
         start_lernsequenz(page, base, lesson="leer")
         expect(page.locator(".msg.tutor.bad").last).to_contain_text("technischen Problems", timeout=30000)
         btn = page.locator("#btn-continue")
@@ -165,7 +182,7 @@ def sichtbare_aktionen_deaktiviert(page) -> bool:
 def t02_wartezustand(pw):
     """T-02 AK1-4: Warteanzeige, deaktivierte Buttons, Eingabe bleibt erhalten."""
     with server(ITS_MOCK_DELAY="5") as base:
-        page = pw.chromium.launch().new_page()
+        page = launch(pw).new_page()
         start_lernsequenz(page, base)
         page.wait_for_selector("#waiting", state="detached", timeout=60000)
         # Nach dem Theorie-Schritt läuft der Vorabruf im Hintergrund (5 s)
@@ -211,7 +228,7 @@ def t02_wartezustand(pw):
         page.unroute("**/chat")
         page.evaluate("SLOW_AFTER_MS")  # Konstante existiert
     with server(ITS_MOCK_DELAY="23") as base:
-        page = pw.chromium.launch().new_page()
+        page = launch(pw).new_page()
         page.goto(base + "/")
         page.evaluate("""() => { document.getElementById('view-learn').classList.remove('hidden');
                                   setChatBusy(true); }""")
@@ -224,7 +241,7 @@ def t02_wartezustand(pw):
 def t04_rollen(pw):
     """T-04 AK2/AK4: Startseite ohne Lehrpersonen-Elemente, Header-Name fest."""
     with server(TEACHER_PASSWORD="geheim", CLASS_CODE="BM2026") as base:
-        browser = pw.chromium.launch()
+        browser = launch(pw)
         page = browser.new_page()
         page.goto(base + "/")
         page.wait_for_load_state("networkidle")
@@ -247,7 +264,7 @@ def t04_rollen(pw):
         check("T-04 Lehrperson sieht den Link", True)
         browser.close()
     with server(ITS_TRUST_PROXY_HEADERS="true") as base:
-        browser = pw.chromium.launch()
+        browser = launch(pw)
         ctx = browser.new_context(extra_http_headers={"X-Forwarded-User": "mia.muster",
                                                        "X-User-Roles": "student"})
         page = ctx.new_page()
@@ -257,6 +274,50 @@ def t04_rollen(pw):
               not page.locator("#name").is_editable())
         check("T-04 AK4 Rolle lernend: kein Lehrpersonen-Link",
               not page.locator("#teacher-link").is_visible())
+        browser.close()
+
+
+@scenario("t05")
+def t05_sequenzen(pw):
+    """T-05 AK1-3: Fortsetzen in Browser B, getrennte Namen, Neu beginnen archiviert."""
+    with server() as base:
+        browser = launch(pw)
+        a = browser.new_context().new_page()
+        start_lernsequenz(a, base, name="Lina")
+        zur_aufgabe(a)
+        frage_a = a.locator(".msg.tutor.question").last.inner_text()
+
+        b = browser.new_context().new_page()     # anderer Browser
+        anmelden(b, base, "  lina ")
+        seqs = b.locator("#seq-list .seq")
+        check("T-05 AK1 Sequenz in Browser B sichtbar", seqs.count() == 1)
+        b.click("#seq-list button[data-act='resume']")
+        expect(b.locator("#view-learn")).to_be_visible()
+        frage_b = b.locator(".msg.tutor.question").last.inner_text()
+        check("T-05 AK1 gleiche Stelle (gleiche Aufgabe)", frage_a == frage_b, f"{frage_a!r} / {frage_b!r}")
+        check("T-05 AK1 Antwort möglich", b.locator("#btn-answer").is_enabled())
+
+        # AK2: anderer Name im selben Browser sieht nichts von Lina
+        b.goto(base + "/")
+        expect(b.locator("#view-home")).to_be_visible()
+        abmelden(b)
+        anmelden(b, base, "Noah")
+        check("T-05 AK2 Noah sieht keine fremden Sequenzen", b.locator("#seq-list .seq").count() == 0)
+
+        # AK3: Neu beginnen archiviert nach Bestätigung
+        abmelden(b)
+        anmelden(b, base, "Lina")
+        b.click("#seq-list button[data-act='restart']")
+        expect(b.locator("#modal")).to_be_visible()
+        b.click("#modal-ok")
+        expect(b.locator("#view-assess")).to_be_visible(timeout=30000)
+        b.goto(base + "/")
+        expect(b.locator("#view-home")).to_be_visible()
+        check("T-05 AK3 nur noch die neue Sequenz in der Liste", b.locator("#seq-list .seq").count() == 1)
+        rows = httpx.get(base + "/api/teacher/sessions").json()
+        status = sorted(r["status"] for r in rows if r["name"].strip().lower() == "lina")
+        check("T-05 AK3 Lehrperson sieht die archivierte Sequenz",
+              status == ["aktiv", "archiviert"], str(status))
         browser.close()
 
 

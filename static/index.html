@@ -38,7 +38,7 @@
   .adaption { border-left: 4px solid var(--warn); background: #fffbeb; padding: 10px 14px;
               border-radius: 0 8px 8px 0; font-size: .9rem; }
   ul { margin: 8px 0; padding-left: 20px; }
-  .hidden { display: none; }
+  .hidden { display: none !important; }
   .spinner { color: var(--muted); font-size: .9rem; padding: 6px 2px; }
 
   /* Chat */
@@ -75,42 +75,92 @@
   @keyframes blink { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
   button.action:disabled, .confbtn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); }
   .msg.tutor.error { background: #fef2f2; border-color: #fecaca; }
+
+  /* Übersicht der eigenen Lernsequenzen (T-05) */
+  .seq { display: flex; align-items: center; gap: 12px; padding: 12px 0;
+         border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .seq:first-child { border-top: 0; }
+  .seq-main { flex: 1 1 260px; min-width: 0; }
+  .seq-title { font-weight: 600; }
+  .seq-meta { color: var(--muted); font-size: .82rem; margin-top: 3px; }
+  .status { font-size: .72rem; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+            margin-left: 6px; vertical-align: middle; font-weight: 600; }
+  .status.aktiv { background: #eff6ff; color: var(--accent); border-color: #bfdbfe; }
+  .status.pausiert { background: #fffbeb; color: var(--warn); border-color: #fde68a; }
+  .status.abgeschlossen { background: #f0fdf4; color: var(--ok); border-color: #bbf7d0; }
+  .status.abgebrochen { background: #fef2f2; color: var(--err); border-color: #fecaca; }
+  button.small { padding: 6px 12px; font-size: .85rem; }
+  .linkbtn { background: none; border: 0; color: var(--muted); padding: 0; font: inherit;
+             font-size: .85rem; text-decoration: underline; cursor: pointer; font-weight: 400; }
+  .formerror { color: var(--err); font-size: .88rem; margin-top: 10px; }
+  select.full { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+                font: inherit; margin-top: 4px; background: #fff; }
+  label { display: block; font-weight: 600; margin-top: 12px; }
+
+  /* Bestätigungsdialog */
+  .modal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); display: flex;
+           align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+  .modal-box { background: #fff; border-radius: 12px; padding: 22px; max-width: 440px; width: 100%;
+               box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+  .modal-box p { margin: 0 0 6px; line-height: 1.5; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>🎓 ITS – Dein Lerntutor</h1>
-    <!-- Nur für Lehrpersonen sichtbar (T-04); der Server prüft die Rolle zusätzlich -->
-    <a href="/teacher" id="teacher-link" class="hidden">Lehrpersonen-Sicht</a>
+    <span>
+      <!-- Nur für Lehrpersonen sichtbar (T-04); der Server prüft die Rolle zusätzlich -->
+      <a href="/teacher" id="teacher-link" class="hidden">Lehrpersonen-Sicht</a>
+    </span>
   </header>
 
-  <!-- Onboarding -->
+  <!-- Anmeldung -->
   <div id="view-start" class="card">
-    <div id="resume-banner" class="adaption hidden" style="margin-bottom:14px">
-      <div id="resume-text" style="margin-bottom:10px"></div>
-      <button id="btn-resume" style="margin-right:8px">Fortsetzen</button>
-      <button id="btn-restart" style="background:#64748b">Neu starten</button>
-    </div>
     <h2>Willkommen!</h2>
     <p class="muted">Dein persönlicher Tutor begleitet dich im Dialog durch eine
       Lernsequenz. Zuerst schätzt er mit ein paar Fragen dein Vorwissen ein,
       danach passt er die Aufgaben laufend an dich an. Du kannst ihm jederzeit
-      Verständnisfragen stellen.</p>
-    <label>Wie sollen wir dich nennen?</label>
+      Verständnisfragen stellen und jederzeit pausieren.</p>
+    <label for="name">Wie sollen wir dich nennen?</label>
     <input type="text" id="name" placeholder="Spitzname oder Pseudonym" autocomplete="off">
     <div class="hint">Bitte verwende einen Spitznamen oder ein Pseudonym, nicht deinen
-      vollen richtigen Namen.</div>
-    <div id="code-box" class="hidden" style="margin-top:12px">
-      <label>Zugangscode</label>
+      vollen richtigen Namen. Mit dem gleichen Namen findest du deine Lernsequenzen
+      auch auf einem anderen Gerät wieder.</div>
+    <div id="code-box" class="hidden">
+      <label for="code">Zugangscode</label>
       <input type="text" id="code" placeholder="Code von deiner Lehrperson" autocomplete="off">
     </div>
-    <div id="lesson-picker" class="hidden" style="margin-top:12px">
-      <label>Welche Lektion möchtest du bearbeiten?</label>
-      <select id="lesson-select" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;font:inherit;margin-top:4px"></select>
+    <div id="pin-box">
+      <label for="pin">PIN <span class="muted" style="font-weight:400">(freiwillig, 4 Ziffern)</span></label>
+      <input type="text" id="pin" inputmode="numeric" maxlength="4" placeholder="z.B. 4711"
+             autocomplete="off" style="max-width:140px">
+      <div class="hint">Wenn du beim ersten Mal eine PIN wählst, kann niemand sonst mit
+        deinem Namen weiterlernen. Merk sie dir gut.</div>
     </div>
-    <div class="btnrow"><button id="btn-start">Lernsequenz starten</button></div>
-    <div id="start-spinner" class="spinner hidden">Lektion wird vorbereitet …</div>
+    <div class="btnrow"><button id="btn-login">Weiter</button></div>
+    <div id="login-error" class="formerror hidden"></div>
+  </div>
+
+  <!-- Übersicht: eigene Lernsequenzen und neue Lektion -->
+  <div id="view-home" class="hidden">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <h2 style="margin:0">Hallo <span id="home-name"></span></h2>
+        <button class="linkbtn" id="btn-logout">Nicht du? Abmelden</button>
+      </div>
+      <p class="muted" style="margin:6px 0 4px">Deine Lernsequenzen</p>
+      <div id="seq-list"></div>
+      <p class="muted" id="seq-empty">Du hast noch keine Lernsequenz begonnen.</p>
+    </div>
+    <div class="card">
+      <h2>Neue Lektion starten</h2>
+      <label for="lesson-select" style="margin-top:0">Welche Lektion möchtest du bearbeiten?</label>
+      <select id="lesson-select" class="full"></select>
+      <div class="btnrow"><button id="btn-start">Lektion starten</button></div>
+      <div id="start-spinner" class="spinner hidden">Lektion wird vorbereitet …</div>
+      <div id="start-error" class="formerror hidden"></div>
+    </div>
   </div>
 
   <!-- Einstufung -->
@@ -122,19 +172,20 @@
     </div>
     <div class="card">
       <h2>Einstufung <span class="muted" id="assess-count"></span></h2>
-      <p class="muted">Damit dein Tutor weiss, wo du stehst. Ehrliche Antworten helfen –
+      <p class="muted">Damit dein Tutor weiss, wo du stehst. Ehrliche Antworten helfen,
         «weiss ich nicht» ist völlig okay.</p>
       <p style="font-weight:600" id="assess-question"></p>
       <textarea id="assess-answer" rows="3" placeholder="Deine Antwort …"></textarea>
       <div class="btnrow"><button id="btn-assess">Weiter</button></div>
-      <div id="assess-spinner" class="spinner hidden">Dein Tutor überlegt …</div>
+      <div id="assess-spinner" class="spinner hidden">Dein Tutor denkt nach …</div>
+      <div id="assess-error" class="formerror hidden"></div>
     </div>
   </div>
 
   <!-- Lernen: Chat-Dialog -->
   <div id="view-learn" class="hidden">
     <div class="card" style="padding:14px 20px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
         <strong id="prog-text"></strong>
         <span class="muted" id="prog-level"></span>
       </div>
@@ -159,7 +210,7 @@
           <button id="btn-continue" class="action hidden">Weiter</button>
         </div>
         <div class="hint">«Antwort abschicken» beantwortet die Aufgabe und wird bewertet.
-          «Frage stellen» und «Theorie dazu» sind für dich – ohne Bewertung.</div>
+          «Frage stellen» und «Theorie dazu» sind für dich, ohne Bewertung.</div>
       </div>
     </div>
   </div>
@@ -173,7 +224,19 @@
       <ul id="done-goals"></ul>
       <div class="adaption" id="done-reco" style="border-color:var(--ok);background:#f0fdf4"></div>
       <div class="badges" id="done-stats"></div>
-      <div class="btnrow"><button onclick="location.reload()">Neue Lernsequenz</button></div>
+      <div class="btnrow"><button id="btn-done-home">Zur Übersicht</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Bestätigungsdialog (statt Browser-Dialog, damit nichts blockiert) -->
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <p id="modal-text"></p>
+    <div class="btnrow">
+      <button id="modal-ok">OK</button>
+      <button id="modal-alt" class="secondary hidden"></button>
+      <button id="modal-cancel" class="secondary">Abbrechen</button>
     </div>
   </div>
 </div>
@@ -183,19 +246,54 @@ const $ = id => document.getElementById(id);
 let sessionId = null, questions = [], qIndex = 0, assessAnswers = [];
 let answerEnabled = true;
 let confidenceAsked = false, pendingAnswer = "";
+let me = null, codeRequired = false, currentLessonTitle = "";
+
+class ApiError extends Error {
+  constructor(status, detail) {
+    const msg = typeof detail === "string" ? detail : (detail && detail.message) || "Serverfehler";
+    super(msg);
+    this.status = status;
+    this.detail = detail;
+  }
+}
 
 async function api(path, body, method = "POST") {
   const r = await fetch("/api" + path, {
     method, headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!r.ok) throw new Error("Serverfehler (" + r.status + "): " + await r.text());
+  if (!r.ok) {
+    let detail = null;
+    try { detail = (await r.json()).detail; } catch { /* kein JSON */ }
+    throw new ApiError(r.status, detail || ("Serverfehler (" + r.status + ")"));
+  }
   return r.json();
 }
 
+const VIEWS = ["view-start", "view-home", "view-assess", "view-learn", "view-done"];
 function show(view) {
-  for (const v of ["view-start", "view-assess", "view-learn", "view-done"])
-    $(v).classList.toggle("hidden", v !== view);
+  for (const v of VIEWS) $(v).classList.toggle("hidden", v !== view);
+  window.scrollTo(0, 0);
+}
+function showError(id, msg) {
+  $(id).textContent = msg || "";
+  $(id).classList.toggle("hidden", !msg);
+}
+
+// ---------- Bestätigungsdialog
+function confirmDialog(text, okLabel, altLabel) {
+  return new Promise(resolve => {
+    $("modal-text").textContent = text;
+    $("modal-ok").textContent = okLabel || "OK";
+    $("modal-alt").textContent = altLabel || "";
+    $("modal-alt").classList.toggle("hidden", !altLabel);
+    $("modal").classList.remove("hidden");
+    const done = v => { $("modal").classList.add("hidden"); resolve(v); };
+    $("modal-ok").onclick = () => done("ok");
+    $("modal-alt").onclick = () => done("alt");
+    $("modal-cancel").onclick = () => done(null);
+    $("modal-ok").focus();
+  });
 }
 
 // ---------- Chat-Helfer
@@ -227,6 +325,7 @@ function addMsg(cls, text, who) {
   renderMath(div);
   $("chat").insertBefore(div, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
+  return div;
 }
 function addNote(text) {
   const div = document.createElement("div");
@@ -234,6 +333,7 @@ function addNote(text) {
   $("chat").insertBefore(div, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
 }
+
 // ---------- Wartezustand (T-02)
 //
 // Solange die lernende Person auf eine Antwort des Tutors wartet, sind alle
@@ -277,11 +377,13 @@ function addError(e) {
   addMsg("tutor error", "⚠️ Das hat gerade nicht geklappt. Versuch es bitte nochmals.\n" +
     (e && e.message ? e.message : ""), "Tutor");
 }
+
 function setAnswerMode(on) {
   answerEnabled = on;
   $("btn-answer").disabled = !on;
   $("btn-answer").classList.toggle("hidden", !on);
   $("btn-theory").classList.toggle("hidden", !on);
+  $("btn-deeper").classList.add("hidden");
   $("btn-continue").classList.toggle("hidden", on);
 }
 function setRetryMode(adaptation) {
@@ -305,89 +407,183 @@ function setTheoryMode() {
   $("btn-continue").textContent = "Verstanden, weiter";
   $("btn-continue").dataset.adaptation = "";
 }
-
-// ---------- Fortsetzen (Session wird lokal gemerkt)
-async function checkResume() {
-  const saved = localStorage.getItem("its_session");
-  if (!saved) return;
-  try {
-    const st = await api(`/session/${saved}/state`, null, "GET");
-    if (st.phase === "learning") {
-      $("resume-text").innerHTML = `👋 Willkommen zurück, <strong>${esc(st.name)}</strong>!
-        Du warst bei Schritt ${Math.min(st.progress.step + 1, st.progress.total_steps)}
-        von ${st.progress.total_steps} (${esc(st.lesson.titel)}).`;
-      $("resume-banner").classList.remove("hidden");
-      $("btn-resume").onclick = async () => {
-        $("btn-resume").disabled = true;
-        sessionId = saved;
-        addNote(`Schön, bist du wieder da, ${st.name}. Wir machen dort weiter, wo du aufgehört hast.`);
-        try { await nextTask(); show("view-learn"); }
-        catch (e) { alert(e.message); $("btn-resume").disabled = false; }
-      };
-      $("btn-restart").onclick = () => {
-        localStorage.removeItem("its_session");
-        $("resume-banner").classList.add("hidden");
-      };
-    } else {
-      localStorage.removeItem("its_session");
-    }
-  } catch { localStorage.removeItem("its_session"); }
+function setContinueMode(adaption, finished) {
+  setAnswerMode(false);
+  $("btn-continue").textContent = finished ? "Zum Abschluss" : "Weiter";
+  $("btn-continue").dataset.adaptation =
+    adaption === "simplify" ? "simplify" : adaption === "advance" ? "advance" : "";
 }
-checkResume();
 
-// ---------- Lektionsauswahl (nur sichtbar, wenn mehrere Lektionen existieren)
-async function loadLessons() {
-  try {
-    const list = await api("/lessons", null, "GET");
-    if (list.length > 1) {
-      $("lesson-select").innerHTML = list.map(l =>
-        `<option value="${esc(l.id)}">${esc(l.titel)}</option>`).join("");
-      $("lesson-picker").classList.remove("hidden");
-    }
-  } catch { /* Auswahl ist optional */ }
+// ---------- Anmeldung und Übersicht (T-04, T-05)
+async function loadMe() {
+  me = await api("/me", null, "GET");
+  codeRequired = me.code_required;
+  $("code-box").classList.toggle("hidden", !codeRequired);
+  $("teacher-link").classList.toggle("hidden", !me.lehrperson);
+  if (me.name) $("name").value = me.name;
+  if (me.name_fixiert) {
+    // Anmeldung über den Proxy: Name ist vorgegeben und nicht änderbar
+    $("name").readOnly = true;
+    $("name").title = "Dein Name kommt aus der Anmeldung deiner Schule.";
+    $("pin-box").classList.add("hidden");
+  }
+  $("btn-logout").classList.toggle("hidden", !!me.name_fixiert);
+  return me;
 }
-loadLessons();
 
-// ---------- Rolle und Anmeldung (T-04)
-let codeRequired = false, me = null;
-(async () => {
-  try {
-    me = await api("/me", null, "GET");
-    codeRequired = me.code_required;
-    $("code-box").classList.toggle("hidden", !codeRequired);
-    $("teacher-link").classList.toggle("hidden", !me.lehrperson);
-    if (me.name) $("name").value = me.name;
-    if (me.name_fixiert) {
-      // Anmeldung über den Proxy: Name ist vorgegeben und nicht änderbar
-      $("name").readOnly = true;
-      $("name").title = "Dein Name kommt aus der Anmeldung deiner Schule.";
-    }
-  } catch { /* im Zweifel ohne Code starten, der Server prüft ohnehin */ }
-})();
+async function init() {
+  try { await loadMe(); } catch { me = { name: null }; }
+  if (me.name) await showHome(); else show("view-start");
+}
 
-// ---------- Start
-$("btn-start").onclick = async () => {
+$("btn-login").onclick = async () => {
   const name = $("name").value.trim();
   if (!name) { $("name").focus(); return; }
   const code = $("code").value.trim();
   if (codeRequired && !code) { $("code").focus(); return; }
-  $("btn-start").disabled = true; $("start-spinner").classList.remove("hidden");
+  $("btn-login").disabled = true;
+  showError("login-error", "");
   try {
-    const lessonId = $("lesson-picker").classList.contains("hidden")
-      ? null : $("lesson-select").value;
-    const d = await api("/session/start", { name, lesson_id: lessonId, code: code || null });
+    await api("/learner/login", { name, code: code || null, pin: $("pin").value.trim() || null });
+    await loadMe();
+    await showHome();
+  } catch (e) {
+    showError("login-error", e.message);
+    if (e.detail && e.detail.code && e.detail.code.startsWith("pin")) $("pin").focus();
+  } finally { $("btn-login").disabled = false; }
+};
+$("name").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-login").click(); });
+$("pin").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-login").click(); });
+
+$("btn-logout").onclick = async () => {
+  await api("/learner/logout");
+  location.reload();
+};
+
+const STATUS_LABEL = { aktiv: "aktiv", pausiert: "pausiert", abgeschlossen: "abgeschlossen",
+                       abgebrochen: "abgebrochen" };
+let mySequences = [];
+
+async function showHome() {
+  $("home-name").textContent = me.name || "";
+  show("view-home");
+  showError("start-error", "");
+  const [seqs, lessons] = await Promise.all([
+    api("/me/sequenzen", null, "GET").catch(() => []),
+    api("/lessons", null, "GET").catch(() => []),
+  ]);
+  mySequences = seqs;
+  $("seq-empty").classList.toggle("hidden", seqs.length > 0);
+  $("seq-list").innerHTML = seqs.map(sq => `
+    <div class="seq" data-sid="${esc(sq.session_id)}">
+      <div class="seq-main">
+        <div class="seq-title">${esc(sq.lesson_titel)}
+          <span class="status ${esc(sq.status)}">${esc(STATUS_LABEL[sq.status] || sq.status)}</span></div>
+        <div class="seq-meta">${sq.phase === "assessment" ? "Einstufung" :
+          `Schritt ${Math.min(sq.step + (sq.status === "abgeschlossen" ? 0 : 1), sq.total_steps)} von ${sq.total_steps}`}
+          · Niveau ${esc(sq.level_label)} · zuletzt ${esc(new Date(sq.updated_at * 1000).toLocaleString("de-CH"))}</div>
+      </div>
+      <span class="btnrow" style="margin:0">
+        ${sq.fortsetzbar ? `<button class="small" data-act="resume">Fortsetzen</button>` : ""}
+        <button class="small secondary" data-act="restart" data-lesson="${esc(sq.lesson_id)}">Neu beginnen</button>
+      </span>
+    </div>`).join("");
+  $("lesson-select").innerHTML = lessons.map(l =>
+    `<option value="${esc(l.id)}">${esc(l.titel)}</option>`).join("");
+  $("btn-start").disabled = lessons.length === 0;
+}
+
+$("seq-list").onclick = async e => {
+  const btn = e.target.closest("button");
+  if (!btn || btn.disabled) return;
+  const sid = btn.closest(".seq").dataset.sid;
+  btn.disabled = true;
+  try {
+    if (btn.dataset.act === "resume") await resumeSession(sid);
+    else await startLesson(btn.dataset.lesson, true, true);
+  } catch (err) { showError("start-error", err.message); }
+  finally { btn.disabled = false; }
+};
+
+$("btn-start").onclick = async () => {
+  $("btn-start").disabled = true;
+  try { await startLesson($("lesson-select").value, false, false); }
+  catch (err) { showError("start-error", err.message); }
+  finally { $("btn-start").disabled = false; }
+};
+
+async function startLesson(lessonId, neuBeginnen, fragen) {
+  if (fragen) {
+    const ok = await confirmDialog("Neu beginnen? Deine bisherige Lernsequenz zu dieser Lektion " +
+      "wird archiviert. Deine Lehrperson sieht sie weiterhin, du selbst kannst sie danach " +
+      "nicht mehr fortsetzen.", "Neu beginnen");
+    if (!ok) return;
+  }
+  $("start-spinner").classList.remove("hidden");
+  showError("start-error", "");
+  try {
+    let d;
+    try {
+      d = await api("/session/start", { lesson_id: lessonId, neu_beginnen: neuBeginnen });
+    } catch (e) {
+      if (e.status !== 409 || !e.detail || e.detail.code !== "sequenz_existiert") throw e;
+      const fortsetzbar = ["aktiv", "pausiert"].includes(e.detail.status);
+      const wahl = await confirmDialog("Zu dieser Lektion hast du schon eine Lernsequenz " +
+        `(Status: ${STATUS_LABEL[e.detail.status] || e.detail.status}). Neu beginnen archiviert ` +
+        "den bisherigen Stand.", "Neu beginnen", fortsetzbar ? "Bisherige fortsetzen" : null);
+      if (wahl === "alt") return resumeSession(e.detail.session_id);
+      if (wahl !== "ok") return;
+      d = await api("/session/start", { lesson_id: lessonId, neu_beginnen: true });
+    }
     sessionId = d.session_id;
-    localStorage.setItem("its_session", sessionId);
     questions = d.questions;
-    $("lesson-title").textContent = d.lesson.titel;
-    $("lesson-goals").innerHTML = d.lesson.lernziele.map(z => `<li>${esc(z)}</li>`).join("");
+    setLessonHeader(d.lesson);
     qIndex = 0; assessAnswers = [];
     renderAssess();
     show("view-assess");
-  } catch (e) { alert(e.message); }
-  $("btn-start").disabled = false; $("start-spinner").classList.add("hidden");
-};
+  } finally { $("start-spinner").classList.add("hidden"); }
+}
 
+function setLessonHeader(lesson) {
+  currentLessonTitle = lesson.titel;
+  $("lesson-title").textContent = lesson.titel;
+  $("lesson-goals").innerHTML = lesson.lernziele.map(z => `<li>${esc(z)}</li>`).join("");
+}
+
+// ---------- Fortsetzen an derselben Stelle (T-05)
+async function resumeSession(sid) {
+  const st = await api(`/session/${sid}/fortsetzen`);
+  sessionId = sid;
+  pendingNext = null;
+  setLessonHeader(st.lesson);
+  if (st.wartet_auf === "einstufung") {
+    questions = st.questions; qIndex = 0; assessAnswers = [];
+    renderAssess();
+    show("view-assess");
+    return;
+  }
+  $("chat").innerHTML = "";
+  show("view-learn");
+  addNote(`Willkommen zurück, ${st.name}! Wir machen dort weiter, wo du aufgehört hast.`);
+  renderProgress(st.progress);
+  const t = st.current_task;
+  if (st.wartet_auf === "abschluss" || !t) {
+    setChatBusy(true);
+    try { await nextTask(); } catch (e) { addError(e); setRetryMode(); }
+    finally { setChatBusy(false); }
+    return;
+  }
+  renderTask(t, undefined, false);
+  if (st.wartet_auf === "weiter" && t.typ === "aufgabe" && st.letztes_feedback) {
+    renderFeedback(st.letztes_feedback);
+    setContinueMode(st.letztes_feedback.adaption, st.letztes_feedback.finished);
+    prefetchNext($("btn-continue").dataset.adaptation || undefined);
+  } else if (st.wartet_auf === "antwort" && st.letztes_feedback) {
+    renderFeedback(st.letztes_feedback);       // Nachbesserung nach Hinweis
+  }
+}
+
+// ---------- Einstufung
 function renderAssess() {
   $("assess-count").textContent = `(Frage ${qIndex + 1} von ${questions.length})`;
   $("assess-question").textContent = questions[qIndex];
@@ -397,30 +593,37 @@ function renderAssess() {
 }
 
 $("btn-assess").onclick = async () => {
-  assessAnswers.push($("assess-answer").value.trim() || "weiss ich nicht");
-  qIndex++;
+  if ($("btn-assess").disabled) return;
+  if (qIndex < questions.length) {
+    assessAnswers.push($("assess-answer").value.trim() || "weiss ich nicht");
+    qIndex++;
+  }
   if (qIndex < questions.length) { renderAssess(); return; }
   $("btn-assess").disabled = true; $("assess-spinner").classList.remove("hidden");
+  showError("assess-error", "");
   try {
     const d = await api(`/session/${sessionId}/assess`, { answers: assessAnswers });
+    $("chat").innerHTML = "";
     addNote(`Einstufung: Du startest auf Niveau «${d.level_label}». ${d.begruendung}`);
-    await nextTask();
     show("view-learn");
-  } catch (e) { alert(e.message); }
-  $("btn-assess").disabled = false; $("assess-spinner").classList.add("hidden");
+    setChatBusy(true);
+    try { await nextTask(); } catch (e) { addError(e); setRetryMode(); }
+    finally { setChatBusy(false); }
+  } catch (e) {
+    showError("assess-error", e.message + " Klick nochmals auf «Weiter».");
+  } finally {
+    $("btn-assess").disabled = false; $("assess-spinner").classList.add("hidden");
+  }
 };
 
 // ---------- Lernschritte
 //
-// Der nächste Schritt wird schon erzeugt, während der Lernende das Feedback
-// oder den Theorie-Text liest. Beim Klick auf «Weiter» liegt die Antwort des
-// Modells dann meist bereits vor, statt dass die Wartezeit erst dann beginnt.
-let pendingNext = null;
-
 // Der Vorabruf bereitet den Schritt auf dem Server nur vor (prefetch=true).
 // Übernommen wird er erst beim Klick auf «Weiter». Hat die lernende Person
 // in der Zwischenzeit eine Verständnisfrage gestellt, verwirft der Server den
 // vorbereiteten Schritt und erzeugt einen neuen, der zum Gespräch passt.
+let pendingNext = null;
+
 function prefetchNext(adaptation) {
   if (pendingNext) return;
   const q = "?prefetch=true" + (adaptation ? "&adaptation=" + adaptation : "");
@@ -437,7 +640,10 @@ async function nextTask(adaptation) {
   const d = await api(`/session/${sessionId}/next${q}`);
   if (d.done) { renderDone(d); return; }
   renderProgress(d.progress);
-  const t = d.task;
+  renderTask(d.task, adaptation, true);
+}
+
+function renderTask(t, adaptation, prefetch) {
   if (t.typ === "fehler") {
     // Technisches Problem: ehrlich sagen und «Nochmals versuchen» anbieten
     addMsg("tutor bad", "⚠️ " + (t.inhalt || ""), "Tutor");
@@ -449,15 +655,24 @@ async function nextTask(adaptation) {
     setTheoryMode();
     // Auf Theorie folgt immer eine Aufgabe – die kann schon entstehen,
     // während der Lernende die Erklärung liest.
-    prefetchNext();
+    if (prefetch !== false) prefetchNext();
   } else {
     addMsg("tutor", (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
     if (t.frage) addMsg("tutor question", "❓ " + t.frage, "Tutor");
-    $("btn-deeper").classList.add("hidden");
     confidenceAsked = false;   // Sicherheitsfrage einmal pro Aufgabe
     setAnswerMode(true);
   }
   $("chat-input").focus();
+}
+
+function renderFeedback(d) {
+  const label = d.bewertung === "korrekt" ? "✅ Richtig! "
+    : d.bewertung === "teilweise" ? "🔶 Teilweise richtig. " : "❌ Noch nicht ganz. ";
+  let fb = label + (d.feedback || "");
+  if (d.hinweis) fb += "\n💡 Hinweis: " + d.hinweis;
+  const cls = d.bewertung === "korrekt" ? "good" : d.bewertung === "teilweise" ? "mid" : "bad";
+  addMsg("tutor " + cls, fb, "Tutor");
+  if (d.adaption_begruendung) addNote(d.adaption_begruendung);
 }
 
 $("btn-answer").onclick = () => {
@@ -507,22 +722,12 @@ async function submitAnswer(text, confidence) {
       setAnswerMode(true);
       return;
     }
-    const label = d.bewertung === "korrekt" ? "✅ Richtig! "
-      : d.bewertung === "teilweise" ? "🔶 Teilweise richtig. " : "❌ Noch nicht ganz. ";
-    let fb = label + (d.feedback || "");
-    if (d.hinweis) fb += "\n💡 Hinweis: " + d.hinweis;
-    const cls = d.bewertung === "korrekt" ? "good"
-      : d.bewertung === "teilweise" ? "mid" : "bad";
-    addMsg("tutor " + cls, fb, "Tutor");
-    if (d.adaption_begruendung) addNote(d.adaption_begruendung);
+    renderFeedback(d);
     if (d.adaption === "retry") {
       setAnswerMode(true);
       $("chat-input").focus();
     } else {
-      setAnswerMode(false);
-      $("btn-continue").textContent = d.finished ? "Zum Abschluss" : "Weiter";
-      $("btn-continue").dataset.adaptation =
-        d.adaption === "simplify" ? "simplify" : d.adaption === "advance" ? "advance" : "";
+      setContinueMode(d.adaption, d.finished);
       // Der Weg führt sicher weiter – den nächsten Schritt schon anstossen,
       // während der Lernende das Feedback liest.
       prefetchNext($("btn-continue").dataset.adaptation || undefined);
@@ -532,7 +737,7 @@ async function submitAnswer(text, confidence) {
     $("chat-input").value = $("chat-input").value || text;   // Antwort nicht verlieren
   }
   finally { setChatBusy(false); }
-};
+}
 
 // ---------- Verständnisfragen und Theorie auf Abruf (jederzeit)
 async function sendChat(text) {
@@ -577,7 +782,7 @@ $("chat-input").addEventListener("keydown", e => {
 });
 
 function renderProgress(p) {
-  $("prog-text").textContent = `Schritt ${Math.min(p.step + 1, p.total_steps)} von ${p.total_steps}`;
+  $("prog-text").textContent = `${currentLessonTitle ? currentLessonTitle + " · " : ""}Schritt ${Math.min(p.step + 1, p.total_steps)} von ${p.total_steps}`;
   $("prog-level").textContent = `Niveau: ${p.level_label}`;
   $("prog-fill").style.width = (100 * p.step / p.total_steps) + "%";
   $("prog-badges").innerHTML =
@@ -589,7 +794,6 @@ function renderProgress(p) {
 }
 
 function renderDone(d) {
-  localStorage.removeItem("its_session");
   $("done-summary").textContent = d.summary.zusammenfassung || "";
   $("done-goals").innerHTML = (d.summary.erreichte_lernziele || [])
     .map(z => `<li>${esc(z)}</li>`).join("") || "<li class='muted'>–</li>";
@@ -603,11 +807,14 @@ function renderDone(d) {
   renderMath($("view-done"));
   show("view-done");
 }
+$("btn-done-home").onclick = () => showHome();
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+init();
 </script>
 </body>
 </html>

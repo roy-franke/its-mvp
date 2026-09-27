@@ -6,7 +6,7 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 
 ## Was der MVP kann
 
-- **Onboarding**: Lernende starten mit Namenseingabe eine Session.
+- **Onboarding**: Lernende melden sich mit Pseudonym (plus Zugangscode, optional einer vierstelligen PIN) an und sehen ihre eigenen Lernsequenzen.
 - **Wissenseinstufung**: 3 KI-generierte Einstiegsfragen bestimmen das Startniveau (basic / intermediate / advanced).
 - **Lernendenprofil**: Niveau, Fortschritt, Trefferquote, behandelte Konzepte; wird laufend aktualisiert.
 - **Adaptiver Lernpfad**: Die KI generiert Lernschritte aus dem Lektionsmaterial. Richtig → weiter, 2× richtig in Serie → Niveau rauf. Falsch → Hinweis und zweiter Versuch, nochmals falsch → Vereinfachung und Niveau runter. Jede Adaption wird begründet (Transparenzprinzip aus dem Systemkonzept).
@@ -16,7 +16,7 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 - **Mathematische Formeln**: Der Tutor schreibt Formeln in LaTeX, das UI rendert sie mit KaTeX sauber als Brüche, Exponenten, Wurzeln usw. – im Lern-Chat, in der Einstufung und im Lernverlauf der Lehrperson. Hinweis: KaTeX wird von einem CDN geladen; für den Betrieb ganz ohne Internet müsste es lokal ins Projekt gelegt werden.
 - **Chat-Dialog**: Das Lernen läuft als Dialog. Der Tutor liefert Input und Aufgaben als Chat-Nachrichten, und Lernende können ihm jederzeit Verständnisfragen stellen («Frage stellen»), ohne dass dies bewertet wird. Der Tutor antwortet materialgebunden und verrät die Lösung der aktuellen Aufgabe nicht, sondern gibt Denkanstösse. Auch diese Fragen erscheinen im Lernverlauf der Lehrperson. Solange der Tutor arbeitet, zeigt der Chat eine Warteanzeige («Dein Tutor denkt nach …», nach 20 Sekunden mit beruhigendem Hinweis) und alle Aktionsbuttons sind deaktiviert; das Eingabefeld bleibt beschreibbar, nichts wird doppelt abgeschickt.
 - **Abschluss**: Zusammenfassung mit Lernzielabgleich und Empfehlung.
-- **Pausieren und Fortsetzen**: Browser schliessen genügt – beim nächsten Besuch bietet die Startseite an, die Lernsequenz an der gleichen Stelle fortzusetzen (Session-ID wird lokal im Browser gemerkt, Zustand liegt in der DB).
+- **Lernsequenzen pro Person**: Eine Lernsequenz gehört einer Person (Benutzername, Gross-/Kleinschreibung egal) und einer Lektion. Nach der Anmeldung zeigt die Startseite die eigenen Sequenzen mit Lektion, Fortschritt, Niveau, Status und letzter Aktivität, jeweils mit «Fortsetzen» und «Neu beginnen». Fortsetzen klappt auch auf einem anderen Gerät an genau derselben Stelle. Pro Person und Lektion gibt es höchstens eine offene Sequenz; «Neu beginnen» archiviert die bisherige nach einer Bestätigung. Status: aktiv, pausiert, abgeschlossen, abgebrochen, archiviert; jeder Wechsel landet im Event-Log. Wer beim ersten Start eine PIN setzt, schützt den Namen vor fremdem Weiterlernen.
 - **Lehrpersonen-Sicht** (`/teacher`): Übersicht aller Sessions mit Fortschritt, Niveau und Quote; Klick auf eine Zeile zeigt den vollständigen Lernverlauf (Event-Log).
 - **Lektionen erstellen** (`/teacher/lessons/new`): Lehrpersonen erstellen Lektionen direkt im Browser. Material als Text einfügen oder als Datei hochladen (PDF, Word, Text/Markdown), Titel und Lernziele von der KI vorschlagen lassen, optional Hinweise ans Tutorverhalten («Arbeite mit Alltagsbeispielen», «Sei streng bei Fachbegriffen»). Nach dem Speichern erscheint die Lektion in der Auswahl auf der Lernenden-Startseite.
 - **Rollen und Zugangsschutz**: Es gibt die Rollen «lernend» und «lehrperson», durchgesetzt auf dem Server. Alle Seiten unter `/teacher` und alle Endpunkte unter `/api/teacher` hängen an einer zentralen Rollenprüfung (`app/auth.py`); ohne Login gibt es 401 bzw. eine Weiterleitung auf `/teacher/login`. Lernende sehen keine Elemente für Lehrpersonen. Lehrpersonen melden sich mit `TEACHER_PASSWORD` an, Lernende mit Pseudonym plus Zugangscode (`CLASS_CODE`). Beides lässt sich für die lokale Entwicklung deaktivieren, indem die Variablen leer bleiben. Optional übernimmt das ITS Name und Rolle aus Headern eines Proxys wie Cloudflare Access (`ITS_TRUST_PROXY_HEADERS`, siehe `docs/DEPLOYMENT-CLOUDFLARE.md`). Lernsequenzen, die eine Lehrperson startet, sind Testläufe und erscheinen im Monitoring nur mit dem Filter «Testläufe anzeigen».
@@ -81,7 +81,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 
 | Endpoint | Zweck |
 |---|---|
-| `POST /api/session/start` | Session anlegen, Einstufungsfragen erhalten |
+| `POST /api/session/start` | Lernsequenz anlegen, Einstufungsfragen erhalten; 409, wenn zur Lektion schon eine offene Sequenz existiert (`neu_beginnen: true` archiviert sie) |
 | `POST /api/session/{id}/assess` | Einstufung bewerten, Startniveau setzen |
 | `POST /api/session/{id}/next` | Nächste Aufgabe (optional `?adaptation=simplify\|advance`); mit `?prefetch=true` nur vorbereiten, ohne Profil und Verlauf zu ändern |
 | `POST /api/session/{id}/answer` | Antwort bewerten, Feedback + Adaption |
@@ -90,9 +90,11 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `POST /api/teacher/lessons` | Neue Lektion anlegen |
 | `POST /api/teacher/lessons/extract` | Text aus PDF/Word/Text-Datei extrahieren |
 | `POST /api/teacher/lessons/suggest-goals` | KI-Vorschlag für Titel und Lernziele |
-| `GET /api/session/{id}/state` | Zustand (Basis für Pausieren/Fortsetzen) |
+| `GET /api/session/{id}/state` | Zustand inkl. `wartet_auf` (Basis für das Fortsetzen) |
+| `POST /api/session/{id}/fortsetzen` | Sequenz fortsetzen, liefert den Stand zum Anzeigen |
+| `GET /api/me/sequenzen` | Eigene, nicht archivierte Lernsequenzen |
 | `GET /api/me` | Angemeldete Identität und Rolle (für die rollenabhängige Oberfläche) |
-| `POST /api/learner/login` | Anmeldung Lernende mit Name und Zugangscode |
+| `POST /api/learner/login` | Anmeldung Lernende mit Name, Zugangscode und optionaler PIN |
 | `POST /api/learner/logout` | Abmelden bzw. Person wechseln |
 | `POST /api/teacher/login` | Anmeldung Lehrperson mit Passwort |
 | `GET /api/teacher/sessions` | Monitoring-Übersicht (`?testlaeufe=true` zeigt Testläufe) |

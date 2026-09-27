@@ -1,6 +1,7 @@
 """End-to-End-Tests der API mit Mock-Provider (ohne LLM, ohne laufenden Server)."""
 
 import os
+import uuid
 
 os.environ["LLM_PROVIDER"] = "mock"
 os.environ.setdefault("ITS_DB_PATH", "/tmp/its_test.db")
@@ -20,7 +21,8 @@ KURZE_ANTWORT = "weiss nicht"
 
 
 def _start():
-    r = client.post("/api/session/start", json={"name": "Testperson"})
+    # Eigener Name pro Test: pro Person und Lektion gibt es nur eine offene Sequenz
+    r = client.post("/api/session/start", json={"name": f"Testperson-{uuid.uuid4().hex[:6]}"})
     assert r.status_code == 200
     return r.json()
 

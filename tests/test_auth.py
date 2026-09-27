@@ -91,12 +91,12 @@ def test_start_mit_falschem_code_abgelehnt(code_an):
 
 
 def test_start_mit_code_ok(code_an):
-    r = client.post("/api/session/start", json={"name": "Momo", "code": "bm2026"})
+    r = client.post("/api/session/start", json={"name": "Momo-Code", "code": "bm2026"})
     assert r.status_code == 200   # Gross-/Kleinschreibung egal
 
 
 def test_start_ohne_konfigurierten_code(alles_aus):
-    r = client.post("/api/session/start", json={"name": "Momo"})
+    r = client.post("/api/session/start", json={"name": "Momo-ohne-Code"})
     assert r.status_code == 200
 
 

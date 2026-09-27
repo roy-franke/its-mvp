@@ -88,6 +88,8 @@ class StartRequest(BaseModel):
     name: str | None = None   # ohne Name: angemeldete Identität (Cookie oder Header)
     lesson_id: str | None = None
     code: str | None = None   # Zugangscode der Klasse (falls konfiguriert)
+    pin: str | None = None    # optionale PIN (Entscheid E7)
+    neu_beginnen: bool = False  # bestehende Sequenz dieser Lektion archivieren
 
 
 class AssessRequest(BaseModel):
@@ -227,18 +229,34 @@ def _unique_slug(titel: str) -> str:
 
 @app.post("/api/session/start")
 def start_session(req: StartRequest, request: Request, response: Response):
+    """Startet eine Lernsequenz für die angemeldete Person.
+
+    Pro Person und Lektion gibt es höchstens eine nicht archivierte Sequenz
+    (T-05). Existiert bereits eine, antwortet der Server mit 409, und die
+    Oberfläche fragt nach. Mit neu_beginnen=true wird die bestehende Sequenz
+    archiviert und eine neue angelegt.
+    """
     ident = auth.identity(request)
     if req.name and (ident.via != "header") and auth.normalize_user(req.name) != ident.key:
-        name = _login_learner(request, response, req.name, req.code)
+        name = _login_learner(request, response, req.name, req.code, req.pin)
     elif ident.name:
         name = ident.name
     else:
-        name = _login_learner(request, response, req.name, req.code)
+        name = _login_learner(request, response, req.name, req.code, req.pin)
+    user_key = auth.normalize_user(name)
     lesson_id = req.lesson_id or default_lesson_id()
     lesson = load_lesson(lesson_id)
+    bestehend = store.open_session_for(user_key, lesson_id)
+    if bestehend:
+        if not req.neu_beginnen:
+            raise HTTPException(409, detail={
+                "code": "sequenz_existiert", "session_id": bestehend["id"],
+                "status": bestehend["status"],
+                "message": "Zu dieser Lektion gibt es bereits eine Lernsequenz."})
+        store.set_status(bestehend["id"], "archiviert", "Neu begonnen")
     profile = tutor.new_profile()
     testlauf = ident.is_teacher
-    sid = store.create_session(name, lesson_id, profile, testlauf=testlauf)
+    sid = store.create_session(name, lesson_id, profile, testlauf=testlauf, user_key=user_key)
     questions = tutor.generate_assessment(lesson)
     store.log_event(sid, "session_started", {"name": name, "lesson": lesson["titel"],
                                              "testlauf": testlauf})
@@ -254,8 +272,8 @@ def start_session(req: StartRequest, request: Request, response: Response):
 
 
 @app.post("/api/session/{sid}/assess")
-def assess(sid: str, req: AssessRequest):
-    s = _session(sid)
+def assess(sid: str, req: AssessRequest, request: Request):
+    s = _owned(request, sid, aktion=True)
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
     questions = profile.get("assessment_questions", [])
@@ -266,6 +284,7 @@ def assess(sid: str, req: AssessRequest):
         "answers": req.answers, "level": result["level"],
         "begruendung": result.get("begruendung", ""),
     })
+    profile["wartet_auf"] = "weiter"
     store.update_session(sid, phase="learning", profile=profile)
     return {
         "level": result["level"],
@@ -312,7 +331,8 @@ def _vorabruf_ungueltig(pre: dict, sid: str, profile: dict, adaptation: str | No
 
 
 @app.post("/api/session/{sid}/next")
-def next_step(sid: str, adaptation: str | None = None, prefetch: bool = False):
+def next_step(sid: str, request: Request, adaptation: str | None = None,
+              prefetch: bool = False):
     """Nächster Lernschritt.
 
     Mit prefetch=true wird der Schritt nur vorbereitet und separat gespeichert,
@@ -320,7 +340,9 @@ def next_step(sid: str, adaptation: str | None = None, prefetch: bool = False):
     ihn, wenn sich der Gesprächsstand seither nicht geändert hat, sonst wird
     neu erzeugt (T-01: veraltete Vorabrufe nach einer Verständnisfrage).
     """
-    s = _session(sid)
+    s = _owned(request, sid, aktion=not prefetch)
+    if prefetch and s["status"] != "aktiv":
+        return {"vorabruf": False, "done": False}
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
     if profile["step"] >= tutor.total_steps():
@@ -359,6 +381,7 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
         # Nichts erzeugt: Profil bleibt, damit «Nochmals versuchen» denselben
         # Schritt erneut anfordert.
         profile["current_task"] = public_task
+        profile["wartet_auf"] = "nochmals"
         store.log_event(sid, "task", public_task)
         store.update_session(sid, profile=profile)
         return {"done": False, "task": public_task, "progress": _progress(profile)}
@@ -368,6 +391,8 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
         profile.setdefault("fallback_abschnitte", []).append(task["material_abschnitt"])
     profile["current_task"] = public_task
     profile["last_type"] = step_type
+    profile["wartet_auf"] = "weiter" if step_type == "theorie" else "antwort"
+    profile["letztes_feedback"] = None
     concept = task.get("konzept")
     if concept and concept not in profile["covered"]:
         profile["covered"].append(concept)
@@ -381,8 +406,8 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
 
 
 @app.post("/api/session/{sid}/answer")
-def answer(sid: str, req: AnswerRequest):
-    s = _session(sid)
+def answer(sid: str, req: AnswerRequest, request: Request):
+    s = _owned(request, sid, aktion=True)
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
     task = profile.get("current_task")
@@ -417,8 +442,14 @@ def answer(sid: str, req: AnswerRequest):
         "hinweis": result.get("hinweis", ""), "adaption": action,
         "adaption_begruendung": reason, "level": profile["level"],
     })
-    store.update_session(sid, profile=profile)
     finished = profile["step"] >= tutor.total_steps() and action != "retry"
+    profile["wartet_auf"] = "antwort" if action == "retry" else "weiter"
+    profile["letztes_feedback"] = {
+        "bewertung": result["bewertung"], "feedback": result.get("feedback", ""),
+        "hinweis": result.get("hinweis", ""), "adaption": action,
+        "adaption_begruendung": reason, "finished": finished,
+    }
+    store.update_session(sid, profile=profile)
     return {
         "bewertung": result["bewertung"],   # korrekt | teilweise | falsch
         "korrekt": result["korrekt"],
@@ -432,9 +463,9 @@ def answer(sid: str, req: AnswerRequest):
 
 
 @app.post("/api/session/{sid}/chat")
-def chat_with_tutor(sid: str, req: ChatRequest):
+def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
     """Verständnisfrage des Lernenden im Dialog – jederzeit möglich."""
-    s = _session(sid)
+    s = _owned(request, sid, aktion=True)
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
     message = req.message.strip()
@@ -451,18 +482,83 @@ def chat_with_tutor(sid: str, req: ChatRequest):
 
 
 @app.get("/api/session/{sid}/state")
-def state(sid: str):
-    """Aktueller Zustand einer Session – Basis für Pausieren/Fortsetzen."""
-    s = _session(sid)
+def state(sid: str, request: Request):
+    """Aktueller Zustand einer Session – Basis für Pausieren/Fortsetzen.
+
+    `wartet_auf` sagt der Oberfläche, wo es weitergeht: einstufung, antwort
+    (Aufgabe offen), weiter (Theorie gelesen oder Feedback erhalten),
+    nochmals (technischer Fehler) oder abschluss.
+    """
+    s = _owned(request, sid)
+    return _state(s)
+
+
+def _state(s: dict) -> dict:
     lesson = load_lesson(s["lesson_id"])
+    p = s["profile"]
+    if s["phase"] == "assessment":
+        wartet = "einstufung"
+    elif s["phase"] == "finished":
+        wartet = "abschluss"
+    else:
+        wartet = p.get("wartet_auf") or ("antwort" if (p.get("current_task") or {}).get("typ") == "aufgabe" else "weiter")
     return {
-        "session_id": sid,
+        "session_id": s["id"],
         "name": s["name"],
         "phase": s["phase"],
+        "status": s["status"],
+        "lesson_id": s["lesson_id"],
         "lesson": {"titel": lesson["titel"], "lernziele": lesson["lernziele"]},
-        "progress": _progress(s["profile"]),
-        "current_task": s["profile"].get("current_task"),
+        "progress": _progress(p),
+        "current_task": p.get("current_task"),
+        "wartet_auf": wartet,
+        "letztes_feedback": p.get("letztes_feedback"),
+        "questions": p.get("assessment_questions", []) if wartet == "einstufung" else [],
+        "total_steps": tutor.total_steps(),
     }
+
+
+@app.post("/api/session/{sid}/fortsetzen")
+def resume(sid: str, request: Request):
+    """Setzt eine pausierte Sequenz fort und liefert den Stand zum Anzeigen."""
+    s = _owned(request, sid, aktion=True)
+    ident = auth.identity(request)
+    if ident.key != s["user_key"] and ident.is_teacher:
+        raise HTTPException(403, "Lehrpersonen können fremde Sequenzen nur ansehen.")
+    return _state(store.get_session(sid))
+
+
+@app.get("/api/me/sequenzen")
+def my_sequences(request: Request):
+    """Die nicht archivierten Lernsequenzen der angemeldeten Person (T-05)."""
+    ident = auth.identity(request)
+    if not ident.key:
+        raise HTTPException(401, "Bitte melde dich zuerst an.")
+    titel = _lesson_titles()
+    out = []
+    for s in store.sessions_of_user(ident.key):
+        p = s["profile"]
+        out.append({
+            "session_id": s["id"], "lesson_id": s["lesson_id"],
+            "lesson_titel": titel.get(s["lesson_id"], s["lesson_id"]),
+            "status": s["status"], "phase": s["phase"],
+            "step": p.get("step", 0), "total_steps": tutor.total_steps(),
+            "level": p.get("level", "basic"),
+            "level_label": tutor.LEVEL_LABELS.get(p.get("level", "basic"), ""),
+            "updated_at": s["updated_at"],
+            "fortsetzbar": s["status"] in ("aktiv", "pausiert"),
+        })
+    return out
+
+
+def _lesson_titles() -> dict[str, str]:
+    out = {}
+    for p in LESSONS_DIR.glob("*.json"):
+        try:
+            out[p.stem] = json.loads(p.read_text(encoding="utf-8")).get("titel", p.stem)
+        except (OSError, json.JSONDecodeError):
+            out[p.stem] = p.stem
+    return out
 
 
 def _finish(sid: str, lesson: dict, profile: dict):
@@ -477,6 +573,7 @@ def _finish(sid: str, lesson: dict, profile: dict):
     summary = llm.public(summary)
     store.log_event(sid, "finished", summary)
     store.update_session(sid, phase="finished", profile=profile)
+    store.set_status(sid, "abgeschlossen")
     return {"done": True, "summary": summary, "progress": _progress(profile)}
 
 
@@ -504,6 +601,31 @@ def _session(sid: str) -> dict:
     return s
 
 
+def _owned(request: Request, sid: str, aktion: bool = False) -> dict:
+    """Lädt eine Session und prüft, ob sie der anfragenden Person gehört.
+
+    Lehrpersonen dürfen jede Session lesen. Lernende nur ihre eigenen; die
+    Zuordnung läuft über den Benutzernamen, nicht über die Session-ID (T-05).
+    Mit aktion=True wird zusätzlich geprüft, ob in der Sequenz noch gelernt
+    werden darf. Eine pausierte Sequenz wird dabei automatisch fortgesetzt.
+    """
+    s = _session(sid)
+    ident = auth.identity(request)
+    eigen = ident.key is not None and ident.key == s.get("user_key")
+    if not eigen and not ident.is_teacher:
+        if ident.key is None:
+            raise HTTPException(401, "Bitte melde dich zuerst an.")
+        raise HTTPException(403, "Diese Lernsequenz gehört jemand anderem.")
+    if aktion:
+        if s["status"] in ("abgebrochen", "archiviert"):
+            raise HTTPException(409, f"Diese Lernsequenz ist {s['status']} und kann nicht "
+                                     "fortgesetzt werden. Du kannst die Lektion neu beginnen.")
+        if s["status"] == "pausiert":
+            store.set_status(sid, "aktiv", "Weitergelernt")
+            s["status"] = "aktiv"
+    return s
+
+
 # ---------------------------------------------------------------- Lehrperson
 
 @teacher_api.get("/sessions")
@@ -527,6 +649,9 @@ def teacher_sessions(testlaeufe: bool = False):
                                if (c := p.get("confidence", [])) else None),
             "covered": p.get("covered", []),
             "testlauf": bool(s.get("testlauf")),
+            "status": s.get("status", "aktiv"),
+            "status_at": s.get("status_at"),
+            "archived_at": s.get("archived_at"),
             "created_at": s["created_at"],
             "updated_at": s["updated_at"],
         })
@@ -538,6 +663,8 @@ def teacher_session_detail(sid: str):
     s = _session(sid)
     return {
         "session": {"id": s["id"], "name": s["name"], "phase": s["phase"],
+                    "status": s.get("status"), "status_at": s.get("status_at"),
+                    "archived_at": s.get("archived_at"),
                     "testlauf": bool(s.get("testlauf")), "profile": s["profile"]},
         "events": store.get_events(sid),
     }
@@ -570,27 +697,54 @@ def me(request: Request):
 class LearnerLoginRequest(BaseModel):
     name: str
     code: str | None = None
+    pin: str | None = None
 
 
 @app.post("/api/learner/login")
 def learner_login(req: LearnerLoginRequest, request: Request, response: Response):
-    """Anmeldung für Lernende ohne Header: Name (Pseudonym) plus Klassencode."""
-    name = _login_learner(request, response, req.name, req.code)
-    return {"ok": True, "name": name}
+    """Anmeldung für Lernende ohne Header: Name (Pseudonym) plus Klassencode,
+    optional mit PIN."""
+    name = _login_learner(request, response, req.name, req.code, req.pin)
+    user = store.get_user(auth.normalize_user(name)) or {}
+    return {"ok": True, "name": name, "pin_gesetzt": bool(user.get("pin_hash"))}
 
 
 def _login_learner(request: Request, response: Response, name: str | None,
-                   code: str | None) -> str:
-    """Prüft Anmeldedaten und setzt das Lernenden-Cookie. Gibt den Namen zurück."""
+                   code: str | None, pin: str | None = None) -> str:
+    """Prüft Anmeldedaten und setzt das Lernenden-Cookie. Gibt den Namen zurück.
+
+    PIN (Entscheid E7): Wer beim ersten Start eine PIN setzt, muss sie bei
+    jeder weiteren Anmeldung mit diesem Namen angeben. Ohne PIN genügt der Name;
+    wer denselben Namen verwendet, kann dann auch fremde Sequenzen fortsetzen.
+    Dieses Risiko ist für den Klassentest bewusst in Kauf genommen.
+    """
     ident = auth.identity(request)
     if ident.via == "header":
         return ident.name            # Name kommt vom Proxy und ist nicht änderbar
     name = (name or "").strip()
     if not name:
         raise HTTPException(400, "Bitte einen Namen oder ein Pseudonym eingeben")
+    if len(name) > 60:
+        raise HTTPException(400, "Der Name ist zu lang (höchstens 60 Zeichen)")
     if not auth.check_class_code(code) and not ident.is_teacher:
         raise HTTPException(403, "Falscher Zugangscode. Frag deine Lehrperson "
                                  "nach dem aktuellen Code.")
+    pin = (pin or "").strip()
+    if pin and not auth.valid_pin_format(pin):
+        raise HTTPException(400, "Die PIN besteht aus genau vier Ziffern.")
+    key = auth.normalize_user(name)
+    user = store.get_user(key)
+    if user and user.get("pin_hash"):
+        if not pin:
+            raise HTTPException(403, detail={"code": "pin_noetig",
+                                             "message": "Für diesen Namen ist eine PIN gesetzt. Bitte gib sie ein."})
+        if not auth.verify_pin(pin, user["pin_hash"]):
+            raise HTTPException(403, detail={"code": "pin_falsch",
+                                             "message": "Die PIN stimmt nicht."})
+    else:
+        store.ensure_user(key, name)
+        if pin:
+            store.set_user_pin(key, auth.hash_pin(pin))
     response.set_cookie(auth.LEARNER_COOKIE, auth.make_learner_token(name),
                         max_age=auth.LEARNER_COOKIE_MAX_AGE, httponly=True, samesite="lax")
     return name

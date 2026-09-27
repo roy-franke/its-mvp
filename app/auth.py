@@ -79,10 +79,9 @@ def teacher_role() -> str:
     return (os.getenv("ITS_TEACHER_ROLE") or "teacher").strip().lower()
 
 
-def normalize_user(name: str | None) -> str:
-    """Schlüssel für den Vergleich von Namen: Gross-/Kleinschreibung und
-    Leerzeichen am Rand spielen keine Rolle."""
-    return (name or "").strip().casefold()
+# Schlüssel für den Vergleich von Namen (Gross-/Kleinschreibung und
+# Leerzeichen am Rand spielen keine Rolle), eine Definition für alle.
+normalize_user = store.normalize_user
 
 
 # ---------------------------------------------------------------- Signaturen
