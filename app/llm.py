@@ -373,7 +373,18 @@ def chat(system: str, user: str, json_mode: bool = False) -> str:
         raise
     record_timing(label, time.perf_counter() - t0, meta)
     log.debug("ANTWORT: %s", text)
-    return strip_reasoning(text)
+    return schweizer_rechtschreibung(strip_reasoning(text))
+
+
+def schweizer_rechtschreibung(text: str) -> str:
+    """Ersetzt ß durch ss (T-03).
+
+    Der Systemprompt verlangt Schweizer Rechtschreibung, Modelle halten sich
+    aber nicht immer daran («beißt»). Weil jeder Text aus dem Sprachmodell
+    hier vorbeikommt, bevor er geparst, gespeichert oder angezeigt wird,
+    genügt diese eine Stelle.
+    """
+    return text.replace("ß", "ss").replace("ẞ", "SS")
 
 
 def strip_reasoning(text: str) -> str:
