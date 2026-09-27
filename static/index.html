@@ -64,6 +64,17 @@
   .inputrow { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
   .btnrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .hint { font-size: .78rem; color: var(--muted); margin-top: 6px; }
+
+  /* Warteanzeige (T-02): deutlich sichtbar, solange der Tutor arbeitet */
+  .msg.tutor.waiting { background: #f8fafc; border-style: dashed; color: var(--muted); }
+  .msg.tutor.waiting .dots span { display: inline-block; width: 7px; height: 7px; margin-left: 3px;
+    border-radius: 50%; background: var(--accent); opacity: .3; animation: blink 1.2s infinite; }
+  .msg.tutor.waiting .dots span:nth-child(2) { animation-delay: .2s; }
+  .msg.tutor.waiting .dots span:nth-child(3) { animation-delay: .4s; }
+  .msg.tutor.waiting .slow { display: block; font-size: .8rem; margin-top: 6px; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
+  button.action:disabled, .confbtn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); }
+  .msg.tutor.error { background: #fef2f2; border-color: #fecaca; }
 </style>
 </head>
 <body>
@@ -131,7 +142,6 @@
     </div>
     <div class="card">
       <div id="chat"></div>
-      <div id="chat-spinner" class="spinner hidden">Dein Tutor überlegt …</div>
       <div class="inputrow">
         <div id="confidence-box" class="hidden" style="margin-bottom:12px">
           <div style="font-weight:600;margin-bottom:8px">Bevor dein Tutor bewertet:
@@ -141,11 +151,11 @@
         </div>
         <textarea id="chat-input" rows="3" placeholder="Deine Antwort oder Frage …"></textarea>
         <div class="btnrow">
-          <button id="btn-answer">Antwort abschicken</button>
-          <button id="btn-ask" class="secondary">💬 Frage stellen</button>
-          <button id="btn-theory" class="secondary">📖 Theorie dazu</button>
-          <button id="btn-deeper" class="secondary hidden">📖 Genauer erklären</button>
-          <button id="btn-continue" class="hidden">Weiter</button>
+          <button id="btn-answer" class="action">Antwort abschicken</button>
+          <button id="btn-ask" class="secondary action">💬 Frage stellen</button>
+          <button id="btn-theory" class="secondary action">📖 Theorie dazu</button>
+          <button id="btn-deeper" class="secondary action hidden">📖 Genauer erklären</button>
+          <button id="btn-continue" class="action hidden">Weiter</button>
         </div>
         <div class="hint">«Antwort abschicken» beantwortet die Aufgabe und wird bewertet.
           «Frage stellen» und «Theorie dazu» sind für dich – ohne Bewertung.</div>
@@ -214,22 +224,57 @@ function addMsg(cls, text, who) {
   }
   div.appendChild(document.createTextNode(text));
   renderMath(div);
-  $("chat").appendChild(div);
+  $("chat").insertBefore(div, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
 }
 function addNote(text) {
   const div = document.createElement("div");
   div.className = "note"; div.textContent = "🧭 " + text;
-  $("chat").appendChild(div);
+  $("chat").insertBefore(div, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
 }
-function setChatBusy(busy) {
-  $("chat-spinner").classList.toggle("hidden", !busy);
-  $("btn-answer").disabled = busy || !answerEnabled;
-  $("btn-ask").disabled = busy;
-  $("btn-theory").disabled = busy;
-  $("btn-deeper").disabled = busy;
-  $("btn-continue").disabled = busy;
+// ---------- Wartezustand (T-02)
+//
+// Solange die lernende Person auf eine Antwort des Tutors wartet, sind alle
+// Aktionsbuttons deaktiviert und reagieren weder auf Klick noch auf Tasten.
+// Das Eingabefeld bleibt beschreibbar: Ein dort vorbereiteter Text bleibt
+// stehen und wird nicht automatisch abgeschickt. Ein Vorabruf im Hintergrund
+// setzt diesen Zustand nicht.
+let busy = false, waitTimer = null;
+const SLOW_AFTER_MS = 20000;
+
+function showWaiting() {
+  hideWaiting();
+  const div = document.createElement("div");
+  div.className = "msg tutor waiting";
+  div.id = "waiting";
+  div.setAttribute("role", "status");
+  div.innerHTML = 'Dein Tutor denkt nach <span class="dots"><span></span><span></span><span></span></span>';
+  $("chat").appendChild(div);
+  $("chat").scrollTop = $("chat").scrollHeight;
+  waitTimer = setTimeout(() => {
+    const slow = document.createElement("span");
+    slow.className = "slow";
+    slow.textContent = "Das dauert gerade etwas länger. Die Antwort kommt noch, bitte hab einen Moment Geduld.";
+    div.appendChild(slow);
+    $("chat").scrollTop = $("chat").scrollHeight;
+  }, SLOW_AFTER_MS);
+}
+function hideWaiting() {
+  clearTimeout(waitTimer);
+  const w = $("waiting");
+  if (w) w.remove();
+}
+function setChatBusy(on) {
+  busy = on;
+  if (on) showWaiting(); else hideWaiting();
+  document.querySelectorAll("#view-learn button.action, #confidence-buttons button")
+    .forEach(b => { b.disabled = on; });
+  if (!on) $("btn-answer").disabled = !answerEnabled;
+}
+function addError(e) {
+  addMsg("tutor error", "⚠️ Das hat gerade nicht geklappt. Versuch es bitte nochmals.\n" +
+    (e && e.message ? e.message : ""), "Tutor");
 }
 function setAnswerMode(on) {
   answerEnabled = on;
@@ -408,6 +453,7 @@ async function nextTask(adaptation) {
 }
 
 $("btn-answer").onclick = () => {
+  if (busy || !answerEnabled) return;
   const text = $("chat-input").value.trim();
   if (!text) { $("chat-input").focus(); return; }
   addMsg("user", text, "Du (Antwort)");
@@ -427,18 +473,20 @@ function showConfidence(show) {
   $("btn-answer").disabled = show;
   $("btn-ask").disabled = show;
   $("btn-theory").disabled = show;
+  $("btn-continue").disabled = show;
 }
 
 $("confidence-buttons").innerHTML = Array.from({ length: 10 },
   (_, i) => `<button class="confbtn" data-v="${i + 1}">${i + 1}</button>`).join("");
 $("confidence-buttons").onclick = e => {
   const v = e.target.dataset && e.target.dataset.v;
-  if (!v) return;
+  if (!v || busy) return;
   showConfidence(false);
   submitAnswer(pendingAnswer, parseInt(v, 10));
 };
 
 async function submitAnswer(text, confidence) {
+  if (busy) return;
   setChatBusy(true);
   try {
     const d = await api(`/session/${sessionId}/answer`,
@@ -471,22 +519,27 @@ async function submitAnswer(text, confidence) {
       // während der Lernende das Feedback liest.
       prefetchNext($("btn-continue").dataset.adaptation || undefined);
     }
-  } catch (e) { alert(e.message); }
+  } catch (e) {
+    addError(e);
+    $("chat-input").value = $("chat-input").value || text;   // Antwort nicht verlieren
+  }
   finally { setChatBusy(false); }
 };
 
 // ---------- Verständnisfragen und Theorie auf Abruf (jederzeit)
 async function sendChat(text) {
+  if (busy) return;
   addMsg("user ask", text, "Du (Frage)");
   setChatBusy(true);
   try {
     const d = await api(`/session/${sessionId}/chat`, { message: text });
     addMsg("tutor", d.antwort, "Tutor");
-  } catch (e) { alert(e.message); }
-  setChatBusy(false);
+  } catch (e) { addError(e); }
+  finally { setChatBusy(false); }
 }
 
 $("btn-ask").onclick = () => {
+  if (busy) return;
   const text = $("chat-input").value.trim();
   if (!text) { $("chat-input").focus(); return; }
   $("chat-input").value = "";
@@ -500,15 +553,19 @@ $("btn-deeper").onclick = () =>
   sendChat("Erklär mir das bitte noch genauer und einfacher, gerne mit einem weiteren Beispiel.");
 
 $("btn-continue").onclick = async () => {
+  if (busy) return;
   setChatBusy(true);
   try { await nextTask($("btn-continue").dataset.adaptation || undefined); }
-  catch (e) { alert(e.message); }
-  setChatBusy(false);
+  catch (e) { addError(e); }
+  finally { setChatBusy(false); }
 };
 
 // Ctrl/Cmd+Enter schickt die Antwort ab
 $("chat-input").addEventListener("keydown", e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && answerEnabled) $("btn-answer").click();
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    e.preventDefault();
+    if (!busy && answerEnabled) $("btn-answer").click();
+  }
 });
 
 function renderProgress(p) {

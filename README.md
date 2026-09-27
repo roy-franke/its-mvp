@@ -14,7 +14,7 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 - **Sicherheitsfrage (metakognitiv)**: Vor der ersten Bewertung jeder Aufgabe geben Lernende an, wie sicher sie sich sind (1-10). Die Angaben werden protokolliert und der Lehrperson als Durchschnitt angezeigt – ein Mass für die Selbsteinschätzung und deren Kalibrierung.
 - **Theorie-Schritte**: Der Lernpfad besteht aus Input- und Anwendungs-Schritten. Der Tutor erklärt neue Konzepte zuerst (mit Beispiel), bevor Aufgaben dazu kommen – wie viel Theorie, entscheidet er adaptiv: Auf Niveau basic gibt es Input vor jedem neuen Konzept, auf intermediate zum Einstieg, auf advanced nur nach Fehlern. Nach zwei Fehlversuchen wird das Konzept neu und einfacher erklärt. Theorie-Schritte werden nicht bewertet und zählen nicht in die Quote. Lernende können zudem jederzeit selbst Theorie anfordern («Theorie dazu», «Genauer erklären»).
 - **Mathematische Formeln**: Der Tutor schreibt Formeln in LaTeX, das UI rendert sie mit KaTeX sauber als Brüche, Exponenten, Wurzeln usw. – im Lern-Chat, in der Einstufung und im Lernverlauf der Lehrperson. Hinweis: KaTeX wird von einem CDN geladen; für den Betrieb ganz ohne Internet müsste es lokal ins Projekt gelegt werden.
-- **Chat-Dialog**: Das Lernen läuft als Dialog. Der Tutor liefert Input und Aufgaben als Chat-Nachrichten, und Lernende können ihm jederzeit Verständnisfragen stellen («Frage stellen»), ohne dass dies bewertet wird. Der Tutor antwortet materialgebunden und verrät die Lösung der aktuellen Aufgabe nicht, sondern gibt Denkanstösse. Auch diese Fragen erscheinen im Lernverlauf der Lehrperson.
+- **Chat-Dialog**: Das Lernen läuft als Dialog. Der Tutor liefert Input und Aufgaben als Chat-Nachrichten, und Lernende können ihm jederzeit Verständnisfragen stellen («Frage stellen»), ohne dass dies bewertet wird. Der Tutor antwortet materialgebunden und verrät die Lösung der aktuellen Aufgabe nicht, sondern gibt Denkanstösse. Auch diese Fragen erscheinen im Lernverlauf der Lehrperson. Solange der Tutor arbeitet, zeigt der Chat eine Warteanzeige («Dein Tutor denkt nach …», nach 20 Sekunden mit beruhigendem Hinweis) und alle Aktionsbuttons sind deaktiviert; das Eingabefeld bleibt beschreibbar, nichts wird doppelt abgeschickt.
 - **Abschluss**: Zusammenfassung mit Lernzielabgleich und Empfehlung.
 - **Pausieren und Fortsetzen**: Browser schliessen genügt – beim nächsten Besuch bietet die Startseite an, die Lernsequenz an der gleichen Stelle fortzusetzen (Session-ID wird lokal im Browser gemerkt, Zustand liegt in der DB).
 - **Lehrpersonen-Sicht** (`/teacher`): Übersicht aller Sessions mit Fortschritt, Niveau und Quote; Klick auf eine Zeile zeigt den vollständigen Lernverlauf (Event-Log).
@@ -126,6 +126,14 @@ python3 -m pytest tests/ -q
 `tests/test_tutor.py` deckt die deterministische Adaptionslogik ab (Level rauf/runter,
 Retry, Serien, Randfälle), `tests/test_api.py` testet den kompletten Lernenden-Flow
 End-to-End über die API mit Mock-Provider – ohne LLM, ohne laufenden Server.
+
+Oberflächenprüfungen mit Playwright laufen separat gegen eine eigens gestartete
+Instanz mit Mock-Provider (bei Bedarf verzögert oder scheiternd):
+
+```bash
+pip install playwright && python3 -m playwright install chromium
+python3 tests/ui/ui_checks.py          # alle Szenarien, oder z.B. t02
+```
 
 ## Bewusste Grenzen (MVP)
 

@@ -140,6 +140,86 @@ def t01_button_nochmals_versuchen(pw):
         check("T-01 «Nochmals versuchen» fordert den Schritt neu an", len(reqs) == 1, str(reqs))
 
 
+AKTIONEN = ["#btn-answer", "#btn-ask", "#btn-theory", "#btn-deeper", "#btn-continue"]
+
+
+def zur_aufgabe(page):
+    """Klickt sich durch Theorie-Schritte bis zu einer Aufgabe."""
+    for _ in range(4):
+        if page.locator("#btn-answer").is_visible() and page.locator("#btn-answer").is_enabled():
+            return
+        page.click("#btn-continue")
+        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+    raise AssertionError("Keine Aufgabe erreicht")
+
+
+def sichtbare_aktionen_deaktiviert(page) -> bool:
+    for sel in AKTIONEN:
+        loc = page.locator(sel)
+        if loc.is_visible() and loc.is_enabled():
+            return False
+    return True
+
+
+@scenario("t02")
+def t02_wartezustand(pw):
+    """T-02 AK1-4: Warteanzeige, deaktivierte Buttons, Eingabe bleibt erhalten."""
+    with server(ITS_MOCK_DELAY="5") as base:
+        page = pw.chromium.launch().new_page()
+        start_lernsequenz(page, base)
+        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        # Nach dem Theorie-Schritt läuft der Vorabruf im Hintergrund (5 s)
+        check("T-02 Vorabruf blockiert die Oberfläche nicht",
+              page.locator("#btn-continue").is_enabled() and page.locator("#waiting").count() == 0)
+        zur_aufgabe(page)
+        answers = api_requests(page, "/answer")
+        chats = api_requests(page, "/chat")
+        page.fill("#chat-input", "Anna haftet, weil alle vier Voraussetzungen erfüllt sind.")
+        page.click("#btn-answer")
+        page.click("#confidence-buttons button[data-v='7']")
+        waiting = page.locator("#waiting")
+        expect(waiting).to_be_visible()
+        check("T-02 AK1 Warteanzeige sichtbar", "denkt nach" in waiting.inner_text())
+        check("T-02 AK1 alle Aktionsbuttons deaktiviert", sichtbare_aktionen_deaktiviert(page))
+        check("T-02 AK1 Sicherheitsbuttons deaktiviert oder ausgeblendet",
+              not page.locator("#confidence-box").is_visible())
+        # Während der Wartezeit tippen, Ctrl+Enter drücken, deaktivierte Buttons anklicken
+        page.fill("#chat-input", "Vorbereiteter Text für später")
+        page.press("#chat-input", "Control+Enter")
+        page.press("#chat-input", "Enter")
+        page.locator("#btn-ask").dispatch_event("click")
+        page.locator("#btn-answer").dispatch_event("click")
+        check("T-02 Eingabefeld bleibt beschreibbar", page.locator("#chat-input").is_editable())
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        wert = page.input_value("#chat-input")
+        check("T-02 AK2 Text bleibt unverändert", wert.startswith("Vorbereiteter Text für später"), repr(wert))
+        check("T-02 AK2/3 keine zusätzliche Anfrage", len(answers) == 1 and len(chats) == 0,
+              f"answer={len(answers)} chat={len(chats)}")
+        check("T-02 AK4 Buttons nach Ende wieder aktiv",
+              any(page.locator(s).is_visible() and page.locator(s).is_enabled() for s in AKTIONEN))
+
+        # AK4 mit fehlgeschlagener Anfrage: Verständnisfrage wird abgebrochen
+        page.route("**/chat", lambda route: route.abort())
+        page.fill("#chat-input", "Was heisst adäquat?")
+        page.click("#btn-ask")
+        expect(page.locator(".msg.tutor.error")).to_have_count(1, timeout=30000)
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("T-02 AK4 Buttons nach Fehler wieder aktiv", page.locator("#btn-ask").is_enabled())
+        check("T-02 Fehlermeldung im Chat", page.locator(".msg.tutor.error").count() == 1)
+
+        # Hinweis nach 20 Sekunden (mit längerer Verzögerung simuliert)
+        page.unroute("**/chat")
+        page.evaluate("SLOW_AFTER_MS")  # Konstante existiert
+    with server(ITS_MOCK_DELAY="23") as base:
+        page = pw.chromium.launch().new_page()
+        page.goto(base + "/")
+        page.evaluate("""() => { document.getElementById('view-learn').classList.remove('hidden');
+                                  setChatBusy(true); }""")
+        page.wait_for_timeout(20800)
+        check("T-02 beruhigender Hinweis nach 20 Sekunden",
+              "etwas länger" in page.locator("#waiting").inner_text())
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:
