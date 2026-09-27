@@ -297,3 +297,26 @@ def test_hundebiss_bleibt_wiederverwendet():
     task = {"inhalt": "Ein Schäferhund entkommt aus dem Garten und beisst ein Kind auf dem Schulweg.",
             "frage": "Haftet der Hundebesitzer?", "konzept": "Tierhalterhaftung"}
     assert didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(HAFTUNG))
+
+
+def test_fallwoerter_als_verbotsliste():
+    theorie = {"konzept": "Tierhalterhaftung",
+               "inhalt": "Die Tierhalterhaftung ist eine Kausalhaftung des Halters eines Tieres.",
+               "beispiel": "Ein Hundebesitzer haftet, wenn sein Hund einen Passanten beisst, auch ohne Fahrlässigkeit."}
+    w = didaktik.fallwoerter(theorie, didaktik.themenwoerter(HAFTUNG))
+    assert "Hundebesitzer" in w and "Passanten" in w and "beisst" in w
+    assert "haftet" not in w and "Tierhalterhaftung" not in w
+
+
+def test_verbotsliste_im_benutzerteil(monkeypatch):
+    prompts = []
+
+    def spy(system, user, json_mode=False):
+        prompts.append(user)
+        return llm._mock_text(system, user), {}
+    monkeypatch.setitem(llm._PROVIDERS, "mock", spy)
+    p = tutor.new_profile()
+    p["last_type"] = "theorie"
+    tutor.generate_task(LESSON, p, [{"type": "task", "payload": THEORIE_HUND}])
+    assert "dürfen in deinem Fall NICHT vorkommen" in prompts[0] and "Passanten" in prompts[0]
+    assert "Rechenoperation" in prompts[0]

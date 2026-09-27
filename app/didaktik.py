@@ -386,6 +386,28 @@ def beispiel_wiederverwendet(task: dict, theorie: dict | None,
     return None
 
 
+def fallwoerter(theorie: dict | None, themen: set[str] | None = None, n: int = 10) -> list[str]:
+    """Die prägenden Wörter des Theorie-Beispiels, wie sie im Text stehen.
+
+    Das sind die Wörter, die dieselbe Prüfung wie beispiel_wiederverwendet als
+    Fallwörter zählt (nicht in der Erklärung, keine Themen- oder Stoppwörter).
+    Sie gehen vorab als ausdrückliche Verbotsliste an das Modell: Eine konkrete
+    Liste («Hund, Passant, beissen») befolgt es zuverlässiger als die
+    allgemeine Anweisung, einen anderen Fall zu wählen.
+    """
+    if not theorie or not (theorie.get("beispiel") or "").strip():
+        return []
+    ausnahmen = staemme(" ".join([theorie.get("konzept") or "", theorie.get("inhalt") or ""])) | (themen or set())
+    out, gesehen = [], set()
+    for w in woerter(theorie["beispiel"]):
+        st = stamm(w)
+        if _kommt_vor(st, ausnahmen) or any(gleicher_stamm(st, g) for g in gesehen):
+            continue
+        gesehen.add(st)
+        out.append(w)
+    return out[:n]
+
+
 _DEFINITIONSFRAGE = re.compile(
     r"^\W*(was (ist|sind|bedeutet|bedeuten|heisst|versteht man unter|meint man mit)|"
     r"definiere|wie (lautet|heisst) die definition|erkläre,? was)\b", re.IGNORECASE)

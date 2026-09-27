@@ -435,7 +435,14 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
             f"erfinde einen neuen Fall mit anderem Ort, anderen Beteiligten und anderem "
             f"Gegenstand): {beispiel}\n"
         )
+        verboten = didaktik.fallwoerter(theorie, didaktik.themenwoerter(lesson))
+        if verboten:
+            instruction += ("Diese Wörter aus dem Beispiel und verwandte Wörter dürfen in deinem "
+                            "Fall NICHT vorkommen: " + ", ".join(verboten) + ".\n")
     instruction += (
+        "Die Frage darf weder die gesuchten Begriffe noch die anzuwendende Methode oder "
+        "Rechenoperation nennen (nicht «Addiere die Brüche …», sondern «Wie viel Mehl "
+        "brauchst du noch?»). "
         "Die erwartete Antwort und ihre Schlüsselbegriffe dürfen nicht in der Frage vorkommen "
         "(ausser bei Multiple Choice). Schlüsselbegriffe sind nur Fachbegriffe aus dem Material, "
         "die der Lernende selbst nennen oder anwenden muss (z.B. «Tierhalterhaftung», «Nenner»), "
