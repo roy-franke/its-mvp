@@ -452,6 +452,35 @@ def d04_niveau(pw):
               "bleiben auf dem Niveau" in page.locator(".msg.tutor").last.inner_text())
 
 
+@scenario("lp")
+def lp_lernverlauf(pw):
+    """Lehrpersonen-Sicht: Lernverlauf mit allen neuen Event-Typen ohne Skriptfehler."""
+    with server(ITS_MOCK_FAIL="EINSTUFUNG_BEWERTEN") as base:
+        page = launch(pw).new_page()
+        fehler = []
+        page.on("pageerror", lambda e: fehler.append(str(e)))
+        start_lernsequenz(page, base, name="Verlauf")
+        zur_aufgabe(page)
+        beantworte(page, "Anna haftet, weil Schaden da ist.")        # teilweise
+        beantworte(page, "Dazu Widerrechtlichkeit, Kausalzusammenhang, Verschulden.", None)
+        page.fill("#chat-input", "Ich möchte auf dem Grundniveau bleiben.")
+        page.click("#btn-ask")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        page.click("#btn-pause")
+        expect(page.locator("#home-banner")).to_be_visible()
+        page.goto(base + "/teacher")
+        page.locator("tr.clickable").first.click()
+        detail = page.locator("#detail-events")
+        expect(detail).to_contain_text("Status", timeout=10000)
+        text = detail.inner_text()
+        for stichwort in ("Fallback", "Einstufung", "Theorie", "Aufgabe", "Erwartet:", "teilweise richtig",
+                          "Versuch 2", "Niveau", "pausiert"):
+            check(f"Lernverlauf zeigt «{stichwort}»", stichwort in text)
+        check("Lernverlauf ohne Skriptfehler", not fehler, "; ".join(fehler))
+        t = page.locator("#timing-rows").inner_text()
+        check("Messübersicht mit Fallback-Spalte", "Einstufung bewerten" in t)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:
