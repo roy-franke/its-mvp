@@ -171,7 +171,8 @@ STRENGE_TEXT = {
                   "ungenau. Sachliche Fehler gelten nie als richtig.",
     "streng": "BEWERTUNGSSTRENGE: streng. Die Antwort muss vollständig sein und die korrekten "
               "Fachbegriffe verwenden; ungenaue oder nur umschriebene Begriffe erfüllen ein "
-              "Element nicht (Status ungenau, nicht falsch). Sachliche Fehler gelten nie als richtig.",
+              "Element nicht (Status ungenau, nicht falsch oder fehlt; das gilt auch für einen "
+              "zutreffenden Oberbegriff). Sachliche Fehler gelten nie als richtig.",
 }
 
 
@@ -560,10 +561,13 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "   ungenau = sachlich zutreffend, aber zu allgemein, nur umschrieben oder ohne den "
         "verlangten Fachbegriff;\n"
         "   falsch = widerspricht der Musterlösung (anderes Ergebnis, anderes Ja/Nein, "
-        "vertauschte Bedeutung zweier Begriffe);\n"
+        "vertauschte Bedeutung zweier Begriffe, etwa die Bedeutung des Zählers für den Nenner);\n"
         "   fehlt = kommt nicht vor.\n"
-        "Kommt die Antwort zu einem anderen Ergebnis als die Musterlösung, setze "
+        "Kommt die Antwort zu einem anderen Ergebnis als die Musterlösung oder knüpft sie es "
+        "an eine Bedingung, die laut Musterlösung nicht gilt («nur wenn …»), setze "
         "sachlicher_widerspruch auf true, auch wenn einzelne Wörter stimmen.\n"
+        "Nennt die Antwort einen zutreffenden Oberbegriff statt des gesuchten Begriffs, ist "
+        "dieses Element ungenau, nicht fehlend.\n"
         "Urteil: 'korrekt' = alle Elemente korrekt. 'teilweise' = mindestens ein Element "
         "korrekt oder ungenau und keines falsch. 'falsch' = nichts Zutreffendes oder ein "
         "sachlicher Widerspruch.\n\n"
