@@ -425,15 +425,31 @@ def _log_llm_meta(sid: str, schrittart: str, data: dict):
             "behoben": data.get("_versuche", 1) > 1 and len(data["_verstoesse"]) < data["_versuche"]})
 
 
+def _einsatzart(lesson: dict) -> str:
+    return einstellungen.settings(lesson)["einsatzart"]
+
+
 def _generate_step(lesson: dict, profile: dict, history: list[dict],
                    adaptation: str | None) -> tuple[str, dict]:
-    step_type = tutor.decide_step_type(profile, adaptation)
+    step_type = tutor.decide_step_type(profile, adaptation, _einsatzart(lesson))
     if step_type == "theorie":
         return step_type, tutor.generate_theory(lesson, profile, history, adaptation)
-    return step_type, tutor.generate_task(lesson, profile, history, adaptation)
+    task = tutor.generate_task(lesson, profile, history, adaptation)
+    if (_einsatzart(lesson) == "einfuehrung" and not task.get("_fallback")
+            and tutor.unerklaert(task, profile.get("erklaert") or [], tutor.erklaerte_texte(history))):
+        # D-02: Braucht die Aufgabe auch nach der Neugenerierung ein noch nicht
+        # erklärtes Konzept, kommt zuerst ein Theorieschritt dazu.
+        verstoesse = task.get("_verstoesse", [])
+        profil_fuer_theorie = dict(profile, current_task={"konzept": task.get("konzept", "")})
+        theorie = tutor.generate_theory(lesson, profil_fuer_theorie, history, "konzept")
+        theorie["_eingeschoben"] = {"grund": "Konzept noch nicht erklärt",
+                                    "konzept": task.get("konzept", ""), "verstoesse": verstoesse}
+        return "theorie", theorie
+    return "aufgabe", task
 
 
-def _vorabruf_ungueltig(pre: dict, sid: str, profile: dict, adaptation: str | None) -> str | None:
+def _vorabruf_ungueltig(pre: dict, sid: str, profile: dict, adaptation: str | None,
+                        lesson: dict) -> str | None:
     """Prüft, ob ein vorab erzeugter Schritt noch zum Gesprächsstand passt."""
     if pre.get("stand") != store.last_event_id(sid):
         return "Gesprächsstand hat sich seit dem Vorabruf geändert"
@@ -441,7 +457,8 @@ def _vorabruf_ungueltig(pre: dict, sid: str, profile: dict, adaptation: str | No
         return "andere Adaption angefordert"
     if pre.get("step") != profile["step"]:
         return "Lernschritt hat sich geändert"
-    if pre.get("step_type") != tutor.decide_step_type(profile, adaptation):
+    if pre.get("step_type") not in (tutor.decide_step_type(profile, adaptation, _einsatzart(lesson)),
+                                    "theorie"):
         return "andere Schrittart fällig"
     if pre.get("task", {}).get("_fallback"):
         return "Vorabruf endete im Fallback, neuer Versuch"
@@ -479,7 +496,7 @@ def next_step(sid: str, request: Request, adaptation: str | None = None,
     pre = store.get_vorabruf(sid)
     if pre:
         store.set_vorabruf(sid, None)
-        grund = _vorabruf_ungueltig(pre, sid, profile, adaptation)
+        grund = _vorabruf_ungueltig(pre, sid, profile, adaptation, lesson)
         if grund:
             store.log_event(sid, "vorabruf_verworfen", {"grund": grund})
         else:
@@ -503,8 +520,19 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
         store.log_event(sid, "task", public_task)
         store.update_session(sid, profile=profile)
         return {"done": False, "task": tutor.fuer_lernende(public_task), "progress": _progress(profile)}
+    if task.get("_eingeschoben"):
+        e = task["_eingeschoben"]
+        if e.get("verstoesse"):
+            store.log_event(sid, "regel_verstoss", {"schrittart": "NAECHSTE_AUFGABE",
+                                                    "verstoesse": e["verstoesse"], "behoben": False})
+        store.log_event(sid, "theorie_eingeschoben", {"grund": e["grund"], "konzept": e["konzept"]})
     if step_type == "theorie":
         profile["theory_steps"] = profile.get("theory_steps", 0) + 1
+        profile["aufgaben_seit_theorie"] = 0
+        if task.get("konzept") and task["konzept"] not in profile.setdefault("erklaert", []):
+            profile["erklaert"].append(task["konzept"])
+    else:
+        profile["aufgaben_seit_theorie"] = profile.get("aufgaben_seit_theorie", 0) + 1
     if "material_abschnitt" in task:
         profile.setdefault("fallback_abschnitte", []).append(task["material_abschnitt"])
     profile["current_task"] = public_task
@@ -553,7 +581,11 @@ def answer(sid: str, req: AnswerRequest, request: Request):
                 "progress": _progress(profile)}
     if confidence is not None:
         profile.setdefault("confidence", []).append(confidence)
-    action, reason = tutor.adapt(profile, result["bewertung"])
+    kontext = {
+        "einsatzart": _einsatzart(lesson),
+        "konzept_erklaert": tutor.konzept_erklaert(task.get("konzept"), profile.get("erklaert") or []),
+    }
+    action, reason = tutor.adapt(profile, result["bewertung"], kontext)
     store.log_event(sid, "answer_evaluated", {
         "bewertung": result["bewertung"], "korrekt": result["korrekt"],
         "feedback": result.get("feedback", ""),

@@ -422,7 +422,7 @@ function setContinueMode(adaption, finished) {
   setAnswerMode(false);
   $("btn-continue").textContent = finished ? "Zum Abschluss" : "Weiter";
   $("btn-continue").dataset.adaptation =
-    adaption === "simplify" ? "simplify" : adaption === "advance" ? "advance" : "";
+    ["simplify", "advance", "explain"].includes(adaption) ? adaption : "";
 }
 
 // ---------- Anmeldung und Übersicht (T-04, T-05)

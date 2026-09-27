@@ -161,7 +161,9 @@ def test_regelverstoss_wird_protokolliert(monkeypatch):
     c.post(f"/api/session/{sid}/assess", json={"answers": ["a", "b", "c"]})
     t = c.post(f"/api/session/{sid}/next").json()["task"]
     assert t["typ"] == "theorie"
-    immer_gleich = json.dumps(dict(SCREENSHOT_4, titel="T"))
+    # Konzept ist erklärt (D-02 greift nicht), das Lösungswort steht aber in der Frage
+    immer_gleich = json.dumps(dict(SCREENSHOT_4, titel="T", konzept="Verschuldenshaftung",
+                                   schluesselbegriffe=["Kausalhaftung"]))
     monkeypatch.setitem(llm._PROVIDERS, "mock", lambda s, u, json_mode=False: (
         immer_gleich if "NAECHSTE_AUFGABE" in u else llm._mock_text(s, u), {}))
     c.post(f"/api/session/{sid}/next")

@@ -12,7 +12,7 @@ import json
 import os
 import re
 
-from . import didaktik, llm
+from . import didaktik, einstellungen, llm
 
 LEVELS = ["basic", "intermediate", "advanced"]
 
@@ -41,27 +41,64 @@ def new_profile() -> dict:
         "theory_steps": 0,      # Anzahl erhaltener Theorie-Schritte (für Analyse)
         "partial": 0,           # Anzahl teilweise korrekter Antworten (für Analyse)
         "confidence": [],       # Sicherheitsangaben 1-10 vor der Bewertung
+        "erklaert": [],         # in dieser Sequenz per Theorie erklärte Konzepte (D-02)
+        "aufgaben_seit_theorie": 0,
     }
 
 
-def decide_step_type(profile: dict, adaptation: str | None) -> str:
+def decide_step_type(profile: dict, adaptation: str | None,
+                     einsatzart: str = "einfuehrung") -> str:
     """Entscheidet deterministisch, ob als Nächstes Theorie oder eine Aufgabe kommt.
 
     Regeln (Input -> Anwendung -> Feedback):
     - Nie zwei automatische Theorie-Schritte hintereinander.
-    - Nach zwei Fehlversuchen (simplify) wird das Konzept zuerst neu erklärt.
-    - Zu Beginn der Sequenz gibt es Theorie, ausser auf Niveau advanced.
+    - Nach zwei Fehlversuchen (simplify) oder einer falschen Antwort zu einem
+      noch nicht erklärten Konzept (explain) wird zuerst erklärt.
     - Auf Niveau basic kommt vor jedem neuen Konzept ein Theorie-Schritt.
+    - Einführung (D-02): Aufgaben nur zu erklärten Konzepten. Zu Beginn gibt es
+      deshalb immer Theorie, auch auf advanced, und nach zwei Aufgaben folgt
+      der nächste Theorieschritt mit einem neuen Konzept.
+    - Vertiefung: Zu Beginn Theorie ausser auf advanced, danach Aufgaben.
     """
     if profile.get("last_type") == "theorie":
         return "aufgabe"
-    if adaptation == "simplify":
+    if adaptation in ("simplify", "explain"):
         return "theorie"
+    if einsatzart == "einfuehrung":
+        if not profile.get("erklaert") and profile.get("last_type") is None:
+            return "theorie"
+        if profile["level"] == "basic" or profile.get("aufgaben_seit_theorie", 0) >= 2:
+            return "theorie"
+        return "aufgabe"
     if profile["step"] == 0 and profile["level"] != "advanced":
         return "theorie"
     if profile["level"] == "basic":
         return "theorie"
     return "aufgabe"
+
+
+def konzept_erklaert(konzept: str | None, erklaert: list[str]) -> bool:
+    """Wurde das Konzept (oder ein Konzept mit gleichem Wortstamm) schon erklärt?"""
+    teile = {s for s in didaktik.staemme(konzept or "") if len(s) >= 5}
+    if not teile:
+        return True          # ohne erkennbares Konzept nicht blockieren
+    for e in erklaert:
+        andere = didaktik.staemme(e)
+        if any(didaktik.gleicher_stamm(t, a) for t in teile for a in andere if len(a) >= 5):
+            return True
+    return False
+
+
+def erklaerte_texte(history: list[dict]) -> str:
+    """Alles, was in dieser Sequenz erklärt wurde: Theorieschritte und Tutor-Antworten."""
+    teile = []
+    for ev in history:
+        p = ev["payload"]
+        if ev["type"] == "task" and p.get("typ") == "theorie":
+            teile += [p.get("titel", ""), p.get("inhalt", ""), p.get("beispiel", ""), p.get("konzept", "")]
+        elif ev["type"] == "chat_reply":
+            teile.append(p.get("antwort", ""))
+    return "\n".join(t for t in teile if t)
 
 
 def correct_rate(p: dict) -> float:
@@ -104,9 +141,21 @@ def _system_prompt(lesson: dict) -> str:
     )
 
 
+EINSATZART_TEXT = {
+    "einfuehrung": "EINSATZART: Einführung. Die Lernenden bringen kein Vorwissen mit. Bewertete "
+                   "Aufgaben beziehen sich nur auf Konzepte, die in dieser Lernsequenz bereits "
+                   "erklärt wurden. Setze kein Fachwissen voraus, das nicht allgemein bekannt ist.",
+    "vertiefung": "EINSATZART: Vertiefung. Die Lernenden bringen Vorwissen mit. Aufgaben dürfen "
+                  "Konzepte aus dem Material voraussetzen, die in dieser Sequenz noch nicht "
+                  "erklärt wurden.",
+}
+
+
 def _einstellungen_block(lesson: dict) -> str:
     """Lektionseinstellungen als Anweisungen (konstant innerhalb der Lektion)."""
-    return ""
+    e = einstellungen.settings(lesson)
+    zeilen = ["EINSTELLUNGEN DIESER LEKTION:", EINSATZART_TEXT[e["einsatzart"]]]
+    return "\n".join(zeilen) + "\n\n"
 
 
 def suggest_goals(material: str) -> dict:
@@ -129,13 +178,21 @@ def suggest_goals(material: str) -> dict:
 
 # ---------------------------------------------------------------- Einstufung
 
+EINSTUFUNG_EINFUEHRUNG = (
+    "Die Lektion ist eine Einführung: Die Einstufung bestimmt nur das Startniveau. "
+    "Frage nach Alltagserfahrungen, Vorstellungen und allgemein bekanntem Wissen, "
+    "nicht nach Fachbegriffen aus dem Material.\n")
+
+
 def generate_assessment(lesson: dict) -> list[str]:
     """Erzeugt 3 Einstiegsfragen zur Wissenseinstufung."""
+    einfuehrung = einstellungen.settings(lesson)["einsatzart"] == "einfuehrung"
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: EINSTUFUNGSFRAGEN\n"
         "Erstelle genau 3 kurze, offene Einstiegsfragen, um das Vorwissen zur "
         "Lektion einzuschätzen: eine leichte, eine mittlere, eine anspruchsvolle. "
+        + (EINSTUFUNG_EINFUEHRUNG if einfuehrung else "") +
         'Format: {"questions": ["...", "...", "..."]}',
         fallback={"questions": lesson.get("einstufungsfragen_fallback", [])},
     )
@@ -151,7 +208,11 @@ def evaluate_assessment(lesson: dict, questions: list[str], answers: list[str]) 
         "AUFGABE: EINSTUFUNG_BEWERTEN\n"
         "Beurteile das Vorwissen anhand dieser Antworten und bestimme das "
         "Startniveau: basic, intermediate oder advanced. Leere oder sehr knappe "
-        "Antworten deuten auf basic.\n\n"
+        "Antworten deuten auf basic.\n"
+        + ("Die Lektion ist eine Einführung: Erwarte keine Fachbegriffe, beurteile "
+           "Vorstellungen und Alltagswissen.\n"
+           if einstellungen.settings(lesson)["einsatzart"] == "einfuehrung" else "")
+        + "\n"
         f"{qa}\n\n"
         'Format: {"level": "basic|intermediate|advanced", "begruendung": "1-2 Sätze, direkt an den Lernenden gerichtet"}',
         fallback=dict(FALLBACK_TEXTE["einstufung"]),
@@ -192,7 +253,19 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         f"Bisheriger Verlauf (Kurzfassung): {recent}\n"
     )
     vorher = letzte_theorie(history)
-    if adaptation == "simplify":
+    ziel = (profile.get("current_task") or {}).get("konzept") or ""
+    if adaptation == "explain" and ziel:
+        instruction += (
+            f"Der Lernende hat eine Aufgabe zum Konzept '{ziel}' falsch beantwortet, das in "
+            "dieser Sequenz noch nicht erklärt wurde. Erkläre GENAU DIESES Konzept "
+            "verständlich von Grund auf.\n"
+        )
+    elif adaptation == "konzept" and ziel:
+        instruction += (
+            f"Erkläre das Konzept '{ziel}' aus dem Material. Es wird für die nächste "
+            "Aufgabe gebraucht, wurde aber noch nicht erklärt.\n"
+        )
+    elif adaptation == "simplify":
         instruction += (
             "Der Lernende hatte zweimal Mühe mit dem zuletzt behandelten Konzept. "
             "Erkläre GENAU DIESES Konzept noch einmal neu: einfacher, in kleinen "
@@ -265,6 +338,15 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         )
     else:
         instruction += "Wähle das nächste sinnvolle Konzept aus dem Material.\n"
+    einfuehrung = einstellungen.settings(lesson)["einsatzart"] == "einfuehrung"
+    erklaert = profile.get("erklaert") or []
+    if einfuehrung:
+        instruction += (
+            "In dieser Sequenz bereits erklärte Konzepte: "
+            + (", ".join(erklaert) or "noch keine") + ". Stelle die Aufgabe NUR zu einem "
+            "dieser Konzepte. Die erwartete Antwort darf kein Konzept und keinen Fachbegriff "
+            "verlangen, der noch nicht erklärt wurde.\n"
+        )
     instruction += f"Aufgabentyp auf diesem Niveau: {AUFGABENTYP_NACH_NIVEAU.get(level, '')}\n"
     if theorie:
         beispiel = theorie.get("beispiel") or theorie.get("inhalt", "")[:400]
@@ -284,15 +366,34 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         '"schluesselbegriffe": ["1-4 Begriffe, die eine richtige Antwort enthalten muss"], '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
-    data = llm.chat_json(
-        _system_prompt(lesson), instruction, fallback={},
-        check=lambda d: didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie))
+    texte = erklaerte_texte(history)
+
+    def pruefen(d: dict) -> str | None:
+        return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie)
+                or (unerklaert(d, erklaert, texte) if einfuehrung else None))
+
+    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={}, check=pruefen)
     if data.get("_fallback"):
         return task_fallback(lesson, profile, adaptation, data)
     if not isinstance(data.get("optionen"), list) or data.get("aufgabentyp") != "multiple_choice":
         data["optionen"] = []
     data["typ"] = "aufgabe"
     return data
+
+
+def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
+    """D-02: Verlangt die Aufgabe ein Konzept oder einen Begriff, der in dieser
+    Sequenz noch nicht erklärt wurde?"""
+    if not konzept_erklaert(task.get("konzept"), erklaert):
+        return (f"Das Konzept «{task.get('konzept')}» wurde in dieser Sequenz noch nicht erklärt. "
+                "Stelle die Aufgabe zu einem bereits erklärten Konzept.")
+    bekannte = didaktik.staemme(texte)
+    for begriff in task.get("schluesselbegriffe") or []:
+        teile = [t for t in didaktik.staemme(str(begriff)) if len(t) >= 5]
+        if teile and not all(any(didaktik.gleicher_stamm(t, b) for b in bekannte) for t in teile):
+            return (f"Die erwartete Antwort verlangt den Begriff «{begriff}», der noch nicht "
+                    "erklärt wurde. Frage nur nach bereits Erklärtem.")
+    return None
 
 
 # Felder, die nur der Server und die Lehrperson sehen (nie die Lernenden):
@@ -544,12 +645,26 @@ def task_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dic
 
 # ---------------------------------------------------------------- Adaption
 
-def adapt(profile: dict, bewertung: str) -> tuple[str, str]:
+def adapt(profile: dict, bewertung: str, kontext: dict | None = None) -> tuple[str, str]:
     """Adaptive Kernlogik. Verändert das Profil und gibt (aktion, begruendung) zurück.
 
     Bewertung: 'korrekt' | 'teilweise' | 'falsch'
-    Aktionen:  'next' | 'advance' | 'retry' | 'simplify'
+    Aktionen:  'next' | 'advance' | 'retry' | 'simplify' | 'explain'
+    kontext:   einsatzart ('einfuehrung' | 'vertiefung') und konzept_erklaert
+               (wurde das Konzept der Aufgabe in dieser Sequenz schon erklärt?)
     """
+    k = kontext or {}
+    if (bewertung == "falsch" and k.get("einsatzart") == "vertiefung"
+            and k.get("konzept_erklaert") is False):
+        # D-02: In der Vertiefung darf eine Aufgabe Unerklärtes voraussetzen.
+        # Eine falsche Antwort dazu führt zu einer Erklärung, nicht zu einer
+        # Niveausenkung und nicht zu einem zweiten Versuch ohne Erklärung.
+        profile["wrong"] += 1
+        profile["streak"] = 0
+        profile["attempts_current"] = 0
+        profile["step"] += 1
+        return "explain", ("Dieses Konzept haben wir noch nicht angeschaut. Ich erkläre es dir "
+                           "zuerst, das zählt nicht gegen dein Niveau.")
     if bewertung == "korrekt":
         profile["correct"] += 1
         profile["streak"] += 1

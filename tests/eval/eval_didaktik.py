@@ -157,6 +157,91 @@ def eval_d01(b: Bericht, anzahl: int):
     b.ak("D-01", "AK 3 Stichprobe im Bericht", len(echt) > 0, f"{min(10, len(echt))} Aufgaben")
 
 
+# ---------------------------------------------------------------- Hilfen für ganze Sequenzen
+
+_CLIENT = None
+
+
+def client():
+    """FastAPI-TestClient gegen die echte App mit dem konfigurierten Modell.
+
+    Datenbank in einem Temp-Ordner, Zugangsschutz aus: Die Evaluation soll
+    Roys Daten nicht berühren.
+    """
+    global _CLIENT
+    if _CLIENT is None:
+        import tempfile
+        os.environ["ITS_DB_PATH"] = str(Path(tempfile.mkdtemp(prefix="its_eval_")) / "eval.db")
+        os.environ["TEACHER_PASSWORD"] = ""
+        os.environ["CLASS_CODE"] = ""
+        os.environ["ITS_TRUST_PROXY_HEADERS"] = "false"
+        from fastapi.testclient import TestClient
+        from app.main import app
+        _CLIENT = TestClient(app)
+    return _CLIENT
+
+
+def sequenz(lesson_id: str, name: str, schritte: int = 12, antwort=None) -> tuple[str, list[dict]]:
+    """Spielt eine Lernsequenz durch. `antwort(task, events)` liefert die Antwort
+    der simulierten lernenden Person; Standard ist die Musterlösung."""
+    c = client()
+    c.post("/api/learner/login", json={"name": name})
+    d = c.post("/api/session/start", json={"lesson_id": lesson_id, "neu_beginnen": True}).json()
+    sid = d["session_id"]
+    c.post(f"/api/session/{sid}/assess", json={"answers": ["weiss ich nicht"] * 3})
+    adaption = ""
+    for _ in range(schritte):
+        r = c.post(f"/api/session/{sid}/next" + (f"?adaptation={adaption}" if adaption else "")).json()
+        adaption = ""
+        if r.get("done"):
+            break
+        if r["task"]["typ"] != "aufgabe":
+            continue
+        events = c.get(f"/api/teacher/sessions/{sid}").json()["events"]
+        voll = [e["payload"] for e in events if e["type"] == "task"][-1]
+        text = antwort(voll, events) if antwort else (voll.get("erwartete_antwort") or "weiss nicht")
+        a = c.post(f"/api/session/{sid}/answer", json={"answer": text, "confidence": 5}).json()
+        if a["adaption"] == "retry":
+            a = c.post(f"/api/session/{sid}/answer", json={"answer": text}).json()
+        adaption = a["adaption"] if a["adaption"] in ("simplify", "explain") else ""
+    return sid, c.get(f"/api/teacher/sessions/{sid}").json()["events"]
+
+
+# ---------------------------------------------------------------- D-02
+
+@paket("D-02")
+def eval_d02(b: Bericht, anzahl: int):
+    """Einführung: keine Aufgabe zu einem vorher nicht erklärten Konzept."""
+    from app import tutor
+    b.abschnitt("D-02 Einsatzart Einführung",
+                "Zwei vollständige Lernsequenzen in der Quantenphysik-Lektion (Einführung) "
+                "und eine in der Haftungsrecht-Lektion. Die simulierte lernende Person "
+                "antwortet mit der Musterlösung. Geprüft wird jede bewertete Aufgabe gegen "
+                "die bis dahin erklärten Konzepte und Texte.")
+    verstoesse, aufgaben, eingeschoben = [], 0, 0
+    for i, lid in enumerate((QUANTEN, QUANTEN, HAFTUNG)):
+        _, events = sequenz(lid, f"Eval D02 {i}")
+        erklaert, bisher = [], []
+        for e in events:
+            bisher.append(e)
+            p = e["payload"]
+            if e["type"] == "theorie_eingeschoben":
+                eingeschoben += 1
+            if e["type"] != "task":
+                continue
+            if p.get("typ") == "theorie" and p.get("konzept"):
+                erklaert.append(p["konzept"])
+            if p.get("typ") == "aufgabe" and not p.get("fallback"):
+                aufgaben += 1
+                v = tutor.unerklaert(p, erklaert, tutor.erklaerte_texte(bisher[:-1]))
+                if v:
+                    verstoesse.append((lid, p, v))
+    b.ak("D-02", "AK 1 keine Aufgabe zu unerklärtem Konzept (Einführung)", not verstoesse,
+         f"{len(verstoesse)} von {aufgaben} Aufgaben, {eingeschoben} Theorieschritte eingeschoben")
+    for lid, p, v in verstoesse:
+        b.text(f"- {lid}: «{p.get('frage')}» (erwartet: {p.get('erwartete_antwort')}) – {v}")
+
+
 # ---------------------------------------------------------------- Ablauf
 
 def main():

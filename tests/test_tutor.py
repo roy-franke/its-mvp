@@ -128,11 +128,31 @@ def test_teilweise_unterbricht_serie():
 
 # ---------------------------------------------------------------- Schrittwahl
 
-def test_sequenz_beginnt_mit_theorie_ausser_advanced():
+def test_vertiefung_beginnt_mit_theorie_ausser_advanced():
     for level, expected in [("basic", "theorie"), ("intermediate", "theorie"),
                             ("advanced", "aufgabe")]:
         p = _profile(level)
-        assert tutor.decide_step_type(p, None) == expected, level
+        assert tutor.decide_step_type(p, None, "vertiefung") == expected, level
+
+
+def test_einfuehrung_beginnt_immer_mit_theorie():
+    for level in tutor.LEVELS:
+        assert tutor.decide_step_type(_profile(level), None, "einfuehrung") == "theorie", level
+
+
+def test_einfuehrung_neue_theorie_nach_zwei_aufgaben():
+    p = _profile("advanced")
+    p.update(step=3, last_type="aufgabe", erklaert=["Schaden"], aufgaben_seit_theorie=1)
+    assert tutor.decide_step_type(p, None, "einfuehrung") == "aufgabe"
+    p["aufgaben_seit_theorie"] = 2
+    assert tutor.decide_step_type(p, None, "einfuehrung") == "theorie"
+    assert tutor.decide_step_type(p, None, "vertiefung") == "aufgabe"
+
+
+def test_explain_erzwingt_theorie():
+    p = _profile("advanced")
+    p.update(step=2, last_type="aufgabe")
+    assert tutor.decide_step_type(p, "explain", "vertiefung") == "theorie"
 
 
 def test_nie_zwei_theorie_schritte_hintereinander():
@@ -183,3 +203,39 @@ def test_extract_json_verschachtelt():
 def test_extract_json_kaputt():
     assert extract_json("kein json") is None
     assert extract_json('{"a": ') is None
+
+
+# ---------------------------------------------------------------- D-02 Einsatzart
+
+def test_vertiefung_falsch_zu_unerklaertem_konzept_gibt_erklaerung():
+    p = _profile("advanced")
+    action, reason = tutor.adapt(p, "falsch", {"einsatzart": "vertiefung", "konzept_erklaert": False})
+    assert action == "explain" and reason
+    assert p["level"] == "advanced"        # keine Niveausenkung
+    assert p["step"] == 1 and p["attempts_current"] == 0
+
+
+def test_vertiefung_falsch_zu_erklaertem_konzept_normal():
+    p = _profile("advanced")
+    action, _ = tutor.adapt(p, "falsch", {"einsatzart": "vertiefung", "konzept_erklaert": True})
+    assert action == "retry"
+
+
+def test_einfuehrung_falsch_gibt_zweiten_versuch():
+    p = _profile("advanced")
+    action, _ = tutor.adapt(p, "falsch", {"einsatzart": "einfuehrung", "konzept_erklaert": False})
+    assert action == "retry"
+
+
+def test_konzept_erklaert_mit_wortstamm():
+    assert tutor.konzept_erklaert("Tierhalterhaftung", ["Tierhalterhaftung Art. 56 OR"])
+    assert tutor.konzept_erklaert("Superposition", ["Superpositionsprinzip"])
+    assert not tutor.konzept_erklaert("Unschärferelation", ["Welle-Teilchen-Dualismus", "Superposition"])
+
+
+def test_unerklaerter_begriff_in_erwarteter_antwort():
+    task = {"konzept": "Superposition", "schluesselbegriffe": ["Unschärferelation"]}
+    texte = "Superposition: Ein Teilchen kann sich in mehreren Zuständen gleichzeitig befinden."
+    assert tutor.unerklaert(task, ["Superposition"], texte)
+    task["schluesselbegriffe"] = ["Zustände"]
+    assert tutor.unerklaert(task, ["Superposition"], texte) is None
