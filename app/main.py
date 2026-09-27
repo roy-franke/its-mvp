@@ -528,6 +528,36 @@ def resume(sid: str, request: Request):
     return _state(store.get_session(sid))
 
 
+def _eigene(request: Request, sid: str) -> dict:
+    """Wie _owned, aber nur für die Person, der die Sequenz gehört."""
+    s = _owned(request, sid)
+    if auth.identity(request).key != s["user_key"]:
+        raise HTTPException(403, "Nur die lernende Person selbst kann das tun.")
+    return s
+
+
+@app.post("/api/session/{sid}/pausieren")
+def pause(sid: str, request: Request):
+    """«Pausieren und später weiterfahren» (T-06): Stand bleibt gespeichert."""
+    s = _eigene(request, sid)
+    if s["status"] != "aktiv":
+        raise HTTPException(409, f"Die Lernsequenz ist {s['status']} und kann nicht pausiert werden.")
+    store.set_status(sid, "pausiert", "Von der lernenden Person pausiert")
+    store.set_vorabruf(sid, None)
+    return {"ok": True, "status": "pausiert"}
+
+
+@app.post("/api/session/{sid}/abbrechen")
+def abort(sid: str, request: Request):
+    """«Lektion abbrechen» (T-06): Sequenz endet, kann neu begonnen werden."""
+    s = _eigene(request, sid)
+    if s["status"] not in ("aktiv", "pausiert"):
+        raise HTTPException(409, f"Die Lernsequenz ist {s['status']} und kann nicht abgebrochen werden.")
+    store.set_status(sid, "abgebrochen", "Von der lernenden Person abgebrochen")
+    store.set_vorabruf(sid, None)
+    return {"ok": True, "status": "abgebrochen"}
+
+
 @app.get("/api/me/sequenzen")
 def my_sequences(request: Request):
     """Die nicht archivierten Lernsequenzen der angemeldeten Person (T-05)."""

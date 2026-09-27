@@ -321,6 +321,52 @@ def t05_sequenzen(pw):
         browser.close()
 
 
+@scenario("t06")
+def t06_pausieren_abbrechen(pw):
+    """T-06 AK1-3: Pausieren führt zur gleichen Stelle, Abbrechen mit Bestätigung."""
+    with server(ITS_MOCK_DELAY="2") as base:
+        browser = launch(pw)
+        page = browser.new_context().new_page()
+        start_lernsequenz(page, base, name="Pia")
+        zur_aufgabe(page)
+        frage = page.locator(".msg.tutor.question").last.inner_text()
+        # Während einer Wartezeit sind beide Buttons deaktiviert
+        page.fill("#chat-input", "Was heisst Widerrechtlichkeit?")
+        page.click("#btn-ask")
+        expect(page.locator("#waiting")).to_be_visible()
+        check("T-06 Buttons während Wartezeit deaktiviert",
+              page.locator("#btn-pause").is_disabled() and page.locator("#btn-abort").is_disabled())
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        page.click("#btn-pause")
+        expect(page.locator("#home-banner")).to_contain_text("Gespeichert", timeout=10000)
+        check("T-06 Status pausiert in der Übersicht",
+              "pausiert" in page.locator("#seq-list").inner_text())
+        # Erneut anmelden (neuer Browser) und fortsetzen
+        p2 = browser.new_context().new_page()
+        anmelden(p2, base, "Pia")
+        p2.click("#seq-list button[data-act='resume']")
+        expect(p2.locator(".msg.tutor.question").last).to_contain_text(frage.split("❓")[-1].strip(), timeout=10000)
+        check("T-06 AK1 gleiche Stelle nach erneutem Anmelden", True)
+        # Abbrechen verlangt Bestätigung
+        p2.click("#btn-abort")
+        expect(p2.locator("#modal")).to_be_visible()
+        p2.click("#modal-cancel")
+        check("T-06 AK2 Abbrechen ohne Bestätigung ändert nichts",
+              p2.locator("#view-learn").is_visible())
+        p2.click("#btn-abort")
+        p2.click("#modal-ok")
+        expect(p2.locator("#home-banner")).to_contain_text("abgebrochen", timeout=10000)
+        rows = [r for r in httpx.get(base + "/api/teacher/sessions").json() if r["name"] == "Pia"]
+        check("T-06 AK2 Lehrperson sieht Status abgebrochen",
+              rows and rows[0]["status"] == "abgebrochen", str(rows))
+        check("T-06 abgebrochene Sequenz ohne «Fortsetzen»",
+              p2.locator("#seq-list button[data-act='resume']").count() == 0)
+        ev = httpx.get(base + f"/api/teacher/sessions/{rows[0]['session_id']}").json()["events"]
+        nach = [e["payload"]["nach"] for e in ev if e["type"] == "status_geaendert"]
+        check("T-06 AK3 Events im Lernverlauf", nach == ["pausiert", "aktiv", "abgebrochen"], str(nach))
+        browser.close()
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

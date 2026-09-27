@@ -97,6 +97,11 @@
                 font: inherit; margin-top: 4px; background: #fff; }
   label { display: block; font-weight: 600; margin-top: 12px; }
 
+  .seqbar { display: flex; justify-content: flex-end; gap: 8px; margin: -8px 0 10px; flex-wrap: wrap; }
+  button.danger { background: #fff; color: var(--err); border: 1px solid #fca5a5; }
+  .banner { border-left: 4px solid var(--ok); background: #f0fdf4; padding: 10px 14px;
+            border-radius: 0 8px 8px 0; font-size: .9rem; margin-bottom: 16px; }
+
   /* Bestätigungsdialog */
   .modal { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); display: flex;
            align-items: center; justify-content: center; padding: 16px; z-index: 10; }
@@ -144,6 +149,7 @@
 
   <!-- Übersicht: eigene Lernsequenzen und neue Lektion -->
   <div id="view-home" class="hidden">
+    <div id="home-banner" class="banner hidden"></div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
         <h2 style="margin:0">Hallo <span id="home-name"></span></h2>
@@ -184,6 +190,11 @@
 
   <!-- Lernen: Chat-Dialog -->
   <div id="view-learn" class="hidden">
+    <!-- Sequenz steuern (T-06): bewusst getrennt von den Lern-Aktionen -->
+    <div class="seqbar">
+      <button id="btn-pause" class="small secondary action">⏸ Pausieren und später weiterfahren</button>
+      <button id="btn-abort" class="small danger action">✖ Lektion abbrechen</button>
+    </div>
     <div class="card" style="padding:14px 20px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
         <strong id="prog-text"></strong>
@@ -465,6 +476,7 @@ const STATUS_LABEL = { aktiv: "aktiv", pausiert: "pausiert", abgeschlossen: "abg
 let mySequences = [];
 
 async function showHome() {
+  homeBanner("");
   $("home-name").textContent = me.name || "";
   show("view-home");
   showError("start-error", "");
@@ -808,6 +820,40 @@ function renderDone(d) {
   show("view-done");
 }
 $("btn-done-home").onclick = () => showHome();
+
+// ---------- Pausieren und Abbrechen (T-06)
+function homeBanner(text) {
+  $("home-banner").textContent = text;
+  $("home-banner").classList.toggle("hidden", !text);
+}
+
+$("btn-pause").onclick = async () => {
+  if (busy) return;
+  setChatBusy(true);
+  try {
+    await api(`/session/${sessionId}/pausieren`);
+    pendingNext = null;
+    await showHome();
+    homeBanner("⏸ Gespeichert. Wenn du später «Fortsetzen» wählst, geht es an genau " +
+               "dieser Stelle weiter, auch auf einem anderen Gerät.");
+  } catch (e) { addError(e); }
+  finally { setChatBusy(false); }
+};
+
+$("btn-abort").onclick = async () => {
+  if (busy) return;
+  const ok = await confirmDialog("Lektion wirklich abbrechen? Du kannst diese Lernsequenz " +
+    "danach nicht mehr fortsetzen, aber die Lektion jederzeit neu beginnen.", "Ja, abbrechen");
+  if (!ok) return;
+  setChatBusy(true);
+  try {
+    await api(`/session/${sessionId}/abbrechen`);
+    pendingNext = null;
+    await showHome();
+    homeBanner("Die Lektion wurde abgebrochen. Du kannst sie jederzeit neu beginnen.");
+  } catch (e) { addError(e); }
+  finally { setChatBusy(false); }
+};
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,
