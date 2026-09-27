@@ -502,7 +502,7 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
         profile["wartet_auf"] = "nochmals"
         store.log_event(sid, "task", public_task)
         store.update_session(sid, profile=profile)
-        return {"done": False, "task": public_task, "progress": _progress(profile)}
+        return {"done": False, "task": tutor.fuer_lernende(public_task), "progress": _progress(profile)}
     if step_type == "theorie":
         profile["theory_steps"] = profile.get("theory_steps", 0) + 1
     if "material_abschnitt" in task:
@@ -518,7 +518,7 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
     store.update_session(sid, profile=profile)
     return {
         "done": False,
-        "task": public_task,
+        "task": tutor.fuer_lernende(public_task),
         "progress": _progress(profile),
     }
 
@@ -628,7 +628,7 @@ def _state(s: dict) -> dict:
         "lesson_id": s["lesson_id"],
         "lesson": {"titel": lesson["titel"], "lernziele": lesson["lernziele"]},
         "progress": _progress(p),
-        "current_task": p.get("current_task"),
+        "current_task": tutor.fuer_lernende(p.get("current_task")),
         "wartet_auf": wartet,
         "letztes_feedback": p.get("letztes_feedback"),
         "questions": p.get("assessment_questions", []) if wartet == "einstufung" else [],

@@ -663,14 +663,18 @@ function renderTask(t, adaptation, prefetch) {
     return;
   }
   if (t.typ === "theorie") {
-    addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor – Theorie");
+    addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || "") +
+      (t.beispiel ? "\n\n💡 Beispiel: " + t.beispiel : ""), "Tutor – Theorie");
     setTheoryMode();
     // Auf Theorie folgt immer eine Aufgabe – die kann schon entstehen,
     // während der Lernende die Erklärung liest.
     if (prefetch !== false) prefetchNext();
   } else {
     addMsg("tutor", (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
-    if (t.frage) addMsg("tutor question", "❓ " + t.frage, "Tutor");
+    if (t.frage) {
+      const optionen = (t.optionen || []).map((o, i) => `${"ABCDEFGH"[i]}) ${o}`).join("\n");
+      addMsg("tutor question", "❓ " + t.frage + (optionen ? "\n\n" + optionen : ""), "Tutor");
+    }
     confidenceAsked = false;   // Sicherheitsfrage einmal pro Aufgabe
     setAnswerMode(true);
   }

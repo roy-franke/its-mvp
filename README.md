@@ -12,6 +12,7 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 - **Adaptiver Lernpfad**: Die KI generiert Lernschritte aus dem Lektionsmaterial. Richtig → weiter, 2× richtig in Serie → Niveau rauf. Falsch → Hinweis und zweiter Versuch, nochmals falsch → Vereinfachung und Niveau runter. Jede Adaption wird begründet (Transparenzprinzip aus dem Systemkonzept).
 - **KI-Feedback mit dreistufiger Bewertung**: Antworten werden als korrekt, teilweise korrekt oder falsch beurteilt (Kategorien und Feedback-Regeln nach dem Vorbild des LLMTutor-Projekts von Swiss Learning Analytics). Bei «teilweise» gibt es einen Hinweis zur Nachbesserung, ohne dass die Antwort als Fehler zählt; bleibt die Nachbesserung unvollständig, wird sie akzeptiert und die Ergänzungen kommen aus dem Feedback.
 - **Sicherheitsfrage (metakognitiv)**: Vor der ersten Bewertung jeder Aufgabe geben Lernende an, wie sicher sie sich sind (1-10). Die Angaben werden protokolliert und der Lehrperson als Durchschnitt angezeigt – ein Mass für die Selbsteinschätzung und deren Kalibrierung.
+- **Fragequalität (Eigenleistung statt Abschreiben)**: Jede bewertete Aufgabe verlangt eine eigene Denkleistung (anwenden auf einen neuen Fall, begründen, vergleichen, vorhersagen, Fehler finden, mit eigenen Worten an einem neuen Beispiel erklären), passend zum Niveau. Der Tutor liefert zu jeder Aufgabe intern eine Musterlösung und Schlüsselbegriffe, die Lernende nie sehen. Nach der Generierung prüft der Code deterministisch, ob ein Lösungsbegriff oder sein Wortstamm in der Frage steht, ob das Beispiel der letzten Theorie wiederverwendet wird oder ob die Antwort direkt aus dem eben gezeigten Text abschreibbar ist; bei einem Treffer wird einmal neu generiert und der Verstoss protokolliert. Die Regeln stehen gebündelt im Regelkatalog `app/didaktik.py`.
 - **Theorie-Schritte**: Der Lernpfad besteht aus Input- und Anwendungs-Schritten. Der Tutor erklärt neue Konzepte zuerst (mit Beispiel), bevor Aufgaben dazu kommen – wie viel Theorie, entscheidet er adaptiv: Auf Niveau basic gibt es Input vor jedem neuen Konzept, auf intermediate zum Einstieg, auf advanced nur nach Fehlern. Nach zwei Fehlversuchen wird das Konzept neu und einfacher erklärt. Theorie-Schritte werden nicht bewertet und zählen nicht in die Quote. Lernende können zudem jederzeit selbst Theorie anfordern («Theorie dazu», «Genauer erklären»).
 - **Mathematische Formeln**: Der Tutor schreibt Formeln in LaTeX, das UI rendert sie mit KaTeX sauber als Brüche, Exponenten, Wurzeln usw. – im Lern-Chat, in der Einstufung und im Lernverlauf der Lehrperson. Hinweis: KaTeX wird von einem CDN geladen; für den Betrieb ganz ohne Internet müsste es lokal ins Projekt gelegt werden.
 - **Chat-Dialog**: Das Lernen läuft als Dialog. Der Tutor liefert Input und Aufgaben als Chat-Nachrichten, und Lernende können ihm jederzeit Verständnisfragen stellen («Frage stellen»), ohne dass dies bewertet wird. Der Tutor antwortet materialgebunden und verrät die Lösung der aktuellen Aufgabe nicht, sondern gibt Denkanstösse. Auch diese Fragen erscheinen im Lernverlauf der Lehrperson. Solange der Tutor arbeitet, zeigt der Chat eine Warteanzeige («Dein Tutor denkt nach …», nach 20 Sekunden mit beruhigendem Hinweis) und alle Aktionsbuttons sind deaktiviert; das Eingabefeld bleibt beschreibbar, nichts wird doppelt abgeschickt.
@@ -152,6 +153,15 @@ Instanz mit Mock-Provider (bei Bedarf verzögert oder scheiternd):
 ```bash
 pip install playwright && python3 -m playwright install chromium
 python3 tests/ui/ui_checks.py          # alle Szenarien, oder z.B. t02
+```
+
+Die didaktischen Pakete lassen sich zusätzlich gegen ein echtes Sprachmodell
+evaluieren (nicht Teil der normalen Testsuite, schreibt einen Bericht nach
+`tests/eval/berichte/`):
+
+```bash
+python3 tests/eval/eval_didaktik.py              # alle Pakete, dauert mit qwen3:30b länger
+python3 tests/eval/eval_didaktik.py D-01 --anzahl 3
 ```
 
 ## Bewusste Grenzen (MVP)

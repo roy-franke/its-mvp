@@ -72,6 +72,13 @@ def correct_rate(p: dict) -> float:
 # ---------------------------------------------------------------- Prompts
 
 def _system_prompt(lesson: dict) -> str:
+    """Systemprompt: innerhalb einer Lektion für alle Schrittarten identisch.
+
+    Nur so wirkt der Prompt-Cache von Ollama. Alles, was sich von Schritt zu
+    Schritt ändert (gezeigte Theorie, erklärte Konzepte, Beispiele), gehört in
+    den Benutzerteil der Anfrage. Lektionseinstellungen dürfen hinein, weil sie
+    innerhalb einer Lektion konstant sind.
+    """
     hints = lesson.get("tutor_hinweise", "").strip()
     hint_block = (
         f"\n\nHINWEISE DER LEHRPERSON AN DICH (beachte sie, solange sie den "
@@ -79,9 +86,8 @@ def _system_prompt(lesson: dict) -> str:
     )
     return (
         "Du bist ein intelligenter Tutor für Lernende an einer Schweizer "
-        "Berufsmaturitätsschule. Du arbeitest ausschliesslich mit dem "
-        "bereitgestellten Lektionsmaterial und erfindest keine Fakten. "
-        "Wenn etwas nicht im Material steht, sagst du das offen. "
+        "Berufsmaturitätsschule. Grundlage deiner Arbeit ist das bereitgestellte "
+        "Lektionsmaterial; du erfindest keine Fakten. "
         "Du schreibst Deutsch mit Schweizer Rechtschreibung (kein ß, immer ss), "
         "duzt die Lernenden und bleibst freundlich, klar und knapp. "
         "Mathematische Ausdrücke, Formeln und Variablen schreibst du IMMER in "
@@ -89,11 +95,18 @@ def _system_prompt(lesson: dict) -> str:
         "$$...$$ (z.B. $\\frac{a}{b}$ oder $x^2$). "
         "Du antwortest IMMER ausschliesslich mit einem einzigen JSON-Objekt, "
         "ohne Text davor oder danach.\n\n"
-        f"LEKTION: {lesson['titel']}\n"
+        + didaktik.regeln_fuer_prompt() + "\n\n"
+        + _einstellungen_block(lesson)
+        + f"LEKTION: {lesson['titel']}\n"
         f"LERNZIELE:\n" + "\n".join(f"- {z}" for z in lesson["lernziele"]) + "\n\n"
         f"MATERIAL:\n{lesson['material']}"
         + hint_block
     )
+
+
+def _einstellungen_block(lesson: dict) -> str:
+    """Lektionseinstellungen als Anweisungen (konstant innerhalb der Lektion)."""
+    return ""
 
 
 def suggest_goals(material: str) -> dict:
@@ -150,6 +163,23 @@ def evaluate_assessment(lesson: dict, questions: list[str], answers: list[str]) 
 
 # ---------------------------------------------------------------- Lernschritte
 
+def letzte_theorie(history: list[dict]) -> dict | None:
+    """Der zuletzt gezeigte Theorieschritt dieser Sequenz (Payload des Events)."""
+    for ev in reversed(history):
+        if ev["type"] == "task" and ev["payload"].get("typ") == "theorie":
+            return ev["payload"]
+    return None
+
+
+AUFGABENTYP_NACH_NIVEAU = {
+    "basic": "Lass das Konzept auf einen einfachen, neuen Fall aus dem Alltag anwenden.",
+    "intermediate": "Lass das Konzept auf einen anderen Kontext übertragen, zum Beispiel "
+                    "aus der Berufswelt, und die Übertragung kurz begründen.",
+    "advanced": "Verlange Begründen, Abwägen oder das Verknüpfen mehrerer Konzepte, "
+                "zum Beispiel an einem Fall mit zwei möglichen Lösungen.",
+}
+
+
 def generate_theory(lesson: dict, profile: dict, history: list[dict],
                     adaptation: str | None = None) -> dict:
     """Erzeugt einen Theorie-Schritt: Input ohne Aufgabe und ohne Bewertung."""
@@ -161,27 +191,32 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         f"Bereits behandelte Konzepte: {covered}.\n"
         f"Bisheriger Verlauf (Kurzfassung): {recent}\n"
     )
+    vorher = letzte_theorie(history)
     if adaptation == "simplify":
         instruction += (
             "Der Lernende hatte zweimal Mühe mit dem zuletzt behandelten Konzept. "
             "Erkläre GENAU DIESES Konzept noch einmal neu: einfacher, in kleinen "
             "Schritten, mit einem anderen Alltagsbeispiel als zuvor.\n"
         )
+        if vorher and vorher.get("beispiel"):
+            instruction += f"Bisheriges Beispiel (nicht wiederverwenden): {vorher['beispiel']}\n"
     else:
         instruction += (
             "Führe das nächste sinnvolle Konzept aus dem Material ein, das noch "
             "nicht behandelt wurde.\n"
         )
     instruction += (
-        "Erkläre verständlich und strukturiert (5-10 Sätze), passend zum Niveau, "
-        "mit einem konkreten Beispiel aus dem Alltag oder der Berufswelt. "
-        "Stelle KEINE Aufgabe und KEINE Frage – dies ist reiner Lern-Input.\n"
+        "Erkläre verständlich und strukturiert (4-8 Sätze), passend zum Niveau: was gilt, "
+        "und warum bzw. wie es funktioniert. Gib zusätzlich genau ein konkretes Beispiel "
+        "aus dem Alltag oder der Berufswelt, mit einem Satz, warum das Konzept dort gilt. "
+        "Stelle KEINE Aufgabe und KEINE Frage, dies ist reiner Lern-Input.\n"
         'Format: {"titel": "kurzer Titel", '
-        '"inhalt": "die Erklärung mit Beispiel", '
+        '"inhalt": "die Erklärung ohne das Beispiel", '
+        '"beispiel": "das Beispiel mit kurzer Begründung", '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
     data = llm.chat_json(_system_prompt(lesson), instruction, fallback={},
-                         check=lambda d: didaktik.pruefe_felder(d, ("inhalt",)))
+                         check=lambda d: didaktik.pruefe_felder(d, ("inhalt", "beispiel")))
     if data.get("_fallback"):
         return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"
@@ -190,27 +225,38 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
 
 def generate_task(lesson: dict, profile: dict, history: list[dict],
                   adaptation: str | None = None) -> dict:
-    """Erzeugt die nächste Aufgabe basierend auf Profil, Verlauf und Adaption."""
+    """Erzeugt die nächste Aufgabe basierend auf Profil, Verlauf und Adaption.
+
+    D-01: Die Aufgabe verlangt Eigenleistung. Nach der Generierung prüft
+    didaktik.pruefe_aufgabe, ob das Lösungswort in der Frage steht, ob das
+    Beispiel der Theorie wiederverwendet wird oder ob die Antwort direkt aus
+    der Theorie abschreibbar ist. Bei einem Treffer wird einmal neu generiert.
+    """
     covered = ", ".join(profile["covered"]) or "noch keine"
     recent = _recent_history(history)
+    level = profile["level"]
+    theorie = letzte_theorie(history)
+    direkt_nach_theorie = profile.get("last_type") == "theorie"
     instruction = (
         "AUFGABE: NAECHSTE_AUFGABE\n"
         f"Erzeuge Lernschritt {profile['step'] + 1} von {total_steps()} "
-        f"auf Niveau '{profile['level']}'.\n"
+        f"auf Niveau '{level}'.\n"
         f"Bereits behandelte Konzepte: {covered}.\n"
         f"Bisheriger Verlauf (Kurzfassung): {recent}\n"
     )
-    if profile.get("last_type") == "theorie" and profile["covered"]:
+    if direkt_nach_theorie and profile["covered"]:
         instruction += (
             f"Soeben wurde das Konzept '{profile['covered'][-1]}' als Theorie "
-            "erklärt. Stelle jetzt eine dazu passende Aufgabe, damit der Lernende "
-            "das frisch Gelernte anwendet.\n"
+            "erklärt. Stelle jetzt eine dazu passende Aufgabe, bei der der Lernende "
+            "das frisch Gelernte selbständig anwendet.\n"
         )
     elif adaptation == "simplify":
         instruction += (
-            "Der Lernende hatte Mühe mit der letzten Aufgabe. Erkläre das Konzept "
-            "zuerst kurz und einfach neu und stelle dann eine leichtere Aufgabe "
-            "zum gleichen Konzept.\n"
+            "Der Lernende hatte Mühe mit der letzten Aufgabe. Stelle eine einfachere "
+            "Aufgabe zum gleichen Konzept: kleiner und stärker gestützt, etwa ein "
+            "Teilschritt, ein vertrauterer Kontext oder eine Denkhilfe in der Frage. "
+            "Sie muss aber weiterhin eigenes Denken verlangen und darf nicht nur die "
+            "Wiederholung des Textes abfragen.\n"
         )
     elif adaptation == "advance":
         instruction += (
@@ -219,18 +265,45 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         )
     else:
         instruction += "Wähle das nächste sinnvolle Konzept aus dem Material.\n"
+    instruction += f"Aufgabentyp auf diesem Niveau: {AUFGABENTYP_NACH_NIVEAU.get(level, '')}\n"
+    if theorie:
+        beispiel = theorie.get("beispiel") or theorie.get("inhalt", "")[:400]
+        instruction += (
+            f"Beispiel aus der letzten Theorie (NICHT wiederverwenden, wähle einen anderen "
+            f"Fall mit anderem Kontext und anderen Beteiligten): {beispiel}\n"
+        )
     instruction += (
+        "Die erwartete Antwort und ihre Schlüsselbegriffe dürfen weder in der Frage "
+        "noch im Aufgabentext vorkommen (ausser bei Multiple Choice).\n"
         'Format: {"titel": "kurzer Titel", '
-        '"inhalt": "kurze Erklärung oder Fallbeispiel (3-6 Sätze, aus dem Material)", '
+        '"inhalt": "Fallbeschreibung oder Situation (2-5 Sätze), ohne die Lösung", '
         '"frage": "eine konkrete Frage an den Lernenden", '
+        '"aufgabentyp": "anwenden|begruenden|vergleichen|vorhersagen|fehler_finden|erklaeren|multiple_choice", '
+        '"optionen": ["nur bei multiple_choice, sonst leere Liste"], '
+        '"erwartete_antwort": "kurze Musterlösung in 1-2 Sätzen (wird nicht angezeigt)", '
+        '"schluesselbegriffe": ["1-4 Begriffe, die eine richtige Antwort enthalten muss"], '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
-    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={},
-                         check=lambda d: didaktik.pruefe_felder(d, ("inhalt", "frage")))
+    data = llm.chat_json(
+        _system_prompt(lesson), instruction, fallback={},
+        check=lambda d: didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie))
     if data.get("_fallback"):
         return task_fallback(lesson, profile, adaptation, data)
+    if not isinstance(data.get("optionen"), list) or data.get("aufgabentyp") != "multiple_choice":
+        data["optionen"] = []
     data["typ"] = "aufgabe"
     return data
+
+
+# Felder, die nur der Server und die Lehrperson sehen (nie die Lernenden):
+# Die Musterlösung würde die Aufgabe verraten.
+INTERNE_FELDER = ("erwartete_antwort", "schluesselbegriffe")
+
+
+def fuer_lernende(task: dict | None) -> dict | None:
+    if not task:
+        return task
+    return {k: v for k, v in task.items() if k not in INTERNE_FELDER}
 
 
 BEWERTUNGEN = ("korrekt", "teilweise", "falsch")
