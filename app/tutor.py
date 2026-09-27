@@ -154,8 +154,19 @@ EINSATZART_TEXT = {
 def _einstellungen_block(lesson: dict) -> str:
     """Lektionseinstellungen als Anweisungen (konstant innerhalb der Lektion)."""
     e = einstellungen.settings(lesson)
-    zeilen = ["EINSTELLUNGEN DIESER LEKTION:", EINSATZART_TEXT[e["einsatzart"]]]
+    zeilen = ["EINSTELLUNGEN DIESER LEKTION:", EINSATZART_TEXT[e["einsatzart"]],
+              WISSEN_TEXT["allgemeinwissen" if "allgemeinwissen" in e["wissensstufen"] else "material"]]
     return "\n".join(zeilen) + "\n\n"
+
+
+WISSEN_TEXT = {
+    "allgemeinwissen": "WISSENSQUELLEN: Grundlage ist das Lektionsmaterial. Reicht es für eine "
+                       "Erklärung oder eine Verständnisfrage nicht aus, darfst du mit gesichertem "
+                       "Allgemeinwissen erklären; setze dann ausserhalb_material auf true. Die "
+                       "Bewertung von Antworten bleibt immer an das Lektionsmaterial gebunden.",
+    "material": "WISSENSQUELLEN: Erkläre nur mit dem Lektionsmaterial. Reicht es nicht, sag das "
+                "neutral und empfiehl, die Lehrperson zu fragen.",
+}
 
 
 def suggest_goals(material: str) -> dict:
@@ -459,32 +470,121 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str) -> dic
     return data
 
 
-def answer_question(lesson: dict, profile: dict, task: dict | None,
-                    question: str, history: list[dict]) -> dict:
-    """Beantwortet eine Verständnisfrage des Lernenden im Dialog.
+ESKALATION = {
+    ("theorie", 1): "Bring einen NEUEN Zugang zum Konzept: eine andere Erklärung oder ein neues "
+                    "Beispiel aus einem anderen Lebensbereich als bisher.",
+    ("genauer", 1): "Geh in die Tiefe: Erkläre den Mechanismus, die Gründe oder die einzelnen "
+                    "Schritte hinter der Aussage (Warum und Wie), mit einem anderen Beispiel als "
+                    "bisher. Formuliere nicht einfach das Bisherige um.",
+    ("theorie", 2): "Erkläre das Konzept jetzt mit einer Analogie aus dem Alltag oder Schritt "
+                    "für Schritt in kleinen, nummerierten Schritten.",
+    ("genauer", 2): "Erkläre das Konzept jetzt mit einer Analogie aus dem Alltag oder Schritt "
+                    "für Schritt in kleinen, nummerierten Schritten.",
+}
 
-    Materialgebunden; die Lösung der aktuellen Aufgabe wird nicht verraten,
-    sondern höchstens ein Denkanstoss gegeben.
+
+def eskalationsstufe(profile: dict, konzept: str) -> int:
+    """Zählt Nachfragen pro Konzept und bestimmt die Stufe (D-03, deterministisch).
+
+    Stufe 1: neuer Zugang bzw. Tiefe mit anderem Beispiel, Stufe 2: Analogie oder
+    Schritt für Schritt, Stufe 3: Material ausgeschöpft, mit Angebot.
     """
+    zaehler = profile.setdefault("nachfragen", {})
+    zaehler[konzept] = zaehler.get(konzept, 0) + 1
+    return min(zaehler[konzept], 3)
+
+
+def ausgeschoepft(lesson: dict, konzept: str) -> dict:
+    """Stufe 3: ehrliche Aussage ohne LLM-Aufruf, verbunden mit einem Angebot."""
+    k = f"«{konzept}»" if konzept else "diesem Thema"
+    if einstellungen.allgemeinwissen_erlaubt(lesson):
+        return {"antwort": f"Zu {k} habe ich dir alles gezeigt, was das Lektionsmaterial hergibt. "
+                           "Ich kann es dir zusätzlich mit Allgemeinwissen erklären. Das geht "
+                           "über das Material hinaus und ist entsprechend markiert.",
+                "angebot": "allgemeinwissen"}
+    return {"antwort": f"Zu {k} habe ich dir alles gezeigt, was das Lektionsmaterial hergibt. "
+                       "Wenn noch etwas unklar ist, frag am besten deine Lehrperson. Du kannst "
+                       "die Frage auch hier aufschreiben und später mitnehmen.",
+            "angebot": "lehrperson"}
+
+
+def bisherige_erklaerungen(history: list[dict], konzept: str) -> list[str]:
+    """Bereits gezeigte Theorietexte und Tutor-Antworten zum Konzept."""
+    out = []
+    for ev in history:
+        p = ev["payload"]
+        if ev["type"] == "task" and p.get("typ") == "theorie" and (
+                not konzept or konzept_erklaert(konzept, [p.get("konzept", "")])):
+            out.append(" ".join(x for x in (p.get("inhalt"), p.get("beispiel")) if x))
+        elif ev["type"] == "chat_reply" and p.get("antwort") and (
+                p.get("konzept") in (konzept, None, "")):
+            out.append(p["antwort"])
+    return [t for t in out if t]
+
+
+def answer_question(lesson: dict, profile: dict, task: dict | None,
+                    question: str, history: list[dict], art: str = "frage",
+                    stufe: int | None = None) -> dict:
+    """Beantwortet eine Frage des Lernenden im Dialog (unbewertet).
+
+    art: frage (freie Verständnisfrage), theorie («Theorie dazu»),
+         genauer («Genauer erklären»), allgemeinwissen (Angebot angenommen).
+    Bei theorie/genauer bestimmt `stufe` die Eskalation (D-03). Bereits
+    gezeigte Texte zum Konzept gehen im Benutzerteil mit, damit sie nicht
+    wiederholt werden; eine Ähnlichkeitsprüfung erzwingt sonst eine
+    Neugenerierung. Die Lösung der aktuellen Aufgabe wird nie verraten.
+    """
+    konzept = (task or {}).get("konzept") or ""
+    if art in ("theorie", "genauer") and stufe and stufe >= 3:
+        out = ausgeschoepft(lesson, konzept)
+        out.update(konzept=konzept, ausserhalb_material=False, stufe=3)
+        return out
+    bisherige = bisherige_erklaerungen(history, konzept)
     task_ctx = ""
     if task:
-        task_ctx = (f"Aktuelle Aufgabe: {task.get('inhalt', '')}\n"
-                    f"Aktuelle Frage an den Lernenden: {task.get('frage', '')}\n")
+        task_ctx = (f"Aktuelles Konzept: {konzept}\n"
+                    f"Aktueller Schritt: {task.get('inhalt', '')}\n"
+                    + (f"Aktuelle Frage an den Lernenden: {task.get('frage', '')}\n"
+                       if task.get("frage") else ""))
+    gezeigt = ""
+    if bisherige:
+        gezeigt = ("Bereits gezeigt (NICHT wiederholen, auch nicht umformuliert):\n"
+                   + "\n".join(f"{i + 1}) {t[:700]}" for i, t in enumerate(bisherige[-4:])) + "\n")
+    if art in ("theorie", "genauer"):
+        auftrag = (f"ESKALATIONSSTUFE: {stufe or 1}\n"
+                   f"Der Lernende möchte {'mehr Theorie' if art == 'theorie' else 'eine genauere Erklärung'} "
+                   f"zum aktuellen Konzept. {ESKALATION[(art, stufe or 1)]} "
+                   "Verrate die Lösung der aktuellen Aufgabe nicht. Nennst du eine Anwendung, "
+                   "begründe, warum das Konzept dort gilt. Länge: 3-7 Sätze.\n")
+    elif art == "allgemeinwissen":
+        auftrag = ("ALLGEMEINWISSEN: Das Lektionsmaterial ist zu diesem Konzept ausgeschöpft, "
+                   "der Lernende hat eine Erklärung aus Allgemeinwissen angenommen. Erkläre das "
+                   "Konzept mit gesichertem Allgemeinwissen, verständlich und mit einem "
+                   "begründeten Beispiel (3-7 Sätze). Setze ausserhalb_material auf true.\n")
+    else:
+        auftrag = (f"Der Lernende stellt folgende Verständnisfrage: {question}\n"
+                   "Beantworte sie kurz (2-5 Sätze) und verständlich. Wenn sie direkt nach der "
+                   "Lösung der aktuellen Aufgabe verlangt, gib die Lösung NICHT preis, sondern "
+                   "einen Denkanstoss. Ist eine Annahme in der Frage falsch, sag das direkt.\n")
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: FRAGE_BEANTWORTEN\n"
         f"{task_ctx}"
         f"Niveau des Lernenden: {profile['level']}.\n"
-        f"Bisheriger Dialog (Kurzfassung): {_recent_history(history)}\n\n"
-        f"Der Lernende stellt folgende Verständnisfrage: {question}\n\n"
-        "Beantworte die Frage kurz (2-5 Sätze), verständlich und ausschliesslich "
-        "auf Basis des Materials. Wenn die Frage direkt nach der Lösung der "
-        "aktuellen Aufgabe verlangt, gib die Lösung NICHT preis, sondern einen "
-        "Denkanstoss. Wenn das Material die Frage nicht beantwortet, sag das offen.\n"
-        'Format: {"antwort": "..."}',
+        f"Bisheriger Dialog (Kurzfassung): {_recent_history(history)}\n"
+        f"{gezeigt}\n{auftrag}"
+        'Format: {"antwort": "...", "konzept": "worum es geht, 1-3 Worte", '
+        '"ausserhalb_material": false}',
         fallback=dict(FALLBACK_TEXTE["frage"]),
-        check=lambda d: didaktik.pruefe_felder(d, ("antwort",)),
+        check=lambda d: (didaktik.pruefe_felder(d, ("antwort",))
+                         or didaktik.defensiver_einstieg(d.get("antwort", ""))
+                         or (didaktik.zu_aehnlich(d.get("antwort", ""), bisherige)
+                             if art in ("theorie", "genauer") else None)),
     )
+    data["konzept"] = konzept or data.get("konzept") or ""
+    data["ausserhalb_material"] = bool(data.get("ausserhalb_material")) or art == "allgemeinwissen"
+    data["stufe"] = stufe if art in ("theorie", "genauer") else None
+    data["angebot"] = None
     return data
 
 

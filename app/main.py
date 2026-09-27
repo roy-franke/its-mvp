@@ -33,7 +33,7 @@ from pydantic import BaseModel
 
 import time
 
-from . import auth, einstellungen, llm, store, tutor
+from . import auth, didaktik, einstellungen, llm, store, tutor
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("its")
@@ -139,6 +139,9 @@ class AnswerRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    # frage (freie Verständnisfrage) | theorie («Theorie dazu») |
+    # genauer («Genauer erklären») | allgemeinwissen (Angebot angenommen)
+    art: str = "frage"
 
 
 class LessonSource(BaseModel):
@@ -621,14 +624,29 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
     message = req.message.strip()
     if not message:
         raise HTTPException(400, "Leere Nachricht")
-    store.log_event(sid, "chat_question", {"frage": message})
+    art = req.art if req.art in ("frage", "theorie", "genauer", "allgemeinwissen") else "frage"
+    if art == "allgemeinwissen" and not einstellungen.allgemeinwissen_erlaubt(lesson):
+        art = "frage"
+    task = profile.get("current_task")
+    stufe = None
+    if art in ("theorie", "genauer"):
+        stufe = tutor.eskalationsstufe(profile, (task or {}).get("konzept") or "")
+        store.update_session(sid, profile=profile)
+    store.log_event(sid, "chat_question", {"frage": message, "art": art, "stufe": stufe})
     history = store.get_events(sid)
-    result = tutor.answer_question(lesson, profile, profile.get("current_task"),
-                                   message, history)
+    result = tutor.answer_question(lesson, profile, task, message, history, art, stufe)
     _log_llm_meta(sid, "FRAGE_BEANTWORTEN", result)
     antwort = result.get("antwort", "")
-    store.log_event(sid, "chat_reply", {"antwort": antwort})
-    return {"antwort": antwort}
+    ausserhalb = bool(result.get("ausserhalb_material")) and not result.get("_fallback")
+    store.log_event(sid, "chat_reply", {
+        "antwort": antwort, "art": art, "stufe": stufe, "konzept": result.get("konzept", ""),
+        "ausserhalb_material": ausserhalb, "angebot": result.get("angebot"),
+        "aehnlichkeit": round(didaktik.aehnlichkeit(
+            antwort, tutor.bisherige_erklaerungen(history, result.get("konzept", ""))), 2)
+        if art in ("theorie", "genauer") and stufe and stufe < 3 else None,
+    })
+    return {"antwort": antwort, "ausserhalb_material": ausserhalb,
+            "angebot": result.get("angebot"), "stufe": stufe}
 
 
 @app.get("/api/session/{sid}/state")

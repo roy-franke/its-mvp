@@ -301,8 +301,26 @@ def _mock_text(system: str, user: str) -> str:
             "hinweis": "Denk an Art. 41 OR: Schaden, Widerrechtlichkeit, Kausalzusammenhang, Verschulden.",
         }, ensure_ascii=False)
     if "FRAGE_BEANTWORTEN" in user:
+        if "ALLGEMEINWISSEN:" in user:
+            return json.dumps({
+                "antwort": "Aus dem Allgemeinwissen: Haftungsregeln verteilen Risiken, damit Geschädigte nicht auf ihren Kosten sitzen bleiben. Deshalb verlangt das Recht Sorgfalt von allen. (Mock-Antwort)",
+                "konzept": "", "ausserhalb_material": True,
+            }, ensure_ascii=False)
+        if "ESKALATIONSSTUFE: 2" in user:
+            return json.dumps({
+                "antwort": "Stell dir eine Checkliste mit vier Kästchen vor: Erst wenn jedes Kästchen angekreuzt ist, entsteht eine Pflicht zum Ersatz. Schritt 1 fragt nach einer Einbusse, Schritt 2 nach einem verletzten Recht, Schritt 3 nach der Ursache, Schritt 4 nach mangelnder Sorgfalt. (Mock-Antwort)",
+                "konzept": "", "ausserhalb_material": False,
+            }, ensure_ascii=False)
+        if "ESKALATIONSSTUFE: 1" in user:
+            return json.dumps({
+                "antwort": "Ein anderer Blickwinkel: Wer beim Zügeln die geliehene Lampe des Nachbarn fallen lässt, muss sie ersetzen, weil er unsorgfältig war und dadurch fremdes Eigentum zerstört hat. Genau diese Verbindung aus Unsorgfalt und Folge macht die Pflicht aus. (Mock-Antwort)",
+                "konzept": "", "ausserhalb_material": False,
+            }, ensure_ascii=False)
+        wunsch = re.search(r"Verständnisfrage:\s*(.+)", user)
+        frage = (wunsch.group(1) if wunsch else "").lower()
         return json.dumps({
             "antwort": "Gute Frage! Die Verschuldenshaftung nach Art. 41 OR setzt Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden voraus. Überleg dir, welche dieser Voraussetzungen in der aktuellen Aufgabe zu prüfen sind. (Mock-Antwort – für echtes Tutoring LLM-Provider konfigurieren.)",
+            "konzept": "", "ausserhalb_material": False,
         }, ensure_ascii=False)
     if "LERNZIELE_VORSCHLAGEN" in user:
         return json.dumps({

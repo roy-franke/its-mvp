@@ -242,6 +242,77 @@ def eval_d02(b: Bericht, anzahl: int):
         b.text(f"- {lid}: «{p.get('frage')}» (erwartet: {p.get('erwartete_antwort')}) – {v}")
 
 
+# ---------------------------------------------------------------- D-03
+
+@paket("D-03")
+def eval_d03(b: Bericht, anzahl: int):
+    """Erklärtiefe: neue Zugänge statt Wiederholung, klarer Ton, begründete Anwendungen."""
+    import re
+    from app import didaktik, tutor
+    b.abschnitt("D-03 Erklärtiefe bei Nachfragen",
+                "Pro Lektion wird nach dem ersten Theorieschritt zweimal «Theorie dazu» und "
+                "danach zweimal «Genauer erklären» angefordert, dazu kommen freie "
+                "Verständnisfragen, die das Material nicht abdeckt. Die Ähnlichkeit misst den "
+                "Anteil der Inhaltswörter einer Antwort, die schon in einem früher gezeigten "
+                "Text zum selben Konzept standen.")
+    c = client()
+    werte, texte = [], []
+    fragen = {QUANTEN: ["Kann man zwischen Welle und Teilchen umschalten?",
+                        "Wie ist ein Quantensensor gebaut?"],
+              HAFTUNG: ["Haftet man auch, wenn einem das Velo gestohlen wird?",
+                        "Gilt das auch in Deutschland?"]}
+    for i, lid in enumerate((QUANTEN, HAFTUNG)):
+        c.post("/api/learner/login", json={"name": f"Eval D03 {i}"})
+        sid = c.post("/api/session/start", json={"lesson_id": lid, "neu_beginnen": True}).json()["session_id"]
+        c.post(f"/api/session/{sid}/assess", json={"answers": ["weiss ich nicht"] * 3})
+        c.post(f"/api/session/{sid}/next")
+        for art in ("theorie", "theorie", "genauer"):
+            c.post(f"/api/session/{sid}/chat", json={"message": art, "art": art})
+        c.post(f"/api/session/{sid}/next")      # Aufgabe
+        c.post(f"/api/session/{sid}/chat", json={"message": "genauer", "art": "genauer"})
+        for f in fragen[lid]:
+            c.post(f"/api/session/{sid}/chat", json={"message": f})
+        events = c.get(f"/api/teacher/sessions/{sid}").json()["events"]
+        b.text(f"\n### {lektion(lid)['titel']}\n")
+        for e in events:
+            p = e["payload"]
+            if e["type"] == "task" and p.get("typ") == "theorie":
+                texte.append(("Theorie", p.get("inhalt", "") + " " + p.get("beispiel", "")))
+                b.text(f"**Theorie ({p.get('konzept')})**\n\n{zitat(p.get('inhalt'))}\n\n{zitat(p.get('beispiel'))}\n")
+            elif e["type"] == "chat_question":
+                b.text(f"**Lernende ({p.get('art')}{', Stufe ' + str(p['stufe']) if p.get('stufe') else ''}):** {p.get('frage')}\n")
+            elif e["type"] == "chat_reply":
+                texte.append((p.get("art"), p.get("antwort", "")))
+                if p.get("aehnlichkeit") is not None:
+                    werte.append(p["aehnlichkeit"])
+                zusatz = f" (Ähnlichkeit {round(p['aehnlichkeit'] * 100)} %)" if p.get("aehnlichkeit") is not None else ""
+                marke = " [ausserhalb Material]" if p.get("ausserhalb_material") else ""
+                b.text(f"**Tutor{marke}{zusatz}:**\n\n{zitat(p.get('antwort'))}\n")
+    zu_hoch = [w for w in werte if w >= 0.6]
+    b.ak("D-03", "AK 1 «Theorie dazu»/«Genauer» wiederholt nicht", not zu_hoch,
+         "Ähnlichkeiten: " + ", ".join(f"{round(w * 100)} %" for w in werte))
+    defensiv = [t for _, t in texte if didaktik.defensiver_einstieg(t)]
+    b.ak("D-03", "AK 3 kein defensiver Einstieg", not defensiv, f"{len(defensiv)} von {len(texte)} Texten")
+    for t in defensiv:
+        b.text(f"- defensiv: {zitat(t, 200)}")
+    # AK 4: Superposition mit begründetem Anwendungsfall
+    lesson = lektion(QUANTEN)
+    p = tutor.new_profile()
+    p["current_task"] = {"konzept": "Superposition"}
+    theorie = tutor.generate_theory(lesson, p, [], "konzept")
+    history = [{"type": "task", "payload": dict(theorie, typ="theorie")}]
+    genauer = tutor.answer_question(lesson, p, {"konzept": "Superposition", "inhalt": theorie.get("inhalt", "")},
+                                    "genauer", history, "genauer", 1)
+    text = " ".join([theorie.get("inhalt", ""), theorie.get("beispiel", ""), genauer.get("antwort", "")])
+    anwendung = re.search(r"(Quantencomputer|Sensor|Anwendung|Beispiel|Logistik|Kryptograf|Messung|Technik)", text, re.I)
+    grund = re.search(r"\b(weil|dadurch|deshalb|denn|sodass|so dass|da |darum|damit)\b", text, re.I)
+    b.ak("D-03", "AK 4 Superposition: Anwendung mit Begründung (heuristisch, bitte lesen)",
+         bool(anwendung and grund), "Anwendung und Begründungswort gefunden" if anwendung and grund else "fehlt")
+    b.text(f"\n### Superposition\n\nTheorie:\n\n{zitat(theorie.get('inhalt'), 900)}\n\n"
+           f"Beispiel:\n\n{zitat(theorie.get('beispiel'), 900)}\n\nGenauer erklärt:\n\n"
+           f"{zitat(genauer.get('antwort'), 900)}\n")
+
+
 # ---------------------------------------------------------------- Ablauf
 
 def main():
@@ -254,6 +325,8 @@ def main():
     if args.mock:
         os.environ["LLM_PROVIDER"] = "mock"
     random.seed(args.seed)
+    import logging
+    logging.disable(logging.INFO)        # nur Warnungen und Fehler auf der Konsole
     from app import llm
     if llm.provider_name() == "mock" and not args.mock:
         print("Achtung: LLM_PROVIDER=mock. Für eine echte Evaluation das Modell in der .env "

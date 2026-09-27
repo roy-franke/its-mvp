@@ -166,12 +166,14 @@ async function loadDetail(sid, name) {
       body = `${label} – ${esc(p.feedback)}`
         + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "");
     }
-    else if (ev.type === "chat_question") body = `❓ Verständnisfrage: <em>${esc(p.frage)}</em>`;
-    else if (ev.type === "chat_reply") body = `💬 Tutor: ${esc(p.antwort)}`;
+    else if (ev.type === "chat_question") body = `❓ ${p.art === "theorie" ? "«Theorie dazu»" : p.art === "genauer" ? "«Genauer erklären»" : p.art === "allgemeinwissen" ? "Allgemeinwissen angenommen" : "Verständnisfrage"}${p.stufe ? ` <span class="muted">(Stufe ${p.stufe})</span>` : ""}: <em>${esc(p.frage)}</em>`;
+    else if (ev.type === "chat_reply") body = `💬 Tutor${p.ausserhalb_material ? ' <span class="pill test">ausserhalb Material</span>' : ""}: ${esc(p.antwort)}`
+      + (p.aehnlichkeit != null ? `<br><span class="muted">Ähnlichkeit zu bisherigen Erklärungen: ${Math.round(p.aehnlichkeit * 100)} %</span>` : "");
     else if (ev.type === "finished") body = `🎉 Abgeschlossen – ${esc(p.zusammenfassung)}`;
     else if (ev.type === "fallback_used") body = `⚠️ <strong>Fallback</strong> bei ${esc(SCHRITT[p.schrittart] || p.schrittart)} – Grund: <span class="muted">${esc(p.grund)}</span>`;
     else if (ev.type === "regel_verstoss") body = `🧪 Regelverstoss bei ${esc(SCHRITT[p.schrittart] || p.schrittart)}${p.behoben ? " (nach Neugenerierung behoben)" : ""}: <span class="muted">${(p.verstoesse || []).map(esc).join(" | ")}</span>`;
     else if (ev.type === "status_geaendert") body = `🔁 Status: ${esc(STATUS[p.von] || p.von)} → <strong>${esc(STATUS[p.nach] || p.nach)}</strong>${p.grund ? ` <span class="muted">(${esc(p.grund)})</span>` : ""}`;
+    else if (ev.type === "theorie_eingeschoben") body = `📖 Theorie eingeschoben: Konzept «${esc(p.konzept)}» war noch nicht erklärt`;
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
     else body = esc(JSON.stringify(p));
     return `<div class="event ${cls}"><span class="t">${time}</span><br>${body}</div>`;

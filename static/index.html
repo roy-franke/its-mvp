@@ -75,6 +75,10 @@
   @keyframes blink { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
   button.action:disabled, .confbtn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); }
   .msg.tutor.error { background: #fef2f2; border-color: #fecaca; }
+  /* Ergänzung ausserhalb des Lektionsmaterials (D-03, Entscheid E4) */
+  .msg.tutor.extern { background: #ecfeff; border-color: #67e8f9; }
+  .msg.tutor.extern .who { opacity: 1; color: #0e7490; font-weight: 600; }
+  .offer { align-self: flex-start; margin: -4px 0 4px; }
 
   /* Übersicht der eigenen Lernsequenzen (T-05) */
   .seq { display: flex; align-items: center; gap: 12px; padding: 12px 0;
@@ -756,15 +760,34 @@ async function submitAnswer(text, confidence) {
 }
 
 // ---------- Verständnisfragen und Theorie auf Abruf (jederzeit)
-async function sendChat(text) {
+async function sendChat(text, art) {
   if (busy) return;
   addMsg("user ask", text, "Du (Frage)");
   setChatBusy(true);
   try {
-    const d = await api(`/session/${sessionId}/chat`, { message: text });
-    addMsg("tutor", d.antwort, "Tutor");
+    const d = await api(`/session/${sessionId}/chat`, { message: text, art: art || "frage" });
+    if (d.ausserhalb_material) {
+      addMsg("tutor extern", d.antwort, "Tutor · Ergänzung ausserhalb des Lektionsmaterials");
+    } else {
+      addMsg("tutor", d.antwort, "Tutor");
+    }
+    if (d.angebot === "allgemeinwissen") addOffer();
   } catch (e) { addError(e); }
   finally { setChatBusy(false); }
+}
+
+// Angebot nach ausgeschöpftem Material: Erklärung aus Allgemeinwissen
+function addOffer() {
+  const btn = document.createElement("button");
+  btn.className = "small secondary action offer";
+  btn.textContent = "Ja, erklär es mir mit Allgemeinwissen";
+  btn.onclick = () => {
+    if (busy) return;
+    btn.remove();
+    sendChat("Erklär es mir bitte mit Allgemeinwissen.", "allgemeinwissen");
+  };
+  $("chat").insertBefore(btn, $("waiting"));
+  $("chat").scrollTop = $("chat").scrollHeight;
 }
 
 $("btn-ask").onclick = () => {
@@ -776,10 +799,10 @@ $("btn-ask").onclick = () => {
 };
 
 $("btn-theory").onclick = () =>
-  sendChat("Erklär mir zuerst kurz die Theorie zu dieser Aufgabe, ohne die Lösung zu verraten.");
+  sendChat("Erklär mir bitte die Theorie zu dieser Aufgabe, ohne die Lösung zu verraten.", "theorie");
 
 $("btn-deeper").onclick = () =>
-  sendChat("Erklär mir das bitte noch genauer und einfacher, gerne mit einem weiteren Beispiel.");
+  sendChat("Erklär mir das bitte genauer: Warum ist das so, und wie funktioniert es?", "genauer");
 
 $("btn-continue").onclick = async () => {
   if (busy) return;

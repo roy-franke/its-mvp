@@ -70,6 +70,40 @@ REGELN: dict[str, dict] = {
                  "und mehrere Konzepte verknüpfen.",
         "pruefbar": False,
     },
+    # ------------------------------------------------------------ D-03 Erklärungen
+    "D03_NEUER_ZUGANG": {
+        "paket": "D-03", "bereich": "erklaerung",
+        "titel": "«Theorie dazu» bringt einen neuen Zugang",
+        "regel": "Wird Theorie nachgefragt, wiederhole nie den bisherigen Text, sondern bring "
+                 "einen neuen Zugang: eine andere Erklärung, ein neues Beispiel oder eine "
+                 "Veranschaulichung.",
+        "pruefbar": True,
+    },
+    "D03_TIEFE": {
+        "paket": "D-03", "bereich": "erklaerung",
+        "titel": "«Genauer erklären» geht in die Tiefe",
+        "regel": "Wird eine genauere Erklärung verlangt, erkläre den Mechanismus, die Gründe "
+                 "oder die einzelnen Schritte hinter der Aussage (das Warum und Wie), statt das "
+                 "Was umzuformulieren.",
+        "pruefbar": False,
+    },
+    "D03_ANWENDUNG_BEGRUENDEN": {
+        "paket": "D-03", "bereich": "erklaerung",
+        "titel": "Anwendungen immer begründen",
+        "regel": "Nennst du ein Anwendungsbeispiel, begründe kurz, warum das Konzept dort gilt "
+                 "oder nützt. Ein blosses Aufzählen von Anwendungsfeldern genügt nicht.",
+        "pruefbar": False,
+    },
+    "D03_TON": {
+        "paket": "D-03", "bereich": "erklaerung",
+        "titel": "Klarer, nicht defensiver Ton",
+        "regel": "Sag klar, was stimmt und was nicht; ist eine Annahme der lernenden Person "
+                 "falsch, sag es direkt. Fehlt etwas im Material, formuliere neutral und "
+                 "hilfreich («Dazu sagt das Lektionsmaterial nichts.») und biete an, wie es "
+                 "weitergehen kann. Beginne nie mit «Im Material wird nicht erwähnt, dass …» "
+                 "und verweise nicht in jedem Satz auf das Material.",
+        "pruefbar": True,
+    },
 }
 
 
@@ -229,6 +263,42 @@ def abschreibbar(task: dict, theorie: dict | None) -> str | None:
                 return ("Die erwartete Antwort steht fast wörtlich im eben gezeigten Theorietext. "
                         "Stelle eine Aufgabe, die eigenes Denken verlangt.")
     return None
+
+
+# ---------------------------------------------------------------- D-03
+
+_DEFENSIV = re.compile(
+    r"^\W*(im|laut|gemäss|gemäß)?\s*(dem\s+)?(lektions)?material\s+(wird|werden|steht|stehen|ist|"
+    r"sind|enthält|erwähnt|findet|gibt|nennt|beschreibt|sagt)\b[^.!?]*\b(nicht|keine?n?)\b"
+    r"|^\W*das\s+(lektions)?material\s+(enthält|nennt|beschreibt|erwähnt|gibt)\s+(keine|nicht)",
+    re.IGNORECASE)
+
+
+def defensiver_einstieg(text: str) -> str | None:
+    t = (text or "").strip()
+    if _DEFENSIV.search(t):
+        return ("Die Antwort beginnt defensiv mit einem Verweis darauf, was im Material fehlt. "
+                "Beginne mit dem, was stimmt oder was du erklären kannst.")
+    if len(re.findall(r"\bMaterial", t)) > 2:
+        return "Die Antwort verweist zu oft auf «das Material». Erkläre direkt."
+    return None
+
+
+def zu_aehnlich(neu: str, bisherige: list[str], schwelle: float = 0.6) -> str | None:
+    """Wiederholt ein neuer Text im Wesentlichen einen bereits gezeigten?"""
+    if len(staemme(neu)) < 8:
+        return None
+    for alt in bisherige:
+        anteil, _ = ueberschneidung(neu, alt)
+        if anteil >= schwelle:
+            return (f"Die Erklärung wiederholt einen bereits gezeigten Text zu {round(anteil * 100)} "
+                    "Prozent. Bring einen neuen Zugang statt derselben Formulierung.")
+    return None
+
+
+def aehnlichkeit(neu: str, bisherige: list[str]) -> float:
+    """Höchster Anteil der Inhaltswörter von `neu`, die schon in einem früheren Text standen."""
+    return max((ueberschneidung(neu, alt)[0] for alt in bisherige), default=0.0)
 
 
 def pruefe_aufgabe(task: dict, theorie: dict | None, direkt_nach_theorie: bool) -> str | None:
