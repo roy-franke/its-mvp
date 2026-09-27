@@ -320,3 +320,31 @@ def test_verbotsliste_im_benutzerteil(monkeypatch):
     tutor.generate_task(LESSON, p, [{"type": "task", "payload": THEORIE_HUND}])
     assert "dürfen in deinem Fall NICHT vorkommen" in prompts[0] and "Passanten" in prompts[0]
     assert "Rechenoperation" in prompts[0]
+
+
+# ---------------------------------------------------------------- voller Lauf 27.09.2026 21:59
+
+def test_vergleichsobjekt_ist_kein_loesungswort():
+    """Vier der zehn Lösungswort-Treffer nannten nur das Vergleichsobjekt."""
+    lesson = json.loads(open("app/lessons/haftungsrecht.json", encoding="utf-8").read())
+    task = {"inhalt": "Ein Geschäftsführer lässt einen Lehrling ohne Einweisung an einer Maschine arbeiten.",
+            "frage": "Begründe, warum der Geschäftsführer für den Schaden haftet, und vergleiche dies "
+                     "mit der Tierhalterhaftung nach Art. 56 OR.",
+            "schluesselbegriffe": ["Tierhalterhaftung", "Geschäftsherrenhaftung"]}
+    assert didaktik.loesungswort_in_aufgabe(task, didaktik.fachvokabular(lesson)) is None
+
+
+def test_methode_vor_dem_vergleich_bleibt_verstoss():
+    task = {"inhalt": "Ein Film dauert 3/4 Stunden, 1/3 Stunde ist vorbei.",
+            "frage": "Begründe, warum du die Brüche subtrahieren musst, und vergleiche dies mit der Addition.",
+            "schluesselbegriffe": ["subtrahieren"]}
+    assert didaktik.loesungswort_in_aufgabe(task, {"subtrahier", "subtrahieren", "bruch"})
+
+
+def test_allgemeine_mengenwoerter_kein_beispiel():
+    """Hackfleisch-Fall: nur «benötigen», «erhalten», «Menge», «richtig» gemeinsam."""
+    theorie = {"konzept": "Bruchteile von Mengen", "inhalt": "Ein Bruchteil einer Grösse wird berechnet.",
+               "beispiel": "Eine Bäckerei benötigt die richtige Menge Mehl und erhält eine Mengenangabe."}
+    task = {"inhalt": "Ein Restaurant benötigt die richtige Menge Hackfleisch und erhält eine Mengenangabe.",
+            "frage": "Wie viel Gramm Hackfleisch braucht das Restaurant?"}
+    assert didaktik.beispiel_wiederverwendet(task, theorie) is None

@@ -128,6 +128,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `OLLAMA_KEEP_ALIVE` | Wie lange das Modell geladen bleibt (Standard 30m) |
 | `OLLAMA_NUM_PREDICT` | Obergrenze für die Antwortlänge in Token (Standard 1024) |
 | `OLLAMA_THINK` | Denkmodus von Reasoning-Modellen (`false` = schnell, Standard) |
+| `ITS_BEWERTUNG_TEMPERATUR` | Temperatur der Antwortbewertung (Standard `0`, damit dieselbe Antwort gleich bewertet wird) |
 | `LLM_TIMEOUT` | Zeitlimit pro LLM-Aufruf in Sekunden (Standard 300) |
 | `OLLAMA_FORMAT_JSON` | Ollama erzwingt gültiges JSON, wo der Tutor JSON erwartet (Standard `true`) |
 | `ITS_MOCK_DELAY` | Nur für Tests: Verzögerung des Mock-Providers in Sekunden |

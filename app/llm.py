@@ -12,6 +12,7 @@ Text; die Tutorlogik verlangt JSON und parst robust mit Fallbacks.
 
 import json
 import logging
+import contextvars
 import os
 import re
 import statistics
@@ -136,6 +137,18 @@ def _ollama_meta(data: dict) -> dict:
 
 # ---------------------------------------------------------------- Provider
 
+# Temperatur für den laufenden Aufruf. Die Bewertung läuft mit niedriger
+# Temperatur, damit dieselbe Antwort nicht einmal korrekt und einmal falsch
+# ist (D-05); Aufgaben und Theorie behalten die Standardtemperatur des Modells,
+# damit sie abwechslungsreich bleiben. Das Feld steht in den Optionen, nicht im
+# Prompt, und ändert deshalb nichts am Prompt-Cache.
+_temperatur: contextvars.ContextVar = contextvars.ContextVar("temperatur", default=None)
+
+
+def temperatur() -> float | None:
+    return _temperatur.get()
+
+
 def _chat_anthropic(system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
     key = os.getenv("ANTHROPIC_API_KEY", "")
     if not key:
@@ -152,6 +165,7 @@ def _chat_anthropic(system: str, user: str, json_mode: bool = False) -> tuple[st
             "model": model,
             "max_tokens": 1500,
             "system": system,
+            **({"temperature": temperatur()} if temperatur() is not None else {}),
             "messages": [{"role": "user", "content": user}],
         },
         timeout=TIMEOUT,
@@ -176,6 +190,7 @@ def _chat_openai(system: str, user: str, json_mode: bool = False) -> tuple[str, 
         headers={"Authorization": f"Bearer {key}"},
         json={
             "model": model,
+            **({"temperature": temperatur()} if temperatur() is not None else {}),
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -228,6 +243,8 @@ def ollama_payload(system: str, user: str, json_mode: bool = False) -> dict:
     # Parsen scheitert. OLLAMA_FORMAT_JSON=false schaltet das ab.
     if json_mode and os.getenv("OLLAMA_FORMAT_JSON", "true").strip().lower() != "false":
         payload["format"] = "json"
+    if temperatur() is not None:
+        payload["options"]["temperature"] = temperatur()
     return payload
 
 
@@ -459,7 +476,17 @@ KORREKTUR_HINWEIS = (
 
 
 def chat_json(system: str, user: str, fallback: dict, check=None,
-              versuche: int = 2) -> dict:
+              versuche: int = 2, temperature: float | None = None) -> dict:
+    """Siehe _chat_json; `temperature` gilt nur für diesen Aufruf."""
+    token = _temperatur.set(temperature)
+    try:
+        return _chat_json(system, user, fallback, check, versuche)
+    finally:
+        _temperatur.reset(token)
+
+
+def _chat_json(system: str, user: str, fallback: dict, check=None,
+               versuche: int = 2) -> dict:
     """Wie chat(), erwartet aber JSON.
 
     Ablauf (T-01): Scheitert ein Aufruf technisch oder ist die Antwort kein

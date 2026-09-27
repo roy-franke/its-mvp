@@ -160,12 +160,27 @@ def eval_d01(b: Bericht, anzahl: int):
     for e in echt:
         typen[e["task"].get("aufgabentyp", "?")] = typen.get(e["task"].get("aufgabentyp", "?"), 0) + 1
     b.text("Aufgabentypen: " + ", ".join(f"{k} {v}" for k, v in sorted(typen.items())) + ".")
+    # Warum wurde neu generiert? Grober Grund aus dem ersten Satz des Verstosses.
+    gruende: dict[str, int] = {}
+    for e in echt:
+        for v in e["task"].get("_verstoesse") or []:
+            k = str(v).split(":")[0].split(".")[0][:70]
+            gruende[k] = gruende.get(k, 0) + 1
+    if gruende:
+        b.text("\nGründe für Neugenerierungen (alle Versuche): "
+               + "; ".join(f"{k} ({n})" for k, n in sorted(gruende.items(), key=lambda x: -x[1])) + ".")
     for titel, liste, feld in (("Verstösse Lösungswort", lw, "loesungswort"),
                                ("Verstösse Beispiel", bsp, "beispiel")):
         if liste:
             b.text(f"\n### {titel}\n")
             for e in liste:
                 b.text(f"- {e['lektion']}, {e['niveau']}: «{e['task'].get('frage', '')}» – {e[feld]}")
+    if thema:
+        b.text("\n### Themenfremde Schritte\n")
+        for e in thema:
+            b.text(f"- {e['lektion']}, {e['niveau']}: Theorie «{e['theorie'].get('konzept', '')}», "
+                   f"Frage «{e['task'].get('frage', '')}» – {e['thema']}\n"
+                   f"{zitat(e['theorie'].get('inhalt'), 300)}")
     b.text("\n### Stichprobe zur Sichtprüfung (AK 3)\n")
     for e in random.sample(echt, min(10, len(echt))):
         t = e["task"]
@@ -450,6 +465,7 @@ def eval_d05(b: Bericht, anzahl: int):
               "|---|---|---|---|---|---|"]
     treffer = {"ausgewogen": 0, "streng": 0}
     falsch_als_richtig = []
+    abweichungen: list[str] = []
     screenshot4 = {}
     for nr, (key, antworten, ok_a, ok_s, sachlich_falsch) in enumerate(TESTSET_D05):
         lid, task = AUFGABEN_D05[key]
@@ -464,6 +480,13 @@ def eval_d05(b: Bericht, anzahl: int):
         for strenge, erlaubt in (("ausgewogen", ok_a), ("streng", ok_s)):
             if urteile[strenge]["bewertung"] in erlaubt:
                 treffer[strenge] += 1
+            else:
+                r = urteile[strenge]
+                abweichungen.append(
+                    f"- {key} ({strenge}): «{antworten[-1]}» → {r['bewertung']}, erwartet "
+                    f"{'/'.join(sorted(erlaubt))}. Elemente: "
+                    + ("; ".join(f"{e['element']} ({e['status']})" for e in r.get("elemente", [])) or "keine")
+                    + (" · Widerspruch" if r.get("sachlicher_widerspruch") else ""))
             if sachlich_falsch and urteile[strenge]["bewertung"] == "korrekt":
                 falsch_als_richtig.append((key, antworten[-1], strenge))
         if nr == 0:
@@ -476,6 +499,8 @@ def eval_d05(b: Bericht, anzahl: int):
                    + "; ".join(f"{e['element']} ({e['status']})" for e in r.get("elemente", []))
                    + f"\n\nFeedback: {zitat(r.get('feedback'), 400)[2:]}\n")
     b.text("\n" + "\n".join(zeilen))
+    if abweichungen:
+        b.text("\n### Abweichungen mit Elementen\n\n" + "\n".join(abweichungen))
     n = len(TESTSET_D05)
     b.ak("D-05", "AK 1 mindestens zehn Urteile stimmen (ausgewogen)", treffer["ausgewogen"] >= 10,
          f"ausgewogen {treffer['ausgewogen']}/{n}, streng {treffer['streng']}/{n}")

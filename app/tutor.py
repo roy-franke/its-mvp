@@ -167,11 +167,11 @@ STRENGE_TEXT = {
     "ausgewogen": "BEWERTUNGSSTRENGE: ausgewogen. Alle zentralen Elemente müssen vorhanden sein; "
                   "Fachbegriffe verlangst du dort, wo sie für das Verständnis wichtig sind. Nennt "
                   "die Antwort nur einen Oberbegriff, wo ein spezifischer Begriff gefragt ist "
-                  "(etwa «Kausalhaftung» statt «Tierhalterhaftung»), ist dieses Element nicht "
-                  "erfüllt. Sachliche Fehler gelten nie als richtig.",
+                  "(etwa «Kausalhaftung» statt «Tierhalterhaftung»), ist dieses Element nur "
+                  "ungenau. Sachliche Fehler gelten nie als richtig.",
     "streng": "BEWERTUNGSSTRENGE: streng. Die Antwort muss vollständig sein und die korrekten "
               "Fachbegriffe verwenden; ungenaue oder nur umschriebene Begriffe erfüllen ein "
-              "Element nicht. Sachliche Fehler gelten nie als richtig.",
+              "Element nicht (Status ungenau, nicht falsch). Sachliche Fehler gelten nie als richtig.",
 }
 
 
@@ -506,6 +506,11 @@ def fuer_lernende(task: dict | None) -> dict | None:
 BEWERTUNGEN = ("korrekt", "teilweise", "falsch")
 
 
+# D-05: Mit der Standardtemperatur bewertete das Modell dieselbe Antwort je nach
+# Durchlauf unterschiedlich. Die Bewertung soll reproduzierbar sein.
+BEWERTUNG_TEMPERATUR = float(os.getenv("ITS_BEWERTUNG_TEMPERATUR", "0"))
+
+
 def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                     vorher: list[dict] | None = None) -> dict:
     """Bewertet eine Antwort dreistufig und liefert KI-Feedback.
@@ -547,13 +552,21 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "AUFGABE: ANTWORT_BEWERTEN\n"
         + kontext +
         "Gehe in zwei Schritten vor:\n"
-        "1. Bestimme 2-4 zentrale Elemente einer vollständigen Antwort (gemäss der "
-        "Bewertungsstrenge dieser Lektion).\n"
-        "2. Prüfe für jedes Element, ob es in der Antwort korrekt vorkommt, falsch ist "
-        "(der Lösung widerspricht) oder fehlt.\n"
+        "1. Bestimme 2-4 zentrale Elemente einer vollständigen Antwort. Leite sie aus der "
+        "Frage und der Musterlösung ab: nur was die Frage tatsächlich verlangt. Fragt sie "
+        "nicht nach einer Begründung oder einem Gesetzesartikel, sind diese kein Element.\n"
+        "2. Prüfe für jedes Element den Status:\n"
+        "   korrekt = sachlich richtig vorhanden (gemäss der Bewertungsstrenge);\n"
+        "   ungenau = sachlich zutreffend, aber zu allgemein, nur umschrieben oder ohne den "
+        "verlangten Fachbegriff;\n"
+        "   falsch = widerspricht der Musterlösung (anderes Ergebnis, anderes Ja/Nein, "
+        "vertauschte Bedeutung zweier Begriffe);\n"
+        "   fehlt = kommt nicht vor.\n"
+        "Kommt die Antwort zu einem anderen Ergebnis als die Musterlösung, setze "
+        "sachlicher_widerspruch auf true, auch wenn einzelne Wörter stimmen.\n"
         "Urteil: 'korrekt' = alle Elemente korrekt. 'teilweise' = mindestens ein Element "
-        "korrekt und keines falsch. 'falsch' = kein Element korrekt oder ein sachlicher "
-        "Widerspruch.\n\n"
+        "korrekt oder ungenau und keines falsch. 'falsch' = nichts Zutreffendes oder ein "
+        "sachlicher Widerspruch.\n\n"
         "Feedback-Regeln:\n"
         "- Beziehe dich ausdrücklich auf das, was der Lernende geschrieben hat: bestätige die "
         "korrekten Teile und korrigiere genau die fehlenden oder falschen.\n"
@@ -565,13 +578,14 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "Hinweis einen gezielten Denkanstoss geben. Keine positiven Floskeln.\n"
         "Formuliere den Hinweis als Anstoss, nicht als neue Frage, die statt der Aufgabe "
         "beantwortet werden soll. Verrate die Lösung nie, auch nicht implizit.\n\n"
-        'Format: {"elemente": [{"element": "zentrales Element", "status": "korrekt|falsch|fehlt"}], '
+        'Format: {"elemente": [{"element": "zentrales Element", "status": "korrekt|ungenau|falsch|fehlt"}], '
         '"sachlicher_widerspruch": false, '
         '"bewertung": "korrekt|teilweise|falsch", '
         '"feedback": "2-4 Sätze direkt an den Lernenden", '
         '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
         fallback=dict(FALLBACK_TEXTE["bewertung"]),
         check=lambda d: didaktik.pruefe_felder(d, ("feedback", "hinweis")),
+        temperature=BEWERTUNG_TEMPERATUR,
     )
     if data.get("_fallback"):
         # Technischer Fehler: nicht als falsch werten, die Antwort zählt nicht.

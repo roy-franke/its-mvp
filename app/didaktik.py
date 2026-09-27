@@ -189,6 +189,9 @@ etwa bitte gerade immer schon wirklich eigentlich einfach genau heute morgen ges
 schwer schwere schweren leicht leichte gross grosse grossen klein kleine kleinen gegenstand
 gegenstände gegenstands sache sachen person personen mensch menschen jemand jemandem
 angestellte angestellter angestellten mitarbeiter mitarbeitende mitarbeitenden
+benötigen benötigt benötigst benötigte brauchen braucht brauchst erhalten erhält erhältst
+menge mengen mengenangabe mengenangaben richtig richtige richtigen richtiger möchte möchtest
+möchten insgesamt übrig
 """.split())
 
 _SUFFIXE = ("ungen", "heiten", "keiten", "ung", "heit", "keit", "ern", "en", "er", "es",
@@ -236,7 +239,7 @@ def ueberschneidung(a: str, b: str, ausnahmen: set[str] | None = None) -> tuple[
 
 # ---------------------------------------------------------------- D-05
 
-ELEMENT_STATUS = ("korrekt", "falsch", "fehlt")
+ELEMENT_STATUS = ("korrekt", "ungenau", "falsch", "fehlt")
 
 
 def urteil_aus_elementen(elemente, widerspruch: bool = False) -> str | None:
@@ -255,7 +258,9 @@ def urteil_aus_elementen(elemente, widerspruch: bool = False) -> str | None:
         return "falsch"
     if all(s == "korrekt" for s in status):
         return "korrekt"
-    if "korrekt" in status:
+    # «ungenau»: sachlich zutreffend, aber zu allgemein oder unpräzis (etwa
+    # «Kausalhaftung» statt «Tierhalterhaftung»). Das ist ein Teilerfolg, kein Fehler.
+    if "korrekt" in status or "ungenau" in status:
         return "teilweise"
     return "falsch"
 
@@ -274,6 +279,20 @@ def schluesselbegriffe(task: dict) -> list[str]:
     return begriffe
 
 
+_VERGLEICH = re.compile(r"(vergleiche?\b|im vergleich (zu|mit)\b|anders als bei\b|gegenüber)[^.?!]*",
+                        re.IGNORECASE)
+
+
+def ohne_vergleich(frage: str) -> str:
+    """Entfernt den Vergleichsteil einer Frage.
+
+    «… und vergleiche dies mit der Tierhalterhaftung» nennt ein
+    Vergleichsobjekt, nicht die Lösung. Im vollen Evaluationslauf waren vier
+    der zehn Lösungswort-Treffer solche Vergleiche.
+    """
+    return _VERGLEICH.sub(" ", frage)
+
+
 def loesungswort_in_aufgabe(task: dict, fachwoerter: set[str] | None = None) -> str | None:
     """Kommt ein Lösungsbegriff (oder sein Wortstamm) in der Frage vor?
 
@@ -286,7 +305,7 @@ def loesungswort_in_aufgabe(task: dict, fachwoerter: set[str] | None = None) -> 
     """
     if (task.get("aufgabentyp") or "").lower() in ("multiple_choice", "multiple-choice", "mc"):
         return None
-    frage_staemme = staemme(task.get("frage") or "")
+    frage_staemme = staemme(ohne_vergleich(task.get("frage") or ""))
     fall_staemme = staemme(task.get("inhalt") or "")
     wurzeln = themenwurzeln
     for begriff in schluesselbegriffe(task):

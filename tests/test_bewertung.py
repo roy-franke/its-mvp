@@ -20,6 +20,9 @@ HUND = {"typ": "aufgabe", "inhalt": "Der Hund von Frau Meier beisst einen Passan
     (["korrekt", "fehlt"], False, "teilweise"),
     (["korrekt", "falsch"], False, "falsch"),
     (["fehlt", "fehlt"], False, "falsch"),
+    (["ungenau", "fehlt"], False, "teilweise"),
+    (["ungenau", "korrekt"], False, "teilweise"),
+    (["ungenau", "falsch"], False, "falsch"),
     (["korrekt", "korrekt"], True, "falsch"),
     ([], False, None),
 ])
@@ -117,3 +120,31 @@ def test_zweite_unvollstaendige_nachbesserung_wird_akzeptiert():
     tutor.adapt(p, "teilweise")
     action, reason = tutor.adapt(p, "teilweise")
     assert action == "next" and "Ergänzungen" in reason
+
+
+def test_bewertung_mit_temperatur_null(monkeypatch):
+    """D-05 nach dem vollen Lauf: Die Bewertung läuft reproduzierbar mit Temperatur 0,
+    die Aufgabengenerierung mit der Standardtemperatur des Modells."""
+    gesehen = []
+
+    def p(system, user, json_mode=False):
+        gesehen.append((user.split("\n")[0], llm.temperatur(), llm.ollama_payload(system, user)["options"]))
+        return json.dumps({"elemente": [{"element": "E", "status": "ungenau"}], "bewertung": "teilweise",
+                           "feedback": "Du nennst den Oberbegriff.", "hinweis": "Welche Haftung genau?"}), {}
+    monkeypatch.setitem(llm._PROVIDERS, "mock", p)
+    r = tutor.evaluate_answer(LESSON, tutor.new_profile(), HUND, "Kausalhaftung")
+    assert r["bewertung"] == "teilweise"
+    assert gesehen[0][1] == 0 and gesehen[0][2]["temperature"] == 0
+    assert llm.temperatur() is None          # nach dem Aufruf zurückgesetzt
+    assert "temperature" not in llm.ollama_payload("s", "u")["options"]
+
+
+def test_prompt_kennt_ungenau_und_widerspruch(monkeypatch):
+    prompts = []
+    monkeypatch.setitem(llm._PROVIDERS, "mock", _modell({
+        "elemente": [{"element": "E", "status": "korrekt"}], "bewertung": "korrekt",
+        "feedback": "Stimmt.", "hinweis": ""}, prompts))
+    tutor.evaluate_answer(LESSON, tutor.new_profile(), HUND, "Tierhalterhaftung")
+    user = prompts[0][1]
+    assert "ungenau" in user and "anderen Ergebnis als die Musterlösung" in user
+    assert "nur was die Frage tatsächlich verlangt" in user
