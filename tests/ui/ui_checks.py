@@ -290,6 +290,7 @@ def t05_sequenzen(pw):
         b = browser.new_context().new_page()     # anderer Browser
         anmelden(b, base, "  lina ")
         seqs = b.locator("#seq-list .seq")
+        expect(seqs).to_have_count(1, timeout=10000)
         check("T-05 AK1 Sequenz in Browser B sichtbar", seqs.count() == 1)
         b.click("#seq-list button[data-act='resume']")
         expect(b.locator("#view-learn")).to_be_visible()
@@ -302,6 +303,7 @@ def t05_sequenzen(pw):
         expect(b.locator("#view-home")).to_be_visible()
         abmelden(b)
         anmelden(b, base, "Noah")
+        expect(b.locator("#seq-empty")).to_be_visible(timeout=10000)
         check("T-05 AK2 Noah sieht keine fremden Sequenzen", b.locator("#seq-list .seq").count() == 0)
 
         # AK3: Neu beginnen archiviert nach Bestätigung
@@ -313,6 +315,7 @@ def t05_sequenzen(pw):
         expect(b.locator("#view-assess")).to_be_visible(timeout=30000)
         b.goto(base + "/")
         expect(b.locator("#view-home")).to_be_visible()
+        expect(b.locator("#seq-list .seq")).to_have_count(1, timeout=10000)
         check("T-05 AK3 nur noch die neue Sequenz in der Liste", b.locator("#seq-list .seq").count() == 1)
         rows = httpx.get(base + "/api/teacher/sessions").json()
         status = sorted(r["status"] for r in rows if r["name"].strip().lower() == "lina")

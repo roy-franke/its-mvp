@@ -65,7 +65,7 @@ class Bericht:
         print(f"  {'OK    ' if ok else 'FEHLER'} {paket} {kriterium}" + (f" – {detail}" if detail else ""))
 
     def abschnitt(self, titel: str, text: str = ""):
-        self.teile.append(f"\n## {titel}\n\n{text}".rstrip() + "\n")
+        self.teile.append(f"\n## {titel}\n\n{text}".rstrip() + "\n\n")
 
     def text(self, text: str):
         self.teile.append(text.rstrip() + "\n")
@@ -111,6 +111,7 @@ def eval_d01(b: Bericht, anzahl: int):
                     konzepte.append(theorie["konzept"])
                 history = [{"type": "task", "payload": theorie}]
                 p["covered"] = list(konzepte)
+                p["erklaert"] = list(konzepte)
                 p["last_type"] = "theorie"
                 task = tutor.generate_task(lesson, p, history)
                 eintrag = {
@@ -132,7 +133,7 @@ def eval_d01(b: Bericht, anzahl: int):
     b.ak("D-01", "AK 1 keine Aufgabe mit Lösungswort in der Frage", not lw,
          f"{len(lw)} von {len(echt)}")
     b.ak("D-01", "AK 2 kein wiederverwendetes Theorie-Beispiel", not bsp, f"{len(bsp)} von {len(echt)}")
-    b.text(f"Aufgaben insgesamt: {len(alle)}, davon Fallbacks: {len(alle) - len(echt)}. "
+    b.text(f"\nAufgaben insgesamt: {len(alle)}, davon Fallbacks: {len(alle) - len(echt)}. "
            f"Nach einem Regelverstoss neu generiert: {len(neu)}. Abschreibbar trotz Prüfung: {len(ab)}. "
            "Multiple-Choice-Aufgaben: "
            f"{sum(1 for e in echt if e['task'].get('aufgabentyp') == 'multiple_choice')}.")

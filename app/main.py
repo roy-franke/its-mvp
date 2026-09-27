@@ -440,7 +440,7 @@ def _log_llm_meta(sid: str, schrittart: str, data: dict):
     if data.get("_verstoesse"):
         store.log_event(sid, "regel_verstoss", {
             "schrittart": schrittart, "verstoesse": data["_verstoesse"],
-            "behoben": data.get("_versuche", 1) > 1 and len(data["_verstoesse"]) < data["_versuche"]})
+            "behoben": not data.get("_verstoss_offen")})
 
 
 def _einsatzart(lesson: dict) -> str:

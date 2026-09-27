@@ -500,9 +500,10 @@ def chat_json(system: str, user: str, fallback: dict, check=None,
             if versuch < versuche:
                 prompt = user + KORREKTUR_HINWEIS.format(verstoss=verstoss)
                 continue
+            return _mit_meta(parsed, versuch, fehler, verstoesse, offen=True)
         return _mit_meta(parsed, versuch, fehler, verstoesse)
     if beste is not None:
-        return _mit_meta(beste, versuche, fehler, verstoesse)
+        return _mit_meta(beste, versuche, fehler, verstoesse, offen=True)
     out = dict(fallback)
     out["_fallback"] = True
     out["_fehler"] = " | ".join(fehler) or "unbekannt"
@@ -510,8 +511,11 @@ def chat_json(system: str, user: str, fallback: dict, check=None,
     return out
 
 
-def _mit_meta(data: dict, versuch: int, fehler: list, verstoesse: list) -> dict:
+def _mit_meta(data: dict, versuch: int, fehler: list, verstoesse: list,
+              offen: bool = False) -> dict:
     data["_versuche"] = versuch
+    if offen:
+        data["_verstoss_offen"] = True      # das verwendete Ergebnis verletzt eine Regel
     if fehler:
         data["_fehler_vorher"] = fehler
     if verstoesse:

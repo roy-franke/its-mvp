@@ -5,7 +5,8 @@ zusammen. Es dient als Kontext für eine neue Claude-Session (z.B. auf einem
 anderen Rechner), damit dort ohne Unterbruch weitergearbeitet werden kann.
 Lies zusätzlich das `README.md` im Projektstamm.
 
-Stand: 27. August 2026 (nachgeführt nach dem Klassentest-Block)
+Stand: 27. September 2026 (nachgeführt nach den Anpassungen aus dem ersten Testdurchlauf,
+Phasen 1 bis 3 des Auftrags «Anpassungen ITS-Prototyp»)
 
 ## 1. Projektkontext
 
@@ -61,12 +62,30 @@ oder hochladen (PDF/Word/Text, Textextraktion), KI-Vorschlag für Titel und
 Lernziele, Tutor-Hinweise, speichern → sofort verfügbar.
 
 Technisch: FastAPI (Python), SQLite (Sessions + Event-Log, vollständige
-Protokollierung), Vanilla-JS-Frontend (3 statische Seiten), KaTeX für
-Formeldarstellung (LaTeX-Anweisung im Systemprompt), Diagnose-Endpoint
-`/api/llm-test`, 43 pytest-Tests (Adaptionslogik, API End-to-End mit
-Mock-Provider, Lektionserstellung). Mock-Provider bewertet heuristisch nach
-Antwortlänge (>=40 Zeichen korrekt, 15-39 teilweise, sonst falsch), damit die
-Adaption ohne LLM demonstrierbar ist.
+Protokollierung, Migrationen beim Start in `store._migrate`), Vanilla-JS-Frontend
+(5 statische Seiten), KaTeX für Formeldarstellung (LaTeX-Anweisung im
+Systemprompt), Diagnose-Endpoint `/api/llm-test` (nur Lehrpersonen), rund 270
+pytest-Tests. Mock-Provider bewertet heuristisch nach Antwortlänge (>=40 Zeichen
+korrekt, 15-39 teilweise, sonst falsch), damit die Adaption ohne LLM
+demonstrierbar ist; `ITS_MOCK_DELAY` und `ITS_MOCK_FAIL` simulieren langsame
+oder scheiternde Aufrufe für Oberflächentests.
+
+Seit dem Auftrag «Anpassungen ITS-Prototyp» (September 2026) zusätzlich:
+Rollen «lernend»/«lehrperson» zentral in `app/auth.py` (Router-Abhängigkeiten,
+optional Anmeldung über Proxy-Header), Lernsequenzen pro Person mit Status
+(aktiv, pausiert, abgeschlossen, abgebrochen, archiviert) und optionaler PIN,
+Buttons Pausieren/Abbrechen, Lektionsverwaltung unter `/teacher/lessons` mit
+Tutor-Einstellungen pro Lektion (`app/einstellungen.py`), Regelkatalog
+`app/didaktik.py` mit deterministischen Prüfungen nach der Generierung
+(Lösungswort, Theorie-Beispiel, Abschreibbarkeit, unerklärte Konzepte,
+Ähnlichkeit, Ton), Eskalation bei Nachfragen, Niveausteuerung mit Zustimmung,
+Bewertung in zwei Schritten mit Elementen, Materialprüfung im Editor.
+Details pro Paket in den Statusnotizen `claude/status-*.md` im Claude-Projekt.
+
+Prüfwerkzeuge neben pytest: `tests/ui/ui_checks.py` (Playwright gegen eine
+eigens gestartete Instanz) und `tests/eval/eval_didaktik.py` (Evaluation der
+didaktischen Pakete gegen das echte Modell, schreibt einen Bericht nach
+`tests/eval/berichte/`).
 
 ## 4. Setup auf einem neuen Rechner
 
@@ -129,7 +148,9 @@ danach lohnt sich der Versuch mit einem kleineren Modell.
 - `.env` wird nur beim Serverstart gelesen; nach Änderungen uvicorn neu starten.
 - Befehle immer im Projektordner ausführen (`cd its-mvp`), venv aktivieren; auf Roys MacBook existiert zusätzlich ein verirrtes `.venv` im Home-Verzeichnis.
 - Ollama: Menüleisten-App muss laufen (sonst «Connection refused» auf Port 11434); `OLLAMA_MODEL` muss exakt einem Eintrag aus `ollama list` entsprechen.
-- Wenn Einstufungsbegründung oder Theorie generisch klingen («Wir starten sicherheitshalber…», «Lies den Abschnitt im Lektionsmaterial…»), sind das Fallback-Texte → LLM nicht erreichbar → `/api/llm-test` aufrufen.
+- Fallbacks sind seit T-01 sichtbar: Im Lernverlauf als «Fallback» markiert mit Grund, in der Tabelle der Antwortzeiten als Spalte «Fallbacks». Bei vielen Fallbacks `/api/llm-test` aufrufen (als Lehrperson angemeldet).
+- Der Systemprompt muss innerhalb einer Lektion für alle Schrittarten identisch bleiben (Prompt-Cache). Schrittbezogenes (gezeigte Theorie, erklärte Konzepte, Beispiele) gehört in den Benutzerteil; ein Test prüft das.
+- Der Server schreibt beim Start ins Fenster, welcher Zugangsschutz aktiv ist. Windows-Umgebungsvariablen haben Vorrang vor der `.env`.
 - Frontend-Änderungen brauchen einen Hard-Refresh (Cmd+Shift+R).
 - KaTeX lädt vom CDN; für Betrieb ohne Internet lokal bundeln.
 - Roys OpenAI-Key wurde einmal im Chat geteilt und sollte rotiert werden (platform.openai.com).
@@ -157,9 +178,10 @@ weil Port 8000 von der anderen Anwendung belegt ist. Merksatz: Pro Rechner
 genau ein Tunnel und ein cloudflared-Dienst; weitere Anwendungen kommen als
 zusätzliche Routen mit eigenem Port dazu, nicht als zweiter Tunnel.
 Noch offen: gleiches Tunnel-Muster später für RIB-AI-01 im Pilot.
-2. **Prompt-Tuning** mit Roys Praxisbeobachtungen (Bewertungsstrenge, Erklärtiefe, Einstufungskalibrierung; Vergleich Ollama vs. Cloud als Evaluationsergebnis).
-3. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
-4. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.
+2. **Anpassungen aus dem ersten Testdurchlauf – Phasen 1 bis 3 UMGESETZT (27.9.2026)**: T-01 bis T-07 und D-01 bis D-06. Als Nächstes: `python tests/eval/eval_didaktik.py` mit qwen3:30b laufen lassen, Bericht sichten, dann einen Testdurchlauf mit echtem Modell. Phase 4 (N-01 bis N-05: Quellenverweise, Auswertungsansicht mit Seitenleiste, Internetrecherche, Rückmeldung zur Selbsteinschätzung, Lernverlauf für Lernende) erst danach. Material der Quantenphysik-Lektion überarbeiten (D-06).
+3. **Prompt-Tuning** mit Roys Praxisbeobachtungen auf Basis der Evaluationsberichte (Vergleich Ollama vs. Cloud als Evaluationsergebnis).
+4. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
+5. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.
 
 ## 8. Arbeitsweise in der Zusammenarbeit
 

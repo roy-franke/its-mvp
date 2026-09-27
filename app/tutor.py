@@ -422,8 +422,8 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         instruction += (
             "In dieser Sequenz bereits erklärte Konzepte: "
             + (", ".join(erklaert) or "noch keine") + ". Stelle die Aufgabe NUR zu einem "
-            "dieser Konzepte. Die erwartete Antwort darf kein Konzept und keinen Fachbegriff "
-            "verlangen, der noch nicht erklärt wurde.\n"
+            "dieser Konzepte und setze im Feld konzept genau dessen Namen. Die erwartete Antwort "
+            "darf kein Konzept und keinen Fachbegriff verlangen, der noch nicht erklärt wurde.\n"
         )
     instruction += f"Aufgabentyp auf diesem Niveau: {AUFGABENTYP_NACH_NIVEAU.get(level, '')}\n"
     if theorie:
@@ -462,10 +462,13 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
 def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
     """D-02: Verlangt die Aufgabe ein Konzept oder einen Begriff, der in dieser
     Sequenz noch nicht erklärt wurde?"""
-    if not konzept_erklaert(task.get("konzept"), erklaert):
+    bekannte = didaktik.staemme(texte)
+    konzept_teile = [t for t in didaktik.staemme(task.get("konzept") or "") if len(t) >= 5]
+    im_text = bool(konzept_teile) and all(
+        any(didaktik.gleicher_stamm(t, b) for b in bekannte) for t in konzept_teile)
+    if not konzept_erklaert(task.get("konzept"), erklaert) and not im_text:
         return (f"Das Konzept «{task.get('konzept')}» wurde in dieser Sequenz noch nicht erklärt. "
                 "Stelle die Aufgabe zu einem bereits erklärten Konzept.")
-    bekannte = didaktik.staemme(texte)
     for begriff in task.get("schluesselbegriffe") or []:
         teile = [t for t in didaktik.staemme(str(begriff)) if len(t) >= 5]
         if teile and not all(any(didaktik.gleicher_stamm(t, b) for b in bekannte) for t in teile):
