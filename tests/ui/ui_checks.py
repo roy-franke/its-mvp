@@ -367,6 +367,51 @@ def t06_pausieren_abbrechen(pw):
         browser.close()
 
 
+@scenario("t07")
+def t07_lektionen(pw):
+    """T-07 AK1/AK2: Lektion ansehen, vorausgefüllt bearbeiten, löschen."""
+    with server() as base:
+        material = ("### Quelle: skript.pdf\n\n" + "Die Tierhalterhaftung nach Art. 56 OR. " * 5 +
+                    "\n\n---\n\n### Quelle: notizen.docx\n\n" + "Eigene Notizen zur Haftung. " * 5 +
+                    "\n\n---\n\nFreitext der Lehrperson.")
+        r = httpx.post(base + "/api/teacher/lessons", json={
+            "titel": "UI Lektion", "lernziele": ["Ziel A", "Ziel B"], "material": material,
+            "quellen": [{"name": "skript.pdf", "chars": 195}, {"name": "notizen.docx", "chars": 140}],
+            "einstellungen": {"bewertungsstrenge": "streng", "einsatzart": "vertiefung"}}).json()
+        lid = r["id"]
+        page = launch(pw).new_page()
+        page.goto(base + "/teacher/lessons")
+        row = page.locator(f"tr[data-id='{lid}']")
+        expect(row).to_be_visible()
+        row.locator("button[data-act='view']").click()
+        expect(page.locator("#detail")).to_be_visible()
+        detail = page.locator("#detail").inner_text()
+        check("T-07 Ansehen zeigt Quellen, Material und Einstellungen",
+              "skript.pdf" in detail and "Freitext der Lehrperson" in detail and "streng" in detail)
+        row.locator("button[data-act='edit']").click()
+        page.wait_for_url(f"**/teacher/lessons/{lid}/edit")
+        expect(page.locator("#titel")).to_have_value("UI Lektion")
+        namen = page.locator(".src-name").all_inner_texts()
+        check("T-07 Editor mit Quellenliste vorausgefüllt", namen == ["skript.pdf", "notizen.docx"], str(namen))
+        check("T-07 Freitext und Einstellungen vorausgefüllt",
+              page.input_value("#material") == "Freitext der Lehrperson."
+              and page.input_value("#s-bewertungsstrenge") == "streng"
+              and page.input_value("#s-einsatzart") == "vertiefung")
+        page.fill("#titel", "UI Lektion geändert")
+        page.click("#btn-save")
+        expect(page.locator("#result")).to_contain_text("Version 2", timeout=10000)
+        d = httpx.get(base + f"/api/teacher/lessons/{lid}").json()
+        check("T-07 AK1 Änderung gespeichert, Material unverändert",
+              d["titel"] == "UI Lektion geändert" and d["material"] == material, d["titel"])
+        page.goto(base + "/teacher/lessons")
+        page.locator(f"tr[data-id='{lid}'] button[data-act='delete']").click()
+        expect(page.locator("#modal")).to_be_visible()
+        page.click("#modal-ok")
+        expect(page.locator(f"tr[data-id='{lid}']")).to_have_count(0, timeout=10000)
+        ids = [l["id"] for l in httpx.get(base + "/api/lessons").json()]
+        check("T-07 AK2 gelöschte Lektion nicht mehr in der Auswahl", lid not in ids)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

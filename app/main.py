@@ -31,7 +31,9 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import auth, llm, store, tutor
+import time
+
+from . import auth, einstellungen, llm, store, tutor
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("its")
@@ -68,18 +70,52 @@ async def block_static_pages(request: Request, call_next):
     return await call_next(request)
 
 
+_LESSON_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,120}$")
+
+
+def _lesson_path(lesson_id: str) -> Path:
+    if not _LESSON_ID.match(lesson_id or ""):
+        raise HTTPException(404, f"Lektion '{lesson_id}' nicht gefunden")
+    return LESSONS_DIR / f"{lesson_id}.json"
+
+
 def load_lesson(lesson_id: str) -> dict:
-    path = LESSONS_DIR / f"{lesson_id}.json"
+    """Lädt eine Lektion, auch eine archivierte (Lernverläufe bleiben lesbar)."""
+    path = _lesson_path(lesson_id)
     if not path.exists():
         raise HTTPException(404, f"Lektion '{lesson_id}' nicht gefunden")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _save_lesson(lesson: dict):
+    """Schreibt eine Lektion atomar (erst Temp-Datei, dann umbenennen)."""
+    path = _lesson_path(lesson["id"])
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(lesson, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _all_lessons(include_archived: bool = False) -> list[dict]:
+    out = []
+    for p in sorted(LESSONS_DIR.glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            log.warning("Lektion %s nicht lesbar", p.name)
+            continue
+        data.setdefault("id", p.stem)
+        data["_datei"] = p
+        if data.get("archiviert") and not include_archived:
+            continue
+        out.append(data)
+    return out
+
+
 def default_lesson_id() -> str:
-    files = sorted(LESSONS_DIR.glob("*.json"))
-    if not files:
+    lessons = _all_lessons()
+    if not lessons:
         raise HTTPException(500, "Keine Lektion vorhanden")
-    return files[0].stem
+    return lessons[0]["_datei"].stem
 
 
 # ---------------------------------------------------------------- Requests
@@ -117,6 +153,7 @@ class LessonCreateRequest(BaseModel):
     material: str
     tutor_hinweise: str = ""
     quellen: list[LessonSource] = []
+    einstellungen: dict | None = None
 
 
 class SuggestGoalsRequest(BaseModel):
@@ -131,17 +168,12 @@ class TeacherLoginRequest(BaseModel):
 
 @app.get("/api/lessons")
 def lessons_list():
-    """Verfügbare Lektionen – für die Auswahl beim Start."""
-    out = []
-    for p in sorted(LESSONS_DIR.glob("*.json")):
-        data = json.loads(p.read_text(encoding="utf-8"))
-        out.append({"id": p.stem, "titel": data.get("titel", p.stem)})
-    return out
+    """Verfügbare Lektionen für die Auswahl beim Start (ohne archivierte)."""
+    return [{"id": d["_datei"].stem, "titel": d.get("titel", d["_datei"].stem)}
+            for d in _all_lessons()]
 
 
-@teacher_api.post("/lessons")
-def lesson_create(req: LessonCreateRequest):
-    """Neue Lektion anlegen (Lehrpersonen-Modul light)."""
+def _validate_lesson(req: LessonCreateRequest) -> dict:
     titel = req.titel.strip()
     material = req.material.strip()
     ziele = [z.strip() for z in req.lernziele if z.strip()]
@@ -152,24 +184,108 @@ def lesson_create(req: LessonCreateRequest):
                                  "damit der Tutor sinnvoll arbeiten kann")
     if not ziele:
         raise HTTPException(400, "Mindestens ein Lernziel angeben")
-    lesson_id = _unique_slug(titel)
-    lesson = {
-        "id": lesson_id,
+    try:
+        settings = einstellungen.validate(req.einstellungen)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
         "titel": titel,
         "lernziele": ziele,
         "material": material,
         "quellen": [{"name": q.name, "chars": q.chars} for q in req.quellen],
         "tutor_hinweise": req.tutor_hinweise.strip(),
+        "einstellungen": settings,
+    }
+
+
+@teacher_api.post("/lessons")
+def lesson_create(req: LessonCreateRequest):
+    """Neue Lektion anlegen (Lehrpersonen-Modul light)."""
+    felder = _validate_lesson(req)
+    lesson_id = _unique_slug(felder["titel"])
+    jetzt = time.time()
+    lesson = {
+        "id": lesson_id,
+        **felder,
         "einstufungsfragen_fallback": [
             "Was weisst du bereits zu diesem Thema? Beschreibe es in eigenen Worten.",
             "Nenne ein Beispiel aus dem Alltag, das zu diesem Thema passt.",
             "Welche Fachbegriffe zu diesem Thema kennst du schon?",
         ],
+        "version": 1,
+        "erstellt_am": jetzt,
+        "geaendert_am": jetzt,
     }
-    path = LESSONS_DIR / f"{lesson_id}.json"
-    path.write_text(json.dumps(lesson, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_lesson(lesson)
     log.info("Lektion erstellt: %s", lesson_id)
-    return {"id": lesson_id, "titel": titel}
+    return {"id": lesson_id, "titel": felder["titel"]}
+
+
+@teacher_api.get("/lessons")
+def lessons_admin_list(archivierte: bool = False):
+    """Alle Lektionen für die Verwaltung (T-07), mit Anzahl Sequenzen."""
+    zaehler = store.count_sessions_by_lesson()
+    out = []
+    for d in _all_lessons(include_archived=archivierte):
+        lid = d["_datei"].stem
+        n = zaehler.get(lid, {})
+        out.append({
+            "id": lid, "titel": d.get("titel", lid),
+            "lernziele": len(d.get("lernziele", [])),
+            "quellen": len(d.get("quellen", [])),
+            "geaendert_am": d.get("geaendert_am") or d["_datei"].stat().st_mtime,
+            "version": d.get("version", 1),
+            "archiviert": bool(d.get("archiviert")),
+            "sequenzen": sum(n.values()),
+            "laufend": n.get("aktiv", 0) + n.get("pausiert", 0),
+        })
+    return out
+
+
+@teacher_api.get("/lessons/{lesson_id}")
+def lesson_detail(lesson_id: str):
+    """Eine Lektion vollständig, inklusive gültiger Tutor-Einstellungen."""
+    lesson = load_lesson(lesson_id)
+    n = store.count_sessions_by_lesson().get(lesson_id, {})
+    return {**lesson, "id": lesson_id,
+            "einstellungen": einstellungen.settings(lesson),
+            "version": lesson.get("version", 1),
+            "laufend": n.get("aktiv", 0) + n.get("pausiert", 0),
+            "sequenzen": sum(n.values())}
+
+
+@teacher_api.put("/lessons/{lesson_id}")
+def lesson_update(lesson_id: str, req: LessonCreateRequest):
+    """Lektion ändern. Laufende Sequenzen arbeiten ab dem nächsten Schritt
+    mit dem neuen Material; Version und Änderungsdatum werden nachgeführt."""
+    lesson = load_lesson(lesson_id)
+    if lesson.get("archiviert"):
+        raise HTTPException(409, "Die Lektion ist gelöscht und kann nicht mehr bearbeitet werden.")
+    lesson.update(_validate_lesson(req))
+    lesson["id"] = lesson_id
+    lesson["version"] = int(lesson.get("version", 1)) + 1
+    lesson["geaendert_am"] = time.time()
+    _save_lesson(lesson)
+    n = store.count_sessions_by_lesson().get(lesson_id, {})
+    laufend = n.get("aktiv", 0) + n.get("pausiert", 0)
+    log.info("Lektion geändert: %s (Version %s)", lesson_id, lesson["version"])
+    return {"id": lesson_id, "titel": lesson["titel"], "version": lesson["version"],
+            "laufend": laufend}
+
+
+@teacher_api.delete("/lessons/{lesson_id}")
+def lesson_delete(lesson_id: str):
+    """Lektion «löschen»: Sie wird archiviert, nicht physisch entfernt.
+
+    Sie verschwindet aus der Auswahl der Lernenden; Lernverläufe dazu bleiben
+    vollständig lesbar, weil die Datei erhalten bleibt.
+    """
+    lesson = load_lesson(lesson_id)
+    lesson["archiviert"] = True
+    lesson["archiviert_am"] = time.time()
+    _save_lesson(lesson)
+    log.info("Lektion archiviert: %s", lesson_id)
+    return {"ok": True, "id": lesson_id}
 
 
 @teacher_api.post("/lessons/extract")
@@ -246,6 +362,8 @@ def start_session(req: StartRequest, request: Request, response: Response):
     user_key = auth.normalize_user(name)
     lesson_id = req.lesson_id or default_lesson_id()
     lesson = load_lesson(lesson_id)
+    if lesson.get("archiviert"):
+        raise HTTPException(404, "Diese Lektion ist nicht mehr verfügbar.")
     bestehend = store.open_session_for(user_key, lesson_id)
     if bestehend:
         if not req.neu_beginnen:
@@ -885,8 +1003,18 @@ def teacher_login_page(request: Request):
     return _page("teacher_login.html")
 
 
+@teacher_pages.get("/lessons")
+def lessons_page():
+    return _page("lessons.html")
+
+
 @teacher_pages.get("/lessons/new")
 def lesson_editor():
+    return _page("lesson_editor.html")
+
+
+@teacher_pages.get("/lessons/{lesson_id}/edit")
+def lesson_edit_page(lesson_id: str):
     return _page("lesson_editor.html")
 
 

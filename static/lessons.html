@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ITS – Lektionen verwalten</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#1c2733; --muted:#64748b;
+          --accent:#2563eb; --border:#e2e8f0; --err:#dc2626; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
+         background:var(--bg); color:var(--text); }
+  .wrap { max-width: 1000px; margin:0 auto; padding:24px 16px 80px; }
+  header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:20px;
+           gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:1.25rem; margin:0; }
+  header a { color:var(--muted); font-size:.85rem; text-decoration:none; margin-left:14px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px;
+          padding:20px; margin-bottom:16px; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; }
+  .muted { color:var(--muted); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:6px 12px;
+           font:inherit; font-size:.85rem; font-weight:600; cursor:pointer; }
+  button.secondary { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  button.danger { background:#fff; color:var(--err); border:1px solid #fca5a5; }
+  .actions { display:flex; gap:6px; flex-wrap:wrap; }
+  .pill { font-size:.72rem; padding:2px 9px; border-radius:999px; border:1px solid var(--border);
+          background:#f1f5f9; color:var(--muted); margin-left:6px; }
+  h2 { font-size:1.05rem; margin:0 0 6px; }
+  h3 { font-size:.9rem; margin:18px 0 6px; color:var(--muted); text-transform:uppercase; }
+  pre { white-space:pre-wrap; font:inherit; font-size:.85rem; background:#f8fafc; border:1px solid var(--border);
+        border-radius:8px; padding:10px 12px; max-height:340px; overflow:auto; margin:0; }
+  dl { display:grid; grid-template-columns: max-content 1fr; gap:6px 14px; margin:0; font-size:.9rem; }
+  dt { color:var(--muted); }
+  dd { margin:0; }
+  .hidden { display:none !important; }
+  .modal { position:fixed; inset:0; background:rgba(15,23,42,.45); display:flex;
+           align-items:center; justify-content:center; padding:16px; z-index:10; }
+  .modal-box { background:#fff; border-radius:12px; padding:22px; max-width:440px; width:100%; }
+  .modal-box .actions { margin-top:14px; }
+  .banner { border-left:4px solid #16a34a; background:#f0fdf4; padding:10px 14px;
+            border-radius:0 8px 8px 0; font-size:.9rem; margin-bottom:16px; }
+  @media (max-width: 640px) { .hide-sm { display:none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📚 Lektionen verwalten</h1>
+    <span>
+      <a href="/teacher/lessons/new">＋ Neue Lektion</a>
+      <a href="/teacher">← Zum Monitoring</a>
+    </span>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+      <strong>Alle Lektionen</strong>
+      <label class="muted" style="font-size:.85rem">
+        <input type="checkbox" id="show-archived" onchange="load()"> Gelöschte anzeigen</label>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Titel</th><th class="hide-sm">Lernziele</th><th class="hide-sm">Quellen</th>
+        <th class="hide-sm">Geändert</th><th>Sequenzen</th><th></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p class="muted hidden" id="empty">Noch keine Lektionen vorhanden.</p>
+  </div>
+
+  <div class="card hidden" id="detail">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+      <h2 id="d-titel"></h2>
+      <button class="secondary" onclick="document.getElementById('detail').classList.add('hidden')">Schliessen</button>
+    </div>
+    <div class="muted" id="d-meta" style="font-size:.85rem"></div>
+    <h3>Lernziele</h3><ul id="d-ziele"></ul>
+    <h3>Quellen</h3><ul id="d-quellen"></ul>
+    <h3>Hinweise ans Tutorverhalten</h3><p id="d-hinweise"></p>
+    <h3>Tutor-Einstellungen</h3><dl id="d-einst"></dl>
+    <h3>Material</h3><pre id="d-material"></pre>
+  </div>
+</div>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <p id="modal-text"></p>
+    <div class="actions">
+      <button class="danger" id="modal-ok">Löschen</button>
+      <button class="secondary" id="modal-cancel">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const LABELS = {
+  einsatzart: { einfuehrung: "Einführung", vertiefung: "Vertiefung" },
+  niveauanpassung: { automatisch: "automatisch", nur_runter: "nur nach unten", fix: "fix" },
+  bewertungsstrenge: { nachsichtig: "nachsichtig", ausgewogen: "ausgewogen", streng: "streng" },
+  wissensstufen: { material: "Lektionsmaterial", allgemeinwissen: "Allgemeinwissen (gekennzeichnet)" },
+};
+const TITEL = { einsatzart: "Einsatzart", niveauanpassung: "Niveauanpassung",
+                bewertungsstrenge: "Bewertungsstrenge", wissensstufen: "Wissensquellen" };
+
+async function api(path, method = "GET") {
+  const r = await fetch("/api/teacher" + path, { method });
+  if (r.status === 401) { location.href = "/teacher/login"; throw new Error("Login"); }
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.detail || "Fehler");
+  return d;
+}
+
+function zeit(t) { return t ? new Date(t * 1000).toLocaleString("de-CH") : "–"; }
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g,
+    c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+async function load() {
+  const list = await api("/lessons" + ($("show-archived").checked ? "?archivierte=true" : ""));
+  $("empty").classList.toggle("hidden", list.length > 0);
+  $("rows").innerHTML = list.map(l => `
+    <tr data-id="${esc(l.id)}">
+      <td><strong>${esc(l.titel)}</strong>${l.archiviert ? '<span class="pill">gelöscht</span>' : ""}
+          <br><span class="muted" style="font-size:.78rem">Version ${l.version}</span></td>
+      <td class="hide-sm">${l.lernziele}</td>
+      <td class="hide-sm">${l.quellen}</td>
+      <td class="hide-sm muted">${esc(zeit(l.geaendert_am))}</td>
+      <td>${l.sequenzen}${l.laufend ? ` <span class="muted">(${l.laufend} laufend)</span>` : ""}</td>
+      <td><div class="actions">
+        <button class="secondary" data-act="view">Ansehen</button>
+        ${l.archiviert ? "" : `<button class="secondary" data-act="edit">Bearbeiten</button>
+        <button class="danger" data-act="delete">Löschen</button>`}
+      </div></td>
+    </tr>`).join("");
+}
+
+$("rows").onclick = async e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  const id = btn.closest("tr").dataset.id;
+  if (btn.dataset.act === "edit") location.href = `/teacher/lessons/${encodeURIComponent(id)}/edit`;
+  if (btn.dataset.act === "view") showDetail(id);
+  if (btn.dataset.act === "delete") confirmDelete(id);
+};
+
+async function showDetail(id) {
+  const l = await api("/lessons/" + encodeURIComponent(id));
+  $("d-titel").textContent = l.titel;
+  $("d-meta").textContent = `Version ${l.version} · geändert ${zeit(l.geaendert_am)} · ` +
+    `${l.sequenzen} Sequenzen, davon ${l.laufend} laufend` + (l.archiviert ? " · gelöscht" : "");
+  $("d-ziele").innerHTML = (l.lernziele || []).map(z => `<li>${esc(z)}</li>`).join("");
+  $("d-quellen").innerHTML = (l.quellen || []).map(q =>
+    `<li>${esc(q.name)} <span class="muted">(${(q.chars || 0).toLocaleString("de-CH")} Zeichen)</span></li>`).join("")
+    || "<li class='muted'>keine Quellenliste (Material direkt eingefügt)</li>";
+  $("d-hinweise").textContent = l.tutor_hinweise || "–";
+  $("d-einst").innerHTML = Object.entries(l.einstellungen || {}).map(([k, v]) =>
+    `<dt>${esc(TITEL[k] || k)}</dt><dd>${esc(Array.isArray(v) ? v.map(x => LABELS[k]?.[x] || x).join(", ")
+      : (LABELS[k]?.[v] || v))}</dd>`).join("");
+  $("d-material").textContent = l.material || "";
+  $("detail").classList.remove("hidden");
+  $("detail").scrollIntoView({ behavior: "smooth" });
+}
+
+function confirmDelete(id) {
+  const titel = document.querySelector(`tr[data-id="${CSS.escape(id)}"] strong`).textContent;
+  $("modal-text").textContent = `Lektion «${titel}» löschen? Sie verschwindet aus der Auswahl ` +
+    "der Lernenden. Bestehende Lernverläufe bleiben vollständig lesbar.";
+  $("modal").classList.remove("hidden");
+  $("modal-cancel").onclick = () => $("modal").classList.add("hidden");
+  $("modal-ok").onclick = async () => {
+    $("modal").classList.add("hidden");
+    await api("/lessons/" + encodeURIComponent(id), "DELETE");
+    $("banner").textContent = `Lektion «${titel}» wurde gelöscht (archiviert).`;
+    $("banner").classList.remove("hidden");
+    load();
+  };
+}
+
+const params = new URLSearchParams(location.search);
+if (params.get("gespeichert")) {
+  $("banner").textContent = "Lektion gespeichert.";
+  $("banner").classList.remove("hidden");
+}
+load();
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ITS – Neue Lektion erstellen</title>
+<title>ITS – Lektion bearbeiten</title>
 <style>
   :root { --bg:#f4f6f8; --card:#fff; --text:#1c2733; --muted:#64748b;
           --accent:#2563eb; --ok:#16a34a; --border:#e2e8f0; }
@@ -71,14 +71,26 @@
   details.paste > summary::-webkit-details-marker { display:none; }
   details.paste > summary::before { content:"▸ "; }
   details.paste[open] > summary::before { content:"▾ "; }
+  select.full { width:100%; padding:9px 12px; border:1px solid var(--border); border-radius:8px;
+                font:inherit; background:#fff; }
+  .settings { display:grid; grid-template-columns: 1fr; gap:4px; }
+  .settings .sub { display:block; margin-top:2px; }
+  .notice { border-left:4px solid #d97706; background:#fffbeb; padding:10px 14px;
+            border-radius:0 8px 8px 0; margin-top:10px; font-size:.9rem; }
+  .check-result { margin-top:10px; font-size:.9rem; }
+  .check-result table { width:100%; border-collapse:collapse; margin-top:6px; }
+  .check-result th, .check-result td { border-bottom:1px solid var(--border); padding:6px 8px;
+                                       text-align:left; vertical-align:top; }
+  .check-result th { color:var(--muted); font-size:.78rem; text-transform:uppercase; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>📚 Neue Lektion erstellen</h1>
-    <a href="/teacher">← Zurück zum Monitoring</a>
+    <h1 id="page-title">📚 Neue Lektion erstellen</h1>
+    <a href="/teacher/lessons">← Zur Lektionsliste</a>
   </header>
+  <div id="edit-notice" class="notice hidden" style="margin-bottom:16px"></div>
 
   <div class="card">
     <label>1. Lernmaterial <span class="sub">– Dateien hochladen (PDF, Word, Text) oder Text einfügen</span></label>
@@ -122,6 +134,39 @@
     <label>3. Tutorverhalten <span class="sub">– optionale Hinweise an den Tutor</span></label>
     <textarea id="hinweise" rows="3"
       placeholder="z.B. «Arbeite viel mit Alltagsbeispielen aus der Berufswelt», «Sei streng bei Fachbegriffen», «Stelle oft Rückfragen» …"></textarea>
+
+    <label>4. Tutor-Einstellungen <span class="sub">– fehlt eine Einstellung, gilt der Standard</span></label>
+    <div class="settings">
+      <label for="s-einsatzart" style="margin-top:4px;font-weight:600">Einsatzart
+        <span class="sub">Einführung: Der Tutor fragt nur ab, was er vorher in dieser Sequenz erklärt hat.
+          Vertiefung: Er darf Konzepte aus dem Material voraussetzen.</span></label>
+      <select id="s-einsatzart" class="full">
+        <option value="einfuehrung">Einführung (Standard)</option>
+        <option value="vertiefung">Vertiefung</option>
+      </select>
+      <label for="s-niveauanpassung" style="font-weight:600">Niveauanpassung
+        <span class="sub">Automatisch: nach wiederholten Fehlern eine Stufe tiefer, höher nur mit Zustimmung
+          der lernenden Person. Nur nach unten: nie automatisch höher. Fix: Das Niveau bleibt gleich.</span></label>
+      <select id="s-niveauanpassung" class="full">
+        <option value="automatisch">Automatisch (Standard)</option>
+        <option value="nur_runter">Nur nach unten</option>
+        <option value="fix">Fix</option>
+      </select>
+      <label for="s-bewertungsstrenge" style="font-weight:600">Bewertungsstrenge
+        <span class="sub">Beeinflusst, wie genau Fachbegriffe und Vollständigkeit verlangt werden.
+          Sachliche Fehler gelten in jeder Stufe als falsch.</span></label>
+      <select id="s-bewertungsstrenge" class="full">
+        <option value="nachsichtig">Nachsichtig</option>
+        <option value="ausgewogen">Ausgewogen (Standard)</option>
+        <option value="streng">Streng</option>
+      </select>
+      <label style="font-weight:600;display:flex;gap:8px;align-items:flex-start">
+        <input type="checkbox" id="s-allgemeinwissen" checked style="margin-top:4px">
+        <span>Allgemeinwissen des Modells für Erklärungen erlauben
+          <span class="sub">Reicht das Material nicht, darf der Tutor auf Nachfrage mit eigenem Wissen
+            erklären. Solche Ergänzungen sind für Lernende deutlich gekennzeichnet. Bewertet wird
+            immer nur anhand des Materials.</span></span></label>
+    </div>
 
     <div class="btnrow" style="margin-top:20px">
       <button id="btn-save">Lektion speichern &amp; veröffentlichen</button>
@@ -313,18 +358,26 @@ $("btn-save").onclick = async () => {
     material,
     tutor_hinweise: $("hinweise").value.trim(),
     quellen: sources.map(s => ({ name: s.name, chars: s.chars })),
+    einstellungen: collectSettings(),
   };
   $("btn-save").disabled = true; $("save-spinner").classList.remove("hidden");
   try {
-    const r = await fetch("/api/teacher/lessons", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await fetch(editId ? "/api/teacher/lessons/" + encodeURIComponent(editId) : "/api/teacher/lessons", {
+      method: editId ? "PUT" : "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     const d = await r.json();
     if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Speichern fehlgeschlagen");
-    showResult("success", `✅ Lektion «${esc(d.titel)}» ist veröffentlicht. Lernende können sie
-      jetzt auf der <a href="/">Startseite</a> auswählen.`);
+    if (editId) {
+      showResult("success", `✅ Änderungen an «${esc(d.titel)}» gespeichert (Version ${d.version}).` +
+        (d.laufend ? ` ${d.laufend} laufende ${d.laufend === 1 ? "Lernsequenz arbeitet" : "Lernsequenzen arbeiten"}
+          ab dem nächsten Schritt mit dem neuen Material.` : "") +
+        ` <a href="/teacher/lessons">Zur Lektionsliste</a>`);
+    } else {
+      showResult("success", `✅ Lektion «${esc(d.titel)}» ist veröffentlicht. Lernende können sie
+        jetzt auf der <a href="/">Startseite</a> auswählen.`);
+    }
   } catch (e) { showResult("error", e.message); }
   $("btn-save").disabled = false; $("save-spinner").classList.add("hidden");
 };
@@ -339,7 +392,72 @@ function esc(s) {
     c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
 
+/* --------------------------------------------------------- Tutor-Einstellungen */
+function collectSettings() {
+  return {
+    einsatzart: $("s-einsatzart").value,
+    niveauanpassung: $("s-niveauanpassung").value,
+    bewertungsstrenge: $("s-bewertungsstrenge").value,
+    wissensstufen: $("s-allgemeinwissen").checked ? ["material", "allgemeinwissen"] : ["material"],
+  };
+}
+function applySettings(e) {
+  if (!e) return;
+  if (e.einsatzart) $("s-einsatzart").value = e.einsatzart;
+  if (e.niveauanpassung) $("s-niveauanpassung").value = e.niveauanpassung;
+  if (e.bewertungsstrenge) $("s-bewertungsstrenge").value = e.bewertungsstrenge;
+  if (e.wissensstufen) $("s-allgemeinwissen").checked = e.wissensstufen.includes("allgemeinwissen");
+}
+
+/* ------------------------------------------------------- Bearbeiten (T-07) */
+const editMatch = location.pathname.match(/^\/teacher\/lessons\/([^/]+)\/edit$/);
+const editId = editMatch ? decodeURIComponent(editMatch[1]) : null;
+
+// Zerlegt das gespeicherte Material wieder in Quellen und Freitext. Beim
+// Speichern wird es aus «### Quelle: <Name>»-Blöcken und dem Freitext
+// zusammengesetzt, getrennt durch «---».
+function splitMaterial(material, quellen) {
+  const chars = Object.fromEntries((quellen || []).map(q => [q.name, q.chars]));
+  const out = { sources: [], pasted: [] };
+  for (const part of (material || "").split("\n\n---\n\n")) {
+    const m = part.match(/^### Quelle: (.+)\n\n([\s\S]*)$/);
+    if (m) out.sources.push({ uid: ++uidCounter, name: m[1].trim(), text: m[2],
+                              chars: chars[m[1].trim()] || m[2].length, checked: false, open: false });
+    else if (part.trim()) out.pasted.push(part);
+  }
+  return out;
+}
+
+async function loadForEdit() {
+  document.title = "ITS – Lektion bearbeiten";
+  $("page-title").textContent = "📚 Lektion bearbeiten";
+  $("btn-save").textContent = "Änderungen speichern";
+  const r = await fetch("/api/teacher/lessons/" + encodeURIComponent(editId));
+  if (r.status === 401) { location.href = "/teacher/login"; return; }
+  const l = await r.json();
+  if (!r.ok) { showResult("error", esc(l.detail || "Lektion nicht gefunden")); return; }
+  $("titel").value = l.titel || "";
+  $("ziele").value = (l.lernziele || []).join("\n");
+  $("hinweise").value = l.tutor_hinweise || "";
+  const parts = splitMaterial(l.material, l.quellen);
+  sources = parts.sources;
+  if (parts.pasted.length) {
+    $("material").value = parts.pasted.join("\n\n---\n\n");
+    $("chars").textContent = $("material").value.length;
+    $("paste-box").open = true;
+  }
+  applySettings(l.einstellungen);
+  renderSources();
+  if (l.laufend) {
+    $("edit-notice").textContent = `Diese Lektion hat ${l.laufend} laufende ` +
+      `${l.laufend === 1 ? "Lernsequenz" : "Lernsequenzen"}. Nach dem Speichern arbeiten sie ` +
+      "ab dem nächsten Schritt mit dem neuen Material.";
+    $("edit-notice").classList.remove("hidden");
+  }
+}
+
 renderSources();
+if (editId) loadForEdit();
 </script>
 </body>
 </html>
