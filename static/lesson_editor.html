@@ -168,6 +168,14 @@
             immer nur anhand des Materials.</span></span></label>
     </div>
 
+    <label>5. Material prüfen <span class="sub">– optional: Deckt das Material jedes Lernziel mit
+      Erklärung, Beispiel und Begründung ab? Eine Empfehlung, das Speichern bleibt jederzeit möglich.</span></label>
+    <div class="btnrow">
+      <button class="secondary" id="btn-check">🔍 Material prüfen (KI)</button>
+      <span class="spinner hidden" id="check-spinner">KI gleicht Material und Lernziele ab …</span>
+    </div>
+    <div id="check-result" class="check-result hidden"></div>
+
     <div class="btnrow" style="margin-top:20px">
       <button id="btn-save">Lektion speichern &amp; veröffentlichen</button>
       <span class="spinner hidden" id="save-spinner">Wird gespeichert …</span>
@@ -391,6 +399,39 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,
     c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
+
+/* ------------------------------------------------------ Material prüfen (D-06) */
+$("btn-check").onclick = async () => {
+  const material = collectMaterial();
+  const lernziele = $("ziele").value.split("\n").map(z => z.trim()).filter(Boolean);
+  if (!lernziele.length) { showResult("error", "Zuerst Lernziele eintragen."); return; }
+  if (material.length < 20) { showResult("error", "Zuerst Material hochladen oder einfügen."); return; }
+  $("btn-check").disabled = true; $("check-spinner").classList.remove("hidden");
+  try {
+    const r = await fetch("/api/teacher/lessons/check-material", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lernziele, material }),
+    });
+    if (r.status === 401) { location.href = "/teacher/login"; return; }
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Prüfung fehlgeschlagen");
+    const zeichen = v => v === true ? "✅" : v === false ? "❌" : "–";
+    $("check-result").innerHTML =
+      (d.geprueft ? "" : `<p class="error">Die KI-Prüfung ist gerade nicht verfügbar. ${esc(d.fehler)}</p>`) +
+      (d.luecken ? `<p><strong>${d.luecken} ${d.luecken === 1 ? "Lücke" : "Lücken"} gefunden.</strong>
+         Das ist eine Empfehlung, speichern kannst du trotzdem.</p>`
+                 : `<p><strong>Keine Lücken gefunden.</strong></p>`) +
+      d.hinweise.map(h => `<p>⚠️ ${esc(h)}</p>`).join("") +
+      (d.ziele.length ? `<table><thead><tr><th>Lernziel</th><th>Erklärung</th><th>Beispiel</th>
+         <th>Begründung</th><th>Hinweis</th></tr></thead><tbody>` +
+        d.ziele.map(z => `<tr><td>${esc(z.ziel)}</td><td>${zeichen(z.erklaerung)}</td>
+          <td>${zeichen(z.beispiel)}</td><td>${zeichen(z.begruendung)}</td>
+          <td>${esc(z.hinweis)}</td></tr>`).join("") + "</tbody></table>" : "") +
+      (d.gesamt ? `<p class="muted">${esc(d.gesamt)}</p>` : "");
+    $("check-result").classList.remove("hidden");
+  } catch (e) { showResult("error", esc(e.message)); }
+  $("btn-check").disabled = false; $("check-spinner").classList.add("hidden");
+};
 
 /* --------------------------------------------------------- Tutor-Einstellungen */
 function collectSettings() {

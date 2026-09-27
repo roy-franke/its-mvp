@@ -465,6 +465,29 @@ def eval_d05(b: Bericht, anzahl: int):
          screenshot4 == {"ausgewogen": "teilweise", "streng": "teilweise"}, str(screenshot4))
 
 
+# ---------------------------------------------------------------- D-06
+
+@paket("D-06")
+def eval_d06(b: Bericht, anzahl: int):
+    """Material prüfen: Quantenphysik hat Lücken, ein vollständiges Material keine."""
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_material_pruefen import VOLLSTAENDIG, VOLLSTAENDIG_ZIELE
+    from app import tutor
+    b.abschnitt("D-06 Material prüfen")
+    q = lektion(QUANTEN)
+    r1 = tutor.check_material(q["lernziele"], q["material"])
+    r2 = tutor.check_material(VOLLSTAENDIG_ZIELE, VOLLSTAENDIG)
+    b.ak("D-06", "AK 1 Quantenphysik-Material: mindestens eine Lücke", r1["luecken"] >= 1, f"{r1['luecken']} Lücken")
+    b.ak("D-06", "AK 1 vollständiges Beispielmaterial: keine Lücke", r2["luecken"] == 0, f"{r2['luecken']} Lücken")
+    for titel, r in (("Quantenphysik", r1), ("Vollständiges Beispiel", r2)):
+        b.text(f"\n### {titel}\n")
+        b.text("| Lernziel | Erklärung | Beispiel | Begründung | Hinweis |\n|---|---|---|---|---|")
+        for z in r["ziele"]:
+            b.text(f"| {z['ziel']} | {z['erklaerung']} | {z['beispiel']} | {z['begruendung']} | {z['hinweis']} |")
+        for h in r["hinweise"]:
+            b.text(f"\n{h}")
+
+
 # ---------------------------------------------------------------- Ablauf
 
 def main():

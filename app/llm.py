@@ -335,6 +335,21 @@ def _mock_text(system: str, user: str) -> str:
             "antwort": "Gute Frage! Die Verschuldenshaftung nach Art. 41 OR setzt Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden voraus. Überleg dir, welche dieser Voraussetzungen in der aktuellen Aufgabe zu prüfen sind. (Mock-Antwort – für echtes Tutoring LLM-Provider konfigurieren.)",
             "konzept": "", "ausserhalb_material": False,
         }, ensure_ascii=False)
+    if "MATERIAL_PRUEFEN" in user:
+        # Heuristik statt Urteil: Stichworte, Beispiel- und Begründungsmarker
+        teil = user.split("LERNZIELE:", 1)[1]
+        ziele_txt, material = teil.split("MATERIAL:", 1)
+        material = material.rsplit("Format:", 1)[0].lower()
+        ergebnisse = []
+        for z in re.findall(r"^- (.+)$", ziele_txt, re.MULTILINE):
+            woerter = [w.lower() for w in re.findall(r"[A-Za-zÄÖÜäöü]{6,}", z)]
+            treffer = [w for w in woerter if w[:6] in material]
+            beispiel = bool(re.search(r"beispiel|z\.\s?b\.|etwa wenn", material))
+            grund = bool(re.search(r"\b(weil|denn|deshalb|daher|darum)\b", material))
+            ergebnisse.append({"ziel": z, "erklaerung": bool(treffer), "beispiel": beispiel,
+                               "begruendung": grund,
+                               "hinweis": "" if treffer and beispiel and grund else "Mock: Lücke gefunden."})
+        return json.dumps({"ziele": ergebnisse, "gesamt": "Mock-Prüfung."}, ensure_ascii=False)
     if "LERNZIELE_VORSCHLAGEN" in user:
         return json.dumps({
             "titel": "Neue Lektion (Mock-Vorschlag)",

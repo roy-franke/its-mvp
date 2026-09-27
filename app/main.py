@@ -305,6 +305,21 @@ async def lesson_extract(file: UploadFile = File(...)):
     return {"filename": file.filename, "text": text, "chars": len(text)}
 
 
+class CheckMaterialRequest(BaseModel):
+    lernziele: list[str]
+    material: str
+
+
+@teacher_api.post("/lessons/check-material")
+def lesson_check_material(req: CheckMaterialRequest):
+    """D-06: Material mit den Lernzielen abgleichen (Empfehlung, blockiert nichts)."""
+    if not [z for z in req.lernziele if z.strip()]:
+        raise HTTPException(400, "Zuerst Lernziele eintragen")
+    if len(req.material.strip()) < 20:
+        raise HTTPException(400, "Zuerst Material hochladen oder einfügen")
+    return tutor.check_material(req.lernziele, req.material)
+
+
 @teacher_api.post("/lessons/suggest-goals")
 def lesson_suggest_goals(req: SuggestGoalsRequest):
     """KI-Vorschlag für Titel und Lernziele aus dem Material."""

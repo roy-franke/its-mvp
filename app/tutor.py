@@ -203,6 +203,57 @@ def suggest_goals(material: str) -> dict:
     return llm.public(data)
 
 
+MINDESTLAENGE_MATERIAL = 1000
+
+
+def check_material(lernziele: list[str], material: str) -> dict:
+    """D-06: Gleicht das Material mit den Lernzielen ab (Empfehlung für Lehrpersonen).
+
+    Pro Lernziel: Gibt es eine Erklärung, mindestens ein Beispiel und eine
+    Begründung? Das Ergebnis verhindert das Speichern nicht.
+    """
+    ziele = [z.strip() for z in lernziele if z.strip()]
+    data = llm.chat_json(
+        "Du unterstützt Lehrpersonen an einer Schweizer Berufsmaturitätsschule beim "
+        "Prüfen von Lernmaterial für einen KI-Tutor. Du schreibst Deutsch mit Schweizer "
+        "Rechtschreibung (kein ß, immer ss). Du antwortest IMMER ausschliesslich mit einem "
+        "einzigen JSON-Objekt.",
+        "AUFGABE: MATERIAL_PRUEFEN\n"
+        "Prüfe für jedes Lernziel, ob das Material dazu (1) eine Erklärung, (2) mindestens "
+        "ein konkretes Beispiel und (3) eine Begründung enthält, warum etwas so ist. Beurteile "
+        "nur, was wirklich im Material steht, nicht was du selbst weisst. Ein blosses "
+        "Aufzählen von Begriffen ist keine Erklärung.\n\n"
+        "LERNZIELE:\n" + "\n".join(f"- {z}" for z in ziele) + "\n\n"
+        f"MATERIAL:\n{material[:12000]}\n\n"
+        'Format: {"ziele": [{"ziel": "Lernziel wörtlich", "erklaerung": true, "beispiel": true, '
+        '"begruendung": true, "hinweis": "was fehlt oder ergänzt werden sollte, sonst leer"}], '
+        '"gesamt": "1-2 Sätze Gesamteinschätzung"}',
+        fallback={"ziele": [], "gesamt": ""},
+    )
+    ergebnisse = []
+    for i, z in enumerate(ziele):
+        roh = next((r for r in data.get("ziele") or [] if isinstance(r, dict)
+                    and (r.get("ziel") or "").strip() == z), None)
+        if roh is None and i < len(data.get("ziele") or []) and isinstance(data["ziele"][i], dict):
+            roh = data["ziele"][i]
+        roh = roh or {}
+        eintrag = {"ziel": z}
+        for feld in ("erklaerung", "beispiel", "begruendung"):
+            eintrag[feld] = bool(roh.get(feld)) if roh else None
+        eintrag["hinweis"] = str(roh.get("hinweis") or "")
+        ergebnisse.append(eintrag)
+    hinweise = []
+    if len(material.strip()) < MINDESTLAENGE_MATERIAL:
+        hinweise.append(f"Das Material ist mit {len(material.strip())} Zeichen sehr kurz. Der Tutor "
+                        "hat dann kaum eigene Erklärungen und Beispiele zur Verfügung und muss auf "
+                        "Allgemeinwissen ausweichen oder bleibt vage.")
+    luecken = sum(1 for e in ergebnisse for f in ("erklaerung", "beispiel", "begruendung")
+                  if e[f] is False) + len(hinweise)
+    return {"ziele": ergebnisse, "gesamt": str(data.get("gesamt") or ""), "hinweise": hinweise,
+            "luecken": luecken, "geprueft": not data.get("_fallback"),
+            "fehler": data.get("_fehler", "") if data.get("_fallback") else ""}
+
+
 # ---------------------------------------------------------------- Einstufung
 
 EINSTUFUNG_EINFUEHRUNG = (
