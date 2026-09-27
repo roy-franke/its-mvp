@@ -228,3 +228,50 @@ def test_themenwoerter_allein_sind_kein_wiederverwendetes_beispiel():
 ])
 def test_sie_anrede(text, verstoss):
     assert bool(didaktik.sie_anrede(text)) is verstoss
+
+
+# ---------------------------------------------------------------- Zweiter Evaluationslauf
+
+QUANTEN = json.loads(open("app/lessons/einfuhrung-in-die-quantenphysik.json", encoding="utf-8").read())
+FAMILIE = ("Familienhauptshaftung regelt, dass Eltern für Schäden ihrer Minderjährigen haften, wenn sie "
+           "die Aufsichtspflicht verletzen. Dieser Grundsatz ist im Zivilgesetzbuch festgelegt und dient "
+           "dem Schutz Dritter vor unzureichender Aufsicht durch die Eltern.")
+
+
+def test_themenfremde_theorie_wird_erkannt():
+    assert didaktik.thema_verfehlt(FAMILIE, BRUCH)
+    assert didaktik.thema_verfehlt("Ein Bruch besteht aus Zähler, Bruchstrich und Nenner. Der Nenner "
+                                   "zeigt, in wie viele gleich grosse Teile das Ganze geteilt ist, der "
+                                   "Zähler, wie viele Teile genommen werden.", BRUCH) is None
+    assert didaktik.thema_verfehlt(FAMILIE, HAFTUNG) is None
+
+
+def test_kurzes_material_wird_nicht_gemessen():
+    assert didaktik.thema_verfehlt("Superposition heisst, dass ein Qubit gleichzeitig mehrere Zustände "
+                                   "einnehmen kann, was Quantencomputer für Optimierungen nutzen.", QUANTEN) is None
+
+
+def test_themenwurzel_ist_kein_loesungswort():
+    task = {"inhalt": "Ein Rezept für 4 Personen braucht 3/4 kg Mehl.",
+            "frage": "Berechne die Menge an Mehl pro Portion in Bruchform.",
+            "schluesselbegriffe": ["Bruchform"]}
+    assert didaktik.loesungswort_in_aufgabe(task, didaktik.fachvokabular(BRUCH)) is None
+
+
+def test_angabe_aus_dem_fall_ist_kein_loesungswort():
+    task = {"inhalt": "Bei einer Behandlung erleidet ein Patient eine Verletzung durch einen Assistenten.",
+            "frage": "Haftet die Praxis für die Verletzung des Patienten?",
+            "schluesselbegriffe": ["Verletzung"]}
+    assert didaktik.loesungswort_in_aufgabe(task, didaktik.fachvokabular(HAFTUNG)) is None
+
+
+def test_konzeptwoerter_der_erklaerung_sind_kein_wiederverwendetes_beispiel():
+    theorie = {"konzept": "Geschäftsherrenhaftung",
+               "inhalt": "Die Geschäftsherrenhaftung macht Arbeitgeber für Sachschäden haftbar, die ihre "
+                         "Angestellten bei der Arbeit fahrlässig verursachen.",
+               "beispiel": "Ein Angestellter verursacht bei der Arbeit einen Sachschaden, indem er mit dem "
+                           "Lastwagen einen Unfall baut."}
+    task = {"inhalt": "Ein Pflegefachmann handelt bei der Arbeit fahrlässig und verursacht einen "
+                      "Sachschaden an einem Rollstuhl, indem er ihn fallen lässt.",
+            "frage": "Warum haftet der Arbeitgeber des Angestellten?", "konzept": "Geschäftsherrenhaftung"}
+    assert didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(HAFTUNG)) is None

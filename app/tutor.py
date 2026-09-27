@@ -367,7 +367,9 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
     data = llm.chat_json(_system_prompt(lesson), instruction, fallback={},
-                         check=lambda d: didaktik.pruefe_felder(d, ("inhalt", "beispiel")))
+                         check=lambda d: (didaktik.pruefe_felder(d, ("inhalt", "beispiel"))
+                                          or didaktik.thema_verfehlt(
+                                              f"{d.get('inhalt', '')} {d.get('beispiel', '')}", lesson)))
     if data.get("_fallback"):
         return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"

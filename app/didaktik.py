@@ -284,11 +284,20 @@ def loesungswort_in_aufgabe(task: dict, fachwoerter: set[str] | None = None) -> 
     if (task.get("aufgabentyp") or "").lower() in ("multiple_choice", "multiple-choice", "mc"):
         return None
     frage_staemme = staemme(task.get("frage") or "")
+    fall_staemme = staemme(task.get("inhalt") or "")
+    wurzeln = themenwurzeln
     for begriff in schluesselbegriffe(task):
         if re.search(r"\d", begriff):
             continue
         teile = staemme(begriff)
         if not teile:
+            continue
+        # Angaben aus der Fallbeschreibung sind gegeben, nicht verraten
+        if all(_kommt_vor(t, fall_staemme) for t in teile):
+            continue
+        # Wörter auf der Themenwurzel der Lektion («Bruchform», «Bruchwert» in
+        # einer Bruch-Lektion) sind Formatangaben, keine Lösung
+        if fachwoerter is not None and all(any(t.startswith(w) for w in wurzeln(fachwoerter)) for t in teile):
             continue
         if fachwoerter is not None and not all(_kommt_vor(t, fachwoerter) for t in teile):
             continue
@@ -299,10 +308,42 @@ def loesungswort_in_aufgabe(task: dict, fachwoerter: set[str] | None = None) -> 
     return None
 
 
+class Fachvokabular(set):
+    """Stämme der Fachbegriffe einer Lektion, dazu die Themenwurzeln des Titels."""
+    wurzeln: set[str] = set()
+
+
 def fachvokabular(lesson: dict) -> set[str]:
     """Stämme der Fachbegriffe einer Lektion (Material, Lernziele, Titel)."""
-    return staemme(" ".join([lesson.get("titel", ""), " ".join(lesson.get("lernziele", [])),
-                             lesson.get("material", "")]))
+    v = Fachvokabular(staemme(" ".join([lesson.get("titel", ""), " ".join(lesson.get("lernziele", [])),
+                                        lesson.get("material", "")])))
+    # Themenwurzel: die ersten fünf Buchstaben langer Titelwörter
+    # («Bruchbegriff» → «bruch»). Wörter darauf sind Themen-, keine Lösungswörter.
+    v.wurzeln = {w.lower()[:5] for w in re.findall(r"[A-Za-zÄÖÜäöü]{7,}", lesson.get("titel", ""))}
+    return v
+
+
+def themenwurzeln(fachwoerter) -> set[str]:
+    return getattr(fachwoerter, "wurzeln", set())
+
+
+def thema_verfehlt(texte: str, lesson: dict, schwelle: float = 0.25) -> str | None:
+    """Passt ein erzeugter Text überhaupt zur Lektion?
+
+    Im Evaluationslauf lieferte das Modell in der Bruch-Lektion eine Theorie zur
+    Familienhauptshaftung. Ist weniger als ein Viertel der Inhaltswörter im
+    Lektionsvokabular zu finden, gilt der Text als themenfremd.
+    """
+    eigene = staemme(texte)
+    if len(eigene) < 8 or len(lesson.get("material", "")) < 1500:
+        return None      # zu wenig Material, um das Thema daran zu messen
+    vokabular = fachvokabular(lesson)
+    anteil = sum(1 for w in eigene if _kommt_vor(w, vokabular)) / len(eigene)
+    if anteil < schwelle:
+        return (f"Der Text passt nicht zur Lektion «{lesson.get('titel', '')}» (nur "
+                f"{round(anteil * 100)} Prozent der Wörter stammen aus dem Lektionsvokabular). "
+                "Bleib beim Thema und beim Material dieser Lektion.")
+    return None
 
 
 def themenwoerter(lesson: dict) -> set[str]:
@@ -324,6 +365,10 @@ def beispiel_wiederverwendet(task: dict, theorie: dict | None,
                                  + schluesselbegriffe(task))) | (themen or set())
     beispiel = (theorie.get("beispiel") or "").strip()
     if beispiel:
+        # Verglichen werden nur die Fallwörter des Beispiels: Wörter, die schon in
+        # der Erklärung stehen («Arbeitgeber», «Aufsichtspflicht»), beschreiben das
+        # Konzept und dürfen in jeder Aufgabe dazu vorkommen.
+        ausnahmen = ausnahmen | staemme(theorie.get("inhalt") or "")
         anteil, gemeinsam = ueberschneidung(beispiel, _aufgabentext(task), ausnahmen)
         treffer = len(gemeinsam) >= 3 and anteil >= 0.3
     else:
@@ -406,6 +451,8 @@ def pruefe_aufgabe(task: dict, theorie: dict | None, direkt_nach_theorie: bool,
     fach = fachvokabular(lesson) if lesson else None
     themen = themenwoerter(lesson) if lesson else None
     return (pruefe_felder(task, ("inhalt", "frage"))
+            or (thema_verfehlt(f"{task.get('inhalt', '')} {task.get('frage', '')}", lesson)
+                if lesson else None)
             or loesungswort_in_aufgabe(task, fach)
             or beispiel_wiederverwendet(task, theorie, themen)
             or (abschreibbar(task, theorie) if direkt_nach_theorie else None))

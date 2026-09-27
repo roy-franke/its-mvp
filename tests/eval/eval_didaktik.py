@@ -98,8 +98,11 @@ def eval_d01(b: Bericht, anzahl: int):
                 "Theorieschritt erzeugt. Geprüft wird die endgültige Aufgabe (nach einer "
                 "allfälligen Neugenerierung).")
     alle = []
+    from app import llm
+    token_info = []
     for lid in (HAFTUNG, BRUCH):
         lesson = lektion(lid)
+        start = len(llm.timings())
         for level in tutor.LEVELS:
             konzepte: list[str] = []
             for i in range(anzahl):
@@ -122,10 +125,16 @@ def eval_d01(b: Bericht, anzahl: int):
                     "abschreibbar": didaktik.abschreibbar(task, theorie),
                     "neu_generiert": task.get("_versuche", 1) > 1,
                     "fallback": bool(task.get("_fallback")),
+                    "thema": didaktik.thema_verfehlt(
+                        " ".join([theorie.get("inhalt", ""), theorie.get("beispiel", ""),
+                                  task.get("inhalt", ""), task.get("frage", "")]), lesson),
                 }
                 alle.append(eintrag)
                 print(f"    {lid[:12]} {level:12} {i + 1}/{anzahl}: "
                       f"{'Verstoss' if eintrag['loesungswort'] or eintrag['beispiel'] else 'ok'}")
+        neue = llm.timings()[start:]
+        prompt_max = max((t.get("prompt_tokens") or 0 for t in neue), default=0)
+        token_info.append((lesson["titel"], prompt_max))
     echt = [e for e in alle if not e["fallback"]]
     lw = [e for e in echt if e["loesungswort"]]
     bsp = [e for e in echt if e["beispiel"]]
@@ -136,6 +145,13 @@ def eval_d01(b: Bericht, anzahl: int):
     b.ak("D-01", "AK 2 kein wiederverwendetes Theorie-Beispiel", not bsp, f"{len(bsp)} von {len(echt)}")
     sie = [e for e in echt if e["sie"]]
     b.ak("D-01", "Lernende werden geduzt", not sie, f"{len(sie)} von {len(echt)} mit «Sie»")
+    thema = [e for e in echt if e["thema"]]
+    b.ak("D-01", "Theorie und Aufgabe bleiben beim Thema der Lektion", not thema,
+         f"{len(thema)} von {len(echt)} themenfremd")
+    num_ctx = int(os.getenv("OLLAMA_NUM_CTX", "16384"))
+    for titel, pt in token_info:
+        warnung = " – ACHTUNG: nahe am Kontextfenster, Material wird abgeschnitten" if pt and pt > num_ctx - 1100 else ""
+        b.text(f"Grösster Prompt in «{titel}»: {pt or 'unbekannt'} Token (Kontextfenster {num_ctx}){warnung}.")
     b.text(f"\nAufgaben insgesamt: {len(alle)}, davon Fallbacks: {len(alle) - len(echt)}. "
            f"Nach einem Regelverstoss neu generiert: {len(neu)}. Abschreibbar trotz Prüfung: {len(ab)}. "
            "Multiple-Choice-Aufgaben: "
