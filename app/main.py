@@ -228,6 +228,7 @@ def assess(sid: str, req: AssessRequest):
     profile = s["profile"]
     questions = profile.get("assessment_questions", [])
     result = tutor.evaluate_assessment(lesson, questions, req.answers)
+    _log_llm_meta(sid, "EINSTUFUNG_BEWERTEN", result)
     profile["level"] = result["level"]
     store.log_event(sid, "assessment_evaluated", {
         "answers": req.answers, "level": result["level"],
@@ -241,30 +242,108 @@ def assess(sid: str, req: AssessRequest):
     }
 
 
+SCHRITTART = {"theorie": "THEORIE_SCHRITT", "aufgabe": "NAECHSTE_AUFGABE"}
+
+
+def _log_llm_meta(sid: str, schrittart: str, data: dict):
+    """Protokolliert Fallbacks und Regelverstösse eines LLM-Ergebnisses (T-01)."""
+    if data.get("_fallback"):
+        store.log_event(sid, "fallback_used", {
+            "schrittart": schrittart, "grund": data.get("_fehler", "unbekannt")})
+    if data.get("_verstoesse"):
+        store.log_event(sid, "regel_verstoss", {
+            "schrittart": schrittart, "verstoesse": data["_verstoesse"],
+            "behoben": data.get("_versuche", 1) > 1 and len(data["_verstoesse"]) < data["_versuche"]})
+
+
+def _generate_step(lesson: dict, profile: dict, history: list[dict],
+                   adaptation: str | None) -> tuple[str, dict]:
+    step_type = tutor.decide_step_type(profile, adaptation)
+    if step_type == "theorie":
+        return step_type, tutor.generate_theory(lesson, profile, history, adaptation)
+    return step_type, tutor.generate_task(lesson, profile, history, adaptation)
+
+
+def _vorabruf_ungueltig(pre: dict, sid: str, profile: dict, adaptation: str | None) -> str | None:
+    """Prüft, ob ein vorab erzeugter Schritt noch zum Gesprächsstand passt."""
+    if pre.get("stand") != store.last_event_id(sid):
+        return "Gesprächsstand hat sich seit dem Vorabruf geändert"
+    if (pre.get("adaptation") or "") != (adaptation or ""):
+        return "andere Adaption angefordert"
+    if pre.get("step") != profile["step"]:
+        return "Lernschritt hat sich geändert"
+    if pre.get("step_type") != tutor.decide_step_type(profile, adaptation):
+        return "andere Schrittart fällig"
+    if pre.get("task", {}).get("_fallback"):
+        return "Vorabruf endete im Fallback, neuer Versuch"
+    return None
+
+
 @app.post("/api/session/{sid}/next")
-def next_step(sid: str, adaptation: str | None = None):
+def next_step(sid: str, adaptation: str | None = None, prefetch: bool = False):
+    """Nächster Lernschritt.
+
+    Mit prefetch=true wird der Schritt nur vorbereitet und separat gespeichert,
+    ohne Profil oder Lernverlauf zu verändern. Der eigentliche Aufruf übernimmt
+    ihn, wenn sich der Gesprächsstand seither nicht geändert hat, sonst wird
+    neu erzeugt (T-01: veraltete Vorabrufe nach einer Verständnisfrage).
+    """
     s = _session(sid)
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
     if profile["step"] >= tutor.total_steps():
+        if prefetch:
+            return {"vorabruf": True, "done": True}
         return _finish(sid, lesson, profile)
-    history = store.get_events(sid)
-    step_type = tutor.decide_step_type(profile, adaptation)
+    if prefetch:
+        stand = store.last_event_id(sid)
+        step_type, task = _generate_step(lesson, profile, store.get_events(sid), adaptation)
+        store.set_vorabruf(sid, {"stand": stand, "adaptation": adaptation or "",
+                                 "step": profile["step"], "step_type": step_type,
+                                 "task": task})
+        return {"vorabruf": True, "done": False}
+
+    task = None
+    pre = store.get_vorabruf(sid)
+    if pre:
+        store.set_vorabruf(sid, None)
+        grund = _vorabruf_ungueltig(pre, sid, profile, adaptation)
+        if grund:
+            store.log_event(sid, "vorabruf_verworfen", {"grund": grund})
+        else:
+            step_type, task = pre["step_type"], pre["task"]
+    if task is None:
+        step_type, task = _generate_step(lesson, profile, store.get_events(sid), adaptation)
+    return _commit_step(sid, profile, step_type, task)
+
+
+def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
+    """Übernimmt einen erzeugten Schritt in Profil und Lernverlauf."""
+    _log_llm_meta(sid, SCHRITTART[step_type], task)
+    public_task = llm.public(task)
+    if task.get("_fallback"):
+        public_task["fallback"] = True
+    if task.get("typ") == "fehler":
+        # Nichts erzeugt: Profil bleibt, damit «Nochmals versuchen» denselben
+        # Schritt erneut anfordert.
+        profile["current_task"] = public_task
+        store.log_event(sid, "task", public_task)
+        store.update_session(sid, profile=profile)
+        return {"done": False, "task": public_task, "progress": _progress(profile)}
     if step_type == "theorie":
-        task = tutor.generate_theory(lesson, profile, history, adaptation)
         profile["theory_steps"] = profile.get("theory_steps", 0) + 1
-    else:
-        task = tutor.generate_task(lesson, profile, history, adaptation)
-    profile["current_task"] = task
+    if "material_abschnitt" in task:
+        profile.setdefault("fallback_abschnitte", []).append(task["material_abschnitt"])
+    profile["current_task"] = public_task
     profile["last_type"] = step_type
     concept = task.get("konzept")
     if concept and concept not in profile["covered"]:
         profile["covered"].append(concept)
-    store.log_event(sid, "task", task)
+    store.log_event(sid, "task", public_task)
     store.update_session(sid, profile=profile)
     return {
         "done": False,
-        "task": task,
+        "task": public_task,
         "progress": _progress(profile),
     }
 
@@ -281,11 +360,24 @@ def answer(sid: str, req: AnswerRequest):
         raise HTTPException(400, "Der aktuelle Schritt ist Theorie – es gibt "
                                  "nichts zu bewerten. Weiter mit /next")
     confidence = req.confidence if req.confidence in range(1, 11) else None
-    if confidence is not None:
-        profile.setdefault("confidence", []).append(confidence)
     store.log_event(sid, "answer_submitted",
                     {"answer": req.answer, "confidence": confidence})
     result = tutor.evaluate_answer(lesson, profile, task, req.answer)
+    _log_llm_meta(sid, "ANTWORT_BEWERTEN", result)
+    if result["bewertung"] == "unbewertet":
+        # Technischer Fehler bei der Bewertung: zählt weder als richtig noch
+        # als falsch, die lernende Person schickt die Antwort nochmals ab.
+        store.log_event(sid, "answer_evaluated", {
+            "bewertung": "unbewertet", "korrekt": False,
+            "feedback": result.get("feedback", ""), "hinweis": result.get("hinweis", ""),
+            "adaption": "retry", "adaption_begruendung": "", "level": profile["level"],
+        })
+        return {"bewertung": "unbewertet", "korrekt": False,
+                "feedback": result.get("feedback", ""), "hinweis": result.get("hinweis", ""),
+                "adaption": "retry", "adaption_begruendung": "", "finished": False,
+                "progress": _progress(profile)}
+    if confidence is not None:
+        profile.setdefault("confidence", []).append(confidence)
     action, reason = tutor.adapt(profile, result["bewertung"])
     store.log_event(sid, "answer_evaluated", {
         "bewertung": result["bewertung"], "korrekt": result["korrekt"],
@@ -320,6 +412,7 @@ def chat_with_tutor(sid: str, req: ChatRequest):
     history = store.get_events(sid)
     result = tutor.answer_question(lesson, profile, profile.get("current_task"),
                                    message, history)
+    _log_llm_meta(sid, "FRAGE_BEANTWORTEN", result)
     antwort = result.get("antwort", "")
     store.log_event(sid, "chat_reply", {"antwort": antwort})
     return {"antwort": antwort}
@@ -348,6 +441,8 @@ def _finish(sid: str, lesson: dict, profile: dict):
             return {"done": True, "summary": ev["payload"], "progress": _progress(profile)}
     history = store.get_events(sid)
     summary = tutor.generate_summary(lesson, profile, history)
+    _log_llm_meta(sid, "ABSCHLUSS", summary)
+    summary = llm.public(summary)
     store.log_event(sid, "finished", summary)
     store.update_session(sid, phase="finished", profile=profile)
     return {"done": True, "summary": summary, "progress": _progress(profile)}

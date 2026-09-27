@@ -10,8 +10,9 @@ Designprinzipien (aus dem Systemkonzept):
 
 import json
 import os
+import re
 
-from . import llm
+from . import didaktik, llm
 
 LEVELS = ["basic", "intermediate", "advanced"]
 
@@ -110,7 +111,7 @@ def suggest_goals(material: str) -> dict:
         'Format: {"titel": "...", "lernziele": ["...", "..."]}',
         fallback={"titel": "", "lernziele": []},
     )
-    return data
+    return llm.public(data)
 
 
 # ---------------------------------------------------------------- Einstufung
@@ -140,7 +141,7 @@ def evaluate_assessment(lesson: dict, questions: list[str], answers: list[str]) 
         "Antworten deuten auf basic.\n\n"
         f"{qa}\n\n"
         'Format: {"level": "basic|intermediate|advanced", "begruendung": "1-2 Sätze, direkt an den Lernenden gerichtet"}',
-        fallback={"level": "basic", "begruendung": "Wir starten sicherheitshalber bei den Grundlagen."},
+        fallback=dict(FALLBACK_TEXTE["einstufung"]),
     )
     if data.get("level") not in LEVELS:
         data["level"] = "basic"
@@ -179,12 +180,10 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         '"inhalt": "die Erklärung mit Beispiel", '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
-    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={
-        "titel": "Theorie",
-        "inhalt": "Lies den entsprechenden Abschnitt im Lektionsmaterial in Ruhe durch. "
-                  "Die Erklärung konnte gerade nicht generiert werden.",
-        "konzept": "Theorie",
-    })
+    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={},
+                         check=lambda d: didaktik.pruefe_felder(d, ("inhalt",)))
+    if data.get("_fallback"):
+        return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"
     return data
 
@@ -226,12 +225,10 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         '"frage": "eine konkrete Frage an den Lernenden", '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
-    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={
-        "titel": "Wiederholung",
-        "inhalt": "Lies den folgenden Abschnitt aus dem Material noch einmal aufmerksam.",
-        "frage": "Fasse das Wichtigste in zwei Sätzen zusammen.",
-        "konzept": "Wiederholung",
-    })
+    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={},
+                         check=lambda d: didaktik.pruefe_felder(d, ("inhalt", "frage")))
+    if data.get("_fallback"):
+        return task_fallback(lesson, profile, adaptation, data)
     data["typ"] = "aufgabe"
     return data
 
@@ -273,12 +270,14 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str) -> dic
         'Format: {"bewertung": "korrekt|teilweise|falsch", '
         '"feedback": "2-4 Sätze direkt an den Lernenden", '
         '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
-        fallback={
-            "bewertung": "falsch",
-            "feedback": "Deine Antwort konnte gerade nicht automatisch beurteilt werden. Versuch es nochmals.",
-            "hinweis": "Formuliere deine Antwort in ganzen Sätzen.",
-        },
+        fallback=dict(FALLBACK_TEXTE["bewertung"]),
+        check=lambda d: didaktik.pruefe_felder(d, ("feedback", "hinweis")),
     )
+    if data.get("_fallback"):
+        # Technischer Fehler: nicht als falsch werten, die Antwort zählt nicht.
+        data["bewertung"] = "unbewertet"
+        data["korrekt"] = False
+        return data
     if data.get("bewertung") not in BEWERTUNGEN:
         # Rückwärtskompatibilität: alte Antworten mit korrekt=true/false
         data["bewertung"] = "korrekt" if data.get("korrekt") else "falsch"
@@ -309,10 +308,8 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
         "aktuellen Aufgabe verlangt, gib die Lösung NICHT preis, sondern einen "
         "Denkanstoss. Wenn das Material die Frage nicht beantwortet, sag das offen.\n"
         'Format: {"antwort": "..."}',
-        fallback={
-            "antwort": "Das kann ich gerade nicht beantworten. Versuch es gleich "
-                       "nochmals oder halte die Frage für deine Lehrperson fest.",
-        },
+        fallback=dict(FALLBACK_TEXTE["frage"]),
+        check=lambda d: didaktik.pruefe_felder(d, ("antwort",)),
     )
     return data
 
@@ -331,13 +328,145 @@ def generate_summary(lesson: dict, profile: dict, history: list[dict]) -> dict:
         'Format: {"zusammenfassung": "3-5 Sätze", '
         '"erreichte_lernziele": ["..."], '
         '"empfehlung": "1-2 Sätze, was als Nächstes sinnvoll wäre"}',
-        fallback={
-            "zusammenfassung": "Du hast die Lernsequenz abgeschlossen.",
-            "erreichte_lernziele": [],
-            "empfehlung": "Bespreche deinen Verlauf mit deiner Lehrperson.",
-        },
+        fallback=dict(FALLBACK_TEXTE["abschluss"]),
     )
     return data
+
+
+# ---------------------------------------------------------------- Fallbacks
+#
+# Greift erst, wenn auch der automatische zweite Versuch gescheitert ist
+# (llm.chat_json). Fallbacks müssen für Lernende für sich allein brauchbar
+# sein: Statt auf das Material zu verweisen, zeigen sie den passenden
+# Abschnitt direkt an. Lässt sich keiner bestimmen, sagt der Tutor offen,
+# dass ein technisches Problem besteht, und bietet «Nochmals versuchen» an.
+# tests/test_fallbacks.py prüft alle Texte auf leere Ankündigungen.
+
+FALLBACK_TEXTE = {
+    "einstufung": {
+        "level": "basic",
+        "begruendung": "Deine Antworten konnten gerade nicht automatisch ausgewertet "
+                       "werden. Wir starten deshalb bei den Grundlagen, und dein Tutor "
+                       "passt das Niveau unterwegs an.",
+    },
+    "bewertung": {
+        "bewertung": "unbewertet",
+        "feedback": "Deine Antwort konnte wegen eines technischen Problems gerade nicht "
+                    "beurteilt werden. Sie zählt nicht als Fehler.",
+        "hinweis": "Schick die Antwort einfach nochmals ab.",
+    },
+    "frage": {
+        "antwort": "Das kann ich wegen eines technischen Problems gerade nicht "
+                   "beantworten. Versuch es gleich nochmals oder halte die Frage "
+                   "für deine Lehrperson fest.",
+    },
+    "abschluss": {
+        "zusammenfassung": "Du hast die Lernsequenz abgeschlossen. Die ausführliche "
+                           "Bilanz konnte wegen eines technischen Problems gerade nicht "
+                           "erstellt werden.",
+        "erreichte_lernziele": [],
+        "empfehlung": "Bespreche deinen Verlauf mit deiner Lehrperson.",
+    },
+    "theorie_material": {
+        "titel": "Aus dem Lektionsmaterial",
+        "einleitung": "Dein Tutor konnte die Erklärung gerade nicht selbst formulieren. "
+                      "Hier ist deshalb der passende Abschnitt direkt aus dem "
+                      "Lektionsmaterial.",
+    },
+    "aufgabe_material": {
+        "titel": "Aufgabe zum Lektionsmaterial",
+        "einleitung": "Dein Tutor konnte gerade keine neue Aufgabe erzeugen. Arbeite "
+                      "deshalb mit diesem Abschnitt aus dem Lektionsmaterial.",
+        "frage": "Erkläre mit eigenen Worten, was dieser Abschnitt aussagt, und nenne "
+                 "ein eigenes Beispiel, das nicht im Text steht.",
+    },
+    "technischer_fehler": {
+        "titel": "Technisches Problem",
+        "inhalt": "Dein Tutor konnte den nächsten Schritt wegen eines technischen "
+                  "Problems gerade nicht erzeugen. Klick auf «Nochmals versuchen». "
+                  "Wenn es wieder nicht klappt, sag deiner Lehrperson Bescheid.",
+    },
+}
+
+
+def material_abschnitte(material: str, min_len: int = 250, max_len: int = 1200) -> list[str]:
+    """Zerlegt das Material in lesbare Abschnitte (Absätze, zusammengefasst).
+
+    Quellen-Trenner («### Quelle: …», «---») werden entfernt. Sehr lange
+    Absätze werden an Satzgrenzen geteilt, sehr kurze zusammengefasst.
+    """
+    text = re.sub(r"^###\s*Quelle:.*$", "", material or "", flags=re.MULTILINE)
+    text = re.sub(r"^\s*---\s*$", "", text, flags=re.MULTILINE)
+    absaetze = [re.sub(r"\s+", " ", a).strip() for a in re.split(r"\n\s*\n", text)]
+    absaetze = [a for a in absaetze if len(a) >= 40]
+    teile: list[str] = []
+    for a in absaetze:
+        while len(a) > max_len:
+            cut = a.rfind(". ", 0, max_len)
+            cut = cut + 1 if cut > min_len else max_len
+            teile.append(a[:cut].strip())
+            a = a[cut:].strip()
+        if a:
+            teile.append(a)
+    out: list[str] = []
+    for t in teile:
+        if out and len(out[-1]) < min_len and len(out[-1]) + len(t) <= max_len:
+            out[-1] = out[-1] + " " + t
+        else:
+            out.append(t)
+    return out
+
+
+def _woerter(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-zäöüA-ZÄÖÜ]{4,}", (text or "").lower())}
+
+
+def _passender_abschnitt(lesson: dict, profile: dict, adaptation: str | None) -> tuple[int, str] | None:
+    abschnitte = material_abschnitte(lesson.get("material", ""))
+    if not abschnitte:
+        return None
+    gezeigt = set(profile.get("fallback_abschnitte", []))
+    if adaptation == "simplify" and profile.get("covered"):
+        # Nach Fehlversuchen: der Abschnitt, der am besten zum Konzept passt
+        ziel = _woerter(profile["covered"][-1])
+        best = max(range(len(abschnitte)),
+                   key=lambda i: len(ziel & _woerter(abschnitte[i])))
+        if ziel & _woerter(abschnitte[best]):
+            return best, abschnitte[best]
+    for i, a in enumerate(abschnitte):
+        if i not in gezeigt:
+            return i, a
+    return 0, abschnitte[0]
+
+
+def _fehler_schritt(meta: dict) -> dict:
+    out = dict(FALLBACK_TEXTE["technischer_fehler"])
+    out.update({"typ": "fehler", "konzept": "", "wiederholbar": True,
+                "_fallback": True, "_fehler": meta.get("_fehler", "")})
+    return out
+
+
+def theory_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dict) -> dict:
+    treffer = _passender_abschnitt(lesson, profile, adaptation)
+    if treffer is None:
+        return _fehler_schritt(meta)
+    idx, abschnitt = treffer
+    t = FALLBACK_TEXTE["theorie_material"]
+    return {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
+            "konzept": "", "typ": "theorie", "material_abschnitt": idx,
+            "_fallback": True, "_fehler": meta.get("_fehler", "")}
+
+
+def task_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dict) -> dict:
+    treffer = _passender_abschnitt(lesson, profile, adaptation)
+    if treffer is None:
+        return _fehler_schritt(meta)
+    idx, abschnitt = treffer
+    t = FALLBACK_TEXTE["aufgabe_material"]
+    return {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
+            "frage": t["frage"], "konzept": "", "typ": "aufgabe",
+            "material_abschnitt": idx,
+            "_fallback": True, "_fehler": meta.get("_fehler", "")}
 
 
 # ---------------------------------------------------------------- Adaption

@@ -36,6 +36,9 @@
   .event.answer_evaluated.ok { border-color:#16a34a; }
   .event.answer_evaluated.nok { border-color:#dc2626; }
   .event.chat_question, .event.chat_reply { border-color:#7c3aed; }
+  .event.fallback_used { border-color:#dc2626; background:#fef2f2; }
+  .event.regel_verstoss, .event.vorabruf_verworfen { border-color:#d97706; background:#fffbeb; }
+  .fb { color:#dc2626; font-weight:600; }
   .muted { color:var(--muted); }
   button.small { background:none; border:1px solid var(--border); border-radius:6px;
                  padding:4px 12px; cursor:pointer; font-size:.8rem; }
@@ -78,7 +81,7 @@
     </div>
     <table>
       <thead><tr>
-        <th>Schritt</th><th>Aufrufe</th><th>Median</th><th>Langsamster</th>
+        <th>Schritt</th><th>Aufrufe</th><th>Median</th><th>Langsamster</th><th>Fehler</th><th>Fallbacks</th>
       </tr></thead>
       <tbody id="timing-rows"></tbody>
     </table>
@@ -132,19 +135,24 @@ async function loadDetail(sid, name) {
     if (ev.type === "session_started") body = `Session gestartet – Lektion: ${esc(p.lesson)}`;
     else if (ev.type === "assessment_questions") body = `Einstufungsfragen: ${p.questions.map(esc).join(" | ")}`;
     else if (ev.type === "assessment_evaluated") body = `Einstufung: <strong>${LABEL[p.level] || p.level}</strong> – ${esc(p.begruendung)}<br><span class="muted">Antworten: ${p.answers.map(esc).join(" | ")}</span>`;
-    else if (ev.type === "task" && p.typ === "theorie") body = `📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc((p.inhalt || "").slice(0, 200))}…</span>`;
-    else if (ev.type === "task") body = `📝 Aufgabe: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc(p.frage)}</span>`;
+    else if (ev.type === "task" && p.typ === "fehler") body = `⚠️ Schritt konnte nicht erzeugt werden (Lernende sehen «Nochmals versuchen»)`;
+    else if (ev.type === "task" && p.typ === "theorie") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc((p.inhalt || "").slice(0, 200))}…</span>`;
+    else if (ev.type === "task") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}📝 Aufgabe: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc(p.frage)}</span>`;
     else if (ev.type === "answer_submitted") body = `💬 Antwort${p.confidence ? ` <span class="muted">(Sicherheit: ${p.confidence}/10)</span>` : ""}: <pre>${esc(p.answer)}</pre>`;
     else if (ev.type === "answer_evaluated") {
       const bew = p.bewertung || (p.korrekt ? "korrekt" : "falsch");
       cls += bew === "korrekt" ? " ok" : bew === "teilweise" ? "" : " nok";
-      const label = bew === "korrekt" ? "✅ richtig" : bew === "teilweise" ? "🔶 teilweise richtig" : "❌ falsch";
+      const label = bew === "korrekt" ? "✅ richtig" : bew === "teilweise" ? "🔶 teilweise richtig"
+        : bew === "unbewertet" ? '<span class="fb">⚠️ nicht bewertet (technischer Fehler)</span>' : "❌ falsch";
       body = `${label} – ${esc(p.feedback)}`
         + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "");
     }
     else if (ev.type === "chat_question") body = `❓ Verständnisfrage: <em>${esc(p.frage)}</em>`;
     else if (ev.type === "chat_reply") body = `💬 Tutor: ${esc(p.antwort)}`;
     else if (ev.type === "finished") body = `🎉 Abgeschlossen – ${esc(p.zusammenfassung)}`;
+    else if (ev.type === "fallback_used") body = `⚠️ <strong>Fallback</strong> bei ${esc(SCHRITT[p.schrittart] || p.schrittart)} – Grund: <span class="muted">${esc(p.grund)}</span>`;
+    else if (ev.type === "regel_verstoss") body = `🧪 Regelverstoss bei ${esc(SCHRITT[p.schrittart] || p.schrittart)}${p.behoben ? " (nach Neugenerierung behoben)" : ""}: <span class="muted">${(p.verstoesse || []).map(esc).join(" | ")}</span>`;
+    else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
     else body = esc(JSON.stringify(p));
     return `<div class="event ${cls}"><span class="t">${time}</span><br>${body}</div>`;
   }).join("");
@@ -189,6 +197,8 @@ async function loadTimings() {
       <td class="muted">${z.anzahl}</td>
       <td><strong>${z.median_sekunden} s</strong></td>
       <td class="muted">${z.max_sekunden} s</td>
+      <td class="muted">${z.fehler || 0}</td>
+      <td>${z.fallbacks ? `<span class="fb">${z.fallbacks}</span>` : "0"}</td>
     </tr>`).join("");
   const l = (d.letzte || [])[0];
   document.getElementById("timing-last").textContent = l

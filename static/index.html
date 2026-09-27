@@ -238,6 +238,16 @@ function setAnswerMode(on) {
   $("btn-theory").classList.toggle("hidden", !on);
   $("btn-continue").classList.toggle("hidden", on);
 }
+function setRetryMode(adaptation) {
+  answerEnabled = false;
+  $("btn-answer").disabled = true;
+  $("btn-answer").classList.add("hidden");
+  $("btn-theory").classList.add("hidden");
+  $("btn-deeper").classList.add("hidden");
+  $("btn-continue").classList.remove("hidden");
+  $("btn-continue").textContent = "🔄 Nochmals versuchen";
+  $("btn-continue").dataset.adaptation = adaptation || "";
+}
 function setTheoryMode() {
   // Theorie-Schritt: kein Antwortfeld-Zwang, dafür Weiter + Genauer erklären
   answerEnabled = false;
@@ -354,29 +364,33 @@ $("btn-assess").onclick = async () => {
 // Modells dann meist bereits vor, statt dass die Wartezeit erst dann beginnt.
 let pendingNext = null;
 
+// Der Vorabruf bereitet den Schritt auf dem Server nur vor (prefetch=true).
+// Übernommen wird er erst beim Klick auf «Weiter». Hat die lernende Person
+// in der Zwischenzeit eine Verständnisfrage gestellt, verwirft der Server den
+// vorbereiteten Schritt und erzeugt einen neuen, der zum Gespräch passt.
 function prefetchNext(adaptation) {
   if (pendingNext) return;
-  const q = adaptation ? "?adaptation=" + adaptation : "";
-  // Fehler hier nicht verschlucken, aber auch nicht sofort anzeigen: sie
-  // erreichen den Lernenden erst, wenn er wirklich weitergehen will.
-  pendingNext = api(`/session/${sessionId}/next${q}`)
-    .then(d => ({ data: d }), e => ({ error: e }));
+  const q = "?prefetch=true" + (adaptation ? "&adaptation=" + adaptation : "");
+  // Fehler beim Vorabruf sind unkritisch: Beim Klick wird ohnehin neu angefragt.
+  pendingNext = api(`/session/${sessionId}/next${q}`).catch(() => null);
 }
 
 async function nextTask(adaptation) {
-  let d;
   if (pendingNext) {
-    const r = await pendingNext;
+    await pendingNext;
     pendingNext = null;
-    if (r.error) throw r.error;
-    d = r.data;
-  } else {
-    const q = adaptation ? "?adaptation=" + adaptation : "";
-    d = await api(`/session/${sessionId}/next${q}`);
   }
+  const q = adaptation ? "?adaptation=" + adaptation : "";
+  const d = await api(`/session/${sessionId}/next${q}`);
   if (d.done) { renderDone(d); return; }
   renderProgress(d.progress);
   const t = d.task;
+  if (t.typ === "fehler") {
+    // Technisches Problem: ehrlich sagen und «Nochmals versuchen» anbieten
+    addMsg("tutor bad", "⚠️ " + (t.inhalt || ""), "Tutor");
+    setRetryMode(adaptation);
+    return;
+  }
   if (t.typ === "theorie") {
     addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor – Theorie");
     setTheoryMode();
@@ -430,6 +444,13 @@ async function submitAnswer(text, confidence) {
     const d = await api(`/session/${sessionId}/answer`,
       { answer: text, confidence });
     renderProgress(d.progress);
+    if (d.bewertung === "unbewertet") {
+      // Technischer Fehler bei der Bewertung: zählt nicht, einfach nochmals senden
+      addMsg("tutor mid", "⚠️ " + (d.feedback || "") + (d.hinweis ? "\n💡 " + d.hinweis : ""), "Tutor");
+      $("chat-input").value = text;
+      setAnswerMode(true);
+      return;
+    }
     const label = d.bewertung === "korrekt" ? "✅ Richtig! "
       : d.bewertung === "teilweise" ? "🔶 Teilweise richtig. " : "❌ Noch nicht ganz. ";
     let fb = label + (d.feedback || "");
@@ -451,7 +472,7 @@ async function submitAnswer(text, confidence) {
       prefetchNext($("btn-continue").dataset.adaptation || undefined);
     }
   } catch (e) { alert(e.message); }
-  setChatBusy(false);
+  finally { setChatBusy(false); }
 };
 
 // ---------- Verständnisfragen und Theorie auf Abruf (jederzeit)

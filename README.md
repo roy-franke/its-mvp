@@ -75,7 +75,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 - **Materialgebunden**: Der Systemprompt verpflichtet den Tutor auf das Lektionsmaterial und macht Unsicherheit sichtbar (Verlässlichkeit vor Eloquenz).
 - **Trennung Inhalt/Tutorlogik**: Die Adaptionslogik (tutor.adapt) ist deterministischer Code, kein LLM-Entscheid – nachvollziehbar und testbar. Das LLM generiert Inhalte, Bewertungen und Feedback.
 - **Lernpfade rekonstruierbar**: Jedes Ereignis (Fragen, Antworten, Bewertungen, Adaptionen mit Begründung) landet im Event-Log und ist in der Lehrpersonen-Sicht einsehbar.
-- **Robustheit**: Jeder LLM-Aufruf hat einen Fallback; bei KI-Ausfall bleibt das System bedienbar.
+- **Robustheit**: Scheitert ein LLM-Aufruf oder ist die Antwort kein lesbares JSON, wird er einmal automatisch wiederholt. Erst danach greift ein Fallback, der für sich allein brauchbar ist: Ein Theorie-Fallback zeigt den passenden Abschnitt des Lektionsmaterials direkt an; lässt sich keiner bestimmen, meldet der Tutor offen ein technisches Problem und bietet «Nochmals versuchen» an. Jeder Fallback erzeugt ein Event `fallback_used` mit Grund und erscheint in der Messübersicht.
 
 ## API-Überblick
 
@@ -83,7 +83,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 |---|---|
 | `POST /api/session/start` | Session anlegen, Einstufungsfragen erhalten |
 | `POST /api/session/{id}/assess` | Einstufung bewerten, Startniveau setzen |
-| `POST /api/session/{id}/next` | Nächste Aufgabe (optional `?adaptation=simplify\|advance`) |
+| `POST /api/session/{id}/next` | Nächste Aufgabe (optional `?adaptation=simplify\|advance`); mit `?prefetch=true` nur vorbereiten, ohne Profil und Verlauf zu ändern |
 | `POST /api/session/{id}/answer` | Antwort bewerten, Feedback + Adaption |
 | `POST /api/session/{id}/chat` | Verständnisfrage an den Tutor (unbewertet) |
 | `GET /api/lessons` | Verfügbare Lektionen (für die Auswahl beim Start) |
@@ -108,6 +108,9 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `OLLAMA_NUM_PREDICT` | Obergrenze für die Antwortlänge in Token (Standard 1024) |
 | `OLLAMA_THINK` | Denkmodus von Reasoning-Modellen (`false` = schnell, Standard) |
 | `LLM_TIMEOUT` | Zeitlimit pro LLM-Aufruf in Sekunden (Standard 300) |
+| `OLLAMA_FORMAT_JSON` | Ollama erzwingt gültiges JSON, wo der Tutor JSON erwartet (Standard `true`) |
+| `ITS_MOCK_DELAY` | Nur für Tests: Verzögerung des Mock-Providers in Sekunden |
+| `ITS_MOCK_FAIL` | Nur für Tests: Schrittarten, bei denen der Mock scheitert, z.B. `THEORIE_SCHRITT` |
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |
 | `TEACHER_PASSWORD` | Passwort für `/teacher`; leer = kein Login (nur lokal) |
 | `CLASS_CODE` | Zugangscode für Lernende; leer = kein Code |

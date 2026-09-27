@@ -49,6 +49,27 @@ def init_db():
                 value TEXT NOT NULL
             )
         """)
+        _migrate(c)
+
+
+def _columns(c, table: str) -> set[str]:
+    return {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+
+
+def _add_column(c, table: str, name: str, ddl: str) -> bool:
+    """Ergänzt eine Spalte, falls sie fehlt (Migration ohne Datenverlust)."""
+    if name in _columns(c, table):
+        return False
+    c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    return True
+
+
+def _migrate(c):
+    """Schemaänderungen für bestehende Datenbanken. Idempotent."""
+    # T-01: vorab erzeugter nächster Schritt, getrennt vom Profil gespeichert,
+    # damit ein laufender Vorabruf keine gleichzeitige Profiländerung überschreibt.
+    _add_column(c, "sessions", "vorabruf", "TEXT")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, id)")
 
 
 def create_session(name: str, lesson_id: str, profile: dict) -> str:
@@ -70,6 +91,7 @@ def get_session(sid: str) -> dict | None:
         return None
     d = dict(row)
     d["profile"] = json.loads(d["profile"])
+    d.pop("vorabruf", None)
     return d
 
 
@@ -94,6 +116,30 @@ def log_event(sid: str, etype: str, payload: dict):
         )
 
 
+def last_event_id(sid: str) -> int:
+    """Kennzahl für den Gesprächsstand: die ID des letzten Events der Session.
+
+    Jede Verständnisfrage und jede Antwort erzeugt ein Event. Hat sich die Zahl
+    seit einem Vorabruf geändert, passt der vorab erzeugte Schritt nicht mehr.
+    """
+    with _conn() as c:
+        row = c.execute("SELECT MAX(id) AS m FROM events WHERE session_id = ?",
+                        (sid,)).fetchone()
+    return row["m"] or 0
+
+
+def set_vorabruf(sid: str, data: dict | None):
+    with _conn() as c:
+        c.execute("UPDATE sessions SET vorabruf = ? WHERE id = ?",
+                  (json.dumps(data, ensure_ascii=False) if data else None, sid))
+
+
+def get_vorabruf(sid: str) -> dict | None:
+    with _conn() as c:
+        row = c.execute("SELECT vorabruf FROM sessions WHERE id = ?", (sid,)).fetchone()
+    return json.loads(row["vorabruf"]) if row and row["vorabruf"] else None
+
+
 def get_events(sid: str) -> list[dict]:
     with _conn() as c:
         rows = c.execute(
@@ -114,6 +160,7 @@ def list_sessions() -> list[dict]:
     for r in rows:
         d = dict(r)
         d["profile"] = json.loads(d["profile"])
+        d.pop("vorabruf", None)
         out.append(d)
     return out
 

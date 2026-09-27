@@ -39,6 +39,9 @@ class LLMError(Exception):
 # Tabelle in der Datenbank nötig wäre.
 
 _TIMINGS: deque = deque(maxlen=200)
+# Fallbacks separat zählen: Ein Fallback ist kein einzelner Aufruf, sondern das
+# Ergebnis mehrerer gescheiterter Versuche (T-01).
+_FALLBACKS: deque = deque(maxlen=200)
 
 
 def _label(user: str) -> str:
@@ -60,24 +63,51 @@ def timings() -> list[dict]:
     return list(_TIMINGS)
 
 
+def record_fallback(label: str, grund: str) -> None:
+    _FALLBACKS.append({"schritt": label, "grund": grund[:300], "zeitpunkt": time.time()})
+    log.warning("FALLBACK %s: %s", label, grund)
+
+
+def fallbacks() -> list[dict]:
+    return list(_FALLBACKS)
+
+
+def _mark_last_error(label: str, grund: str) -> None:
+    """Hängt einen Fehlergrund an die letzte Messung dieser Schrittart."""
+    for e in reversed(_TIMINGS):
+        if e["schritt"] == label:
+            e.setdefault("fehler", grund[:200])
+            return
+
+
 def timing_summary() -> list[dict]:
     """Aggregiert die Messungen je Schrittart – Median und langsamster Fall."""
     by_label: dict[str, list[float]] = {}
+    fehler: dict[str, int] = {}
     for e in _TIMINGS:
         by_label.setdefault(e["schritt"], []).append(e["sekunden"])
+        if e.get("fehler"):
+            fehler[e["schritt"]] = fehler.get(e["schritt"], 0) + 1
+    fb: dict[str, int] = {}
+    for f in _FALLBACKS:
+        fb[f["schritt"]] = fb.get(f["schritt"], 0) + 1
+        by_label.setdefault(f["schritt"], [])
     out = []
     for label, werte in by_label.items():
         out.append({
             "schritt": label,
             "anzahl": len(werte),
-            "median_sekunden": round(statistics.median(werte), 1),
-            "max_sekunden": round(max(werte), 1),
+            "median_sekunden": round(statistics.median(werte), 1) if werte else 0.0,
+            "max_sekunden": round(max(werte), 1) if werte else 0.0,
+            "fehler": fehler.get(label, 0),
+            "fallbacks": fb.get(label, 0),
         })
     return sorted(out, key=lambda r: r["median_sekunden"], reverse=True)
 
 
 def reset_timings() -> None:
     _TIMINGS.clear()
+    _FALLBACKS.clear()
 
 
 def _ollama_meta(data: dict) -> dict:
@@ -106,7 +136,7 @@ def _ollama_meta(data: dict) -> dict:
 
 # ---------------------------------------------------------------- Provider
 
-def _chat_anthropic(system: str, user: str) -> tuple[str, dict]:
+def _chat_anthropic(system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
     key = os.getenv("ANTHROPIC_API_KEY", "")
     if not key:
         raise LLMError("ANTHROPIC_API_KEY fehlt in .env")
@@ -135,7 +165,7 @@ def _chat_anthropic(system: str, user: str) -> tuple[str, dict]:
     }
 
 
-def _chat_openai(system: str, user: str) -> tuple[str, dict]:
+def _chat_openai(system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
     key = os.getenv("OPENAI_API_KEY", "")
     if not key:
         raise LLMError("OPENAI_API_KEY fehlt in .env")
@@ -162,7 +192,7 @@ def _chat_openai(system: str, user: str) -> tuple[str, dict]:
     }
 
 
-def ollama_payload(system: str, user: str) -> dict:
+def ollama_payload(system: str, user: str, json_mode: bool = False) -> dict:
     """Baut die Anfrage an Ollama zusammen (ausgelagert, damit testbar)."""
     payload = {
         "model": os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
@@ -192,12 +222,18 @@ def ollama_payload(system: str, user: str) -> dict:
     think = os.getenv("OLLAMA_THINK", "false").strip().lower()
     if think in ("true", "false"):
         payload["think"] = think == "true"
+    # Wo die Tutorlogik JSON erwartet, erzwingt Ollama mit format=json gültiges
+    # JSON. Das verhindert die häufigste Fallback-Ursache (T-01): LaTeX-Befehle
+    # wie \Delta oder rohe Zeilenumbrüche in Zeichenketten, an denen das
+    # Parsen scheitert. OLLAMA_FORMAT_JSON=false schaltet das ab.
+    if json_mode and os.getenv("OLLAMA_FORMAT_JSON", "true").strip().lower() != "false":
+        payload["format"] = "json"
     return payload
 
 
-def _chat_ollama(system: str, user: str) -> tuple[str, dict]:
+def _chat_ollama(system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-    payload = ollama_payload(system, user)
+    payload = ollama_payload(system, user, json_mode)
     r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
     if r.status_code == 400 and "think" in payload:
         # Modelle ohne Denkmodus lehnen das Feld ab – ohne erneut versuchen
@@ -281,7 +317,15 @@ def _mock_text(system: str, user: str) -> str:
     return "{}"
 
 
-def _chat_mock(system: str, user: str) -> tuple[str, dict]:
+def _chat_mock(system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
+    # Für Oberflächentests: ITS_MOCK_DELAY verzögert jede Antwort (Sekunden),
+    # ITS_MOCK_FAIL lässt die genannten Schrittarten scheitern (kommagetrennt).
+    delay = float(os.getenv("ITS_MOCK_DELAY", "0") or 0)
+    if delay > 0:
+        time.sleep(delay)
+    fail = {x.strip() for x in os.getenv("ITS_MOCK_FAIL", "").split(",") if x.strip()}
+    if _label(user) in fail:
+        raise LLMError(f"Mock-Fehler für {_label(user)} (ITS_MOCK_FAIL)")
     return _mock_text(system, user), {}
 
 
@@ -308,16 +352,26 @@ def current_model() -> str:
     return "mock"
 
 
-def chat(system: str, user: str) -> str:
-    """Sendet einen Prompt an den konfigurierten Provider und gibt Text zurück."""
+def chat(system: str, user: str, json_mode: bool = False) -> str:
+    """Sendet einen Prompt an den konfigurierten Provider und gibt Text zurück.
+
+    Scheitert der Aufruf, landet der Fehlergrund in der Zeitmessung, damit er
+    im Lehrpersonen-Monitoring sichtbar wird, und die Ausnahme geht weiter.
+    """
     name = provider_name()
     fn = _PROVIDERS.get(name)
     if fn is None:
         raise LLMError(f"Unbekannter LLM_PROVIDER: {name}")
     log.debug("SYSTEM: %s\nUSER: %s", system, user)
+    label = _label(user)
     t0 = time.perf_counter()
-    text, meta = fn(system, user)
-    record_timing(_label(user), time.perf_counter() - t0, meta)
+    try:
+        text, meta = fn(system, user, json_mode=json_mode)
+    except Exception as e:
+        record_timing(label, time.perf_counter() - t0,
+                      {"fehler": f"{type(e).__name__}: {e}"[:200]})
+        raise
+    record_timing(label, time.perf_counter() - t0, meta)
     log.debug("ANTWORT: %s", text)
     return strip_reasoning(text)
 
@@ -336,41 +390,194 @@ def strip_reasoning(text: str) -> str:
 
 # ---------------------------------------------------------------- JSON-Parsing
 
-def chat_json(system: str, user: str, fallback: dict) -> dict:
-    """Wie chat(), erwartet aber JSON. Parst robust, liefert fallback bei Fehlern."""
-    try:
-        text = chat(system, user)
-    except Exception as e:
-        log.error("LLM-Fehler: %s", e)
-        out = dict(fallback)
-        out["_llm_error"] = str(e)
-        return out
-    parsed = extract_json(text)
-    if parsed is None:
-        log.warning("Konnte kein JSON aus LLM-Antwort extrahieren: %.200s", text)
-        out = dict(fallback)
-        out["_raw"] = text[:500]
-        return out
-    return parsed
+KORREKTUR_HINWEIS = (
+    "\n\nKORREKTUR: Dein letzter Vorschlag verletzte eine Regel: {verstoss} "
+    "Erzeuge einen neuen Vorschlag, der diese Regel einhält."
+)
 
 
-def extract_json(text: str):
-    """Extrahiert das erste JSON-Objekt aus einem Text (auch in ```-Blöcken)."""
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if m:
-        text = m.group(1)
+def chat_json(system: str, user: str, fallback: dict, check=None,
+              versuche: int = 2) -> dict:
+    """Wie chat(), erwartet aber JSON.
+
+    Ablauf (T-01): Scheitert ein Aufruf technisch oder ist die Antwort kein
+    lesbares JSON, wird er einmal wiederholt. Erst wenn auch das scheitert,
+    greift der Fallback. Das Ergebnis trägt dann `_fallback` und `_fehler`,
+    damit der Aufrufer ein Event fallback_used protokollieren kann.
+
+    `check` ist eine optionale Prüffunktion (dict -> str | None). Meldet sie
+    einen Regelverstoss, wird einmal mit einem Korrekturhinweis neu generiert.
+    Verstösst auch der zweite Versuch, wird er trotzdem verwendet und der
+    Verstoss in `_verstoesse` mitgegeben.
+    """
+    label = _label(user)
+    fehler: list[str] = []
+    verstoesse: list[str] = []
+    beste: dict | None = None
+    prompt = user
+    for versuch in range(1, versuche + 1):
+        try:
+            text = chat(system, prompt, json_mode=True)
+        except Exception as e:
+            grund = f"{type(e).__name__}: {e}"[:300]
+            log.error("LLM-Fehler (%s, Versuch %d): %s", label, versuch, grund)
+            fehler.append(grund)
+            continue
+        parsed = extract_json(text)
+        if not isinstance(parsed, dict):
+            grund = f"Antwort war kein lesbares JSON: {text[:120]!r}"
+            log.warning("%s (%s, Versuch %d)", grund, label, versuch)
+            _mark_last_error(label, "JSON nicht lesbar")
+            fehler.append(grund)
+            continue
+        verstoss = check(parsed) if check else None
+        if verstoss:
+            log.info("Regelverstoss (%s, Versuch %d): %s", label, versuch, verstoss)
+            verstoesse.append(verstoss)
+            beste = parsed
+            if versuch < versuche:
+                prompt = user + KORREKTUR_HINWEIS.format(verstoss=verstoss)
+                continue
+        return _mit_meta(parsed, versuch, fehler, verstoesse)
+    if beste is not None:
+        return _mit_meta(beste, versuche, fehler, verstoesse)
+    out = dict(fallback)
+    out["_fallback"] = True
+    out["_fehler"] = " | ".join(fehler) or "unbekannt"
+    record_fallback(label, out["_fehler"])
+    return out
+
+
+def _mit_meta(data: dict, versuch: int, fehler: list, verstoesse: list) -> dict:
+    data["_versuche"] = versuch
+    if fehler:
+        data["_fehler_vorher"] = fehler
+    if verstoesse:
+        data["_verstoesse"] = verstoesse
+    return data
+
+
+def public(data: dict) -> dict:
+    """Entfernt interne Metadaten (Schlüssel mit _) vor der Auslieferung."""
+    return {k: v for k, v in data.items() if not k.startswith("_")}
+
+
+_JSON_ESCAPES = set('"\\/bfnrtu')
+
+
+def repair_json_text(raw: str) -> str:
+    r"""Repariert typische Fehler von Sprachmodellen in JSON-Zeichenketten.
+
+    Das Hauptproblem sind LaTeX-Befehle: Ein Modell schreibt "$\Delta x$" mit
+    einem einzelnen Backslash. Für JSON ist \D eine ungültige Escape-Sequenz,
+    das Parsen scheitert und der Tutor fällt auf den Fallback zurück. Noch
+    tückischer ist "$\frac{a}{b}$": \f ist ein gültiges Escape (Seitenvorschub),
+    das Parsen gelingt, aber die Formel ist still zerstört.
+
+    Deshalb: Innerhalb von Zeichenketten wird in Formelbereichen ($...$,
+    $$...$$, \(...\), \[...\]) jeder einzelne Backslash verdoppelt, ausserhalb
+    nur jene, die kein gültiges JSON-Escape einleiten.
+    """
+    out: list[str] = []
+    in_str = False
+    math = False
+    i, n = 0, len(raw)
+    while i < n:
+        c = raw[i]
+        if not in_str:
+            if c == '"':
+                in_str, math = True, False
+            out.append(c)
+            i += 1
+            continue
+        if c == "\\":
+            nxt = raw[i + 1] if i + 1 < n else ""
+            if nxt == "\\":                      # bereits korrekt escaped
+                out.append("\\\\")
+                i += 2
+                continue
+            if nxt and nxt in "([":                     # \( oder \[ öffnet Formel
+                math = True
+                out.append("\\\\" + nxt)
+                i += 2
+                continue
+            if nxt and nxt in ")]":
+                math = False
+                out.append("\\\\" + nxt)
+                i += 2
+                continue
+            if nxt == '"':                        # escaptes Anführungszeichen
+                out.append('\\"')
+                i += 2
+                continue
+            if math or nxt not in _JSON_ESCAPES:
+                out.append("\\\\")
+                i += 1
+                continue
+            if nxt == "u" and not re.match(r"[0-9a-fA-F]{4}", raw[i + 2:i + 6]):
+                out.append("\\\\")                  # \underline statt \u00e4
+                i += 1
+                continue
+            out.append(c + nxt)
+            i += 2
+            continue
+        if c == "$":
+            if raw.startswith("$$", i):
+                math = not math
+                out.append("$$")
+                i += 2
+                continue
+            math = not math
+        elif c == '"':
+            in_str = False
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _find_object(text: str) -> str | None:
+    """Findet das erste vollständige JSON-Objekt; Klammern in Zeichenketten zählen nicht."""
     start = text.find("{")
     if start == -1:
         return None
-    depth = 0
+    depth, in_str, esc = 0, False, False
     for i in range(start, len(text)):
-        if text[i] == "{":
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
             depth += 1
-        elif text[i] == "}":
+        elif c == "}":
             depth -= 1
             if depth == 0:
-                try:
-                    return json.loads(text[start:i + 1])
-                except json.JSONDecodeError:
-                    return None
+                return text[start:i + 1]
+    return None
+
+
+def extract_json(text: str):
+    """Extrahiert das erste JSON-Objekt aus einem Text (auch in ```-Blöcken).
+
+    Robust gegenüber LaTeX-Backslashes, rohen Zeilenumbrüchen in Zeichenketten
+    und einem abschliessenden Komma vor } oder ].
+    """
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if m:
+        text = m.group(1)
+    candidate = _find_object(text)
+    if candidate is None:
+        return None
+    repaired = repair_json_text(candidate)
+    for attempt in (repaired, re.sub(r",\s*([}\]])", r"\1", repaired)):
+        try:
+            return json.loads(attempt, strict=False)
+        except json.JSONDecodeError:
+            continue
     return None
