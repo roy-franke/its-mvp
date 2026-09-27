@@ -455,7 +455,10 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie, lesson)
                 or (unerklaert(d, erklaert, texte) if einfuehrung else None))
 
-    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={}, check=pruefen)
+    # Drei Versuche statt zwei: Die Evaluation mit qwen3:30b zeigte, dass das
+    # Modell ein wiederverwendetes Beispiel oft erst beim zweiten Hinweis ersetzt.
+    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={}, check=pruefen,
+                         versuche=3)
     if data.get("_fallback"):
         return task_fallback(lesson, profile, adaptation, data)
     if not isinstance(data.get("optionen"), list) or data.get("aufgabentyp") != "multiple_choice":

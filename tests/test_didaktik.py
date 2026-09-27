@@ -275,3 +275,25 @@ def test_konzeptwoerter_der_erklaerung_sind_kein_wiederverwendetes_beispiel():
                       "Sachschaden an einem Rollstuhl, indem er ihn fallen lässt.",
             "frage": "Warum haftet der Arbeitgeber des Angestellten?", "konzept": "Geschäftsherrenhaftung"}
     assert didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(HAFTUNG)) is None
+
+
+def test_allgemeine_woerter_sind_kein_wiederverwendetes_beispiel():
+    """Dritter Lauf: Klinik-Fall teilte mit dem Beispiel nur «Angestellter», «Gegenstand», «schwer»."""
+    theorie = {"konzept": "Geschäftsherrenhaftung",
+               "inhalt": "Arbeitgeber haften für Schäden, die ihre Mitarbeiter während der Arbeit verursachen.",
+               "beispiel": "Ein Angestellter verursacht bei der Arbeit einen Sachschaden, zum Beispiel durch ein "
+                           "versehentliches Umkippen eines schweren Gegenstands, der einem Kunden schadet."}
+    task = {"inhalt": "Ein Arzt in einer Klinik vergisst bei einer Operation einen chirurgischen Gegenstand im "
+                      "Patienten. Der Patient leidet unter schweren Schäden. Die Klinik, in der der Arzt "
+                      "angestellt ist, wird verklagt.", "frage": "Begründe, warum die Klinik haftet.",
+            "konzept": "Geschäftsherrenhaftung"}
+    assert didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(HAFTUNG)) is None
+
+
+def test_hundebiss_bleibt_wiederverwendet():
+    theorie = {"konzept": "Tierhalterhaftung",
+               "inhalt": "Die Tierhalterhaftung ist eine Kausalhaftung des Halters eines Tieres.",
+               "beispiel": "Ein Hundebesitzer haftet, wenn sein Hund einen Passanten beisst, auch ohne Fahrlässigkeit."}
+    task = {"inhalt": "Ein Schäferhund entkommt aus dem Garten und beisst ein Kind auf dem Schulweg.",
+            "frage": "Haftet der Hundebesitzer?", "konzept": "Tierhalterhaftung"}
+    assert didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(HAFTUNG))

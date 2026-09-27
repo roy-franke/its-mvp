@@ -186,6 +186,9 @@ sie sind so soll sollte sondern über um und uns unser unter viel vom von vor wa
 was weil welche welchem welchen welcher welches wenn wer werden wie wieder will wird wirst wo
 wurde wurden zum zur zwei drei vier beide beiden dabei damit dazu davon daher deshalb also
 etwa bitte gerade immer schon wirklich eigentlich einfach genau heute morgen gestern
+schwer schwere schweren leicht leichte gross grosse grossen klein kleine kleinen gegenstand
+gegenstände gegenstands sache sachen person personen mensch menschen jemand jemandem
+angestellte angestellter angestellten mitarbeiter mitarbeitende mitarbeitenden
 """.split())
 
 _SUFFIXE = ("ungen", "heiten", "keiten", "ung", "heit", "keit", "ern", "en", "er", "es",
