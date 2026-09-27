@@ -19,7 +19,7 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 - **Pausieren und Fortsetzen**: Browser schliessen genügt – beim nächsten Besuch bietet die Startseite an, die Lernsequenz an der gleichen Stelle fortzusetzen (Session-ID wird lokal im Browser gemerkt, Zustand liegt in der DB).
 - **Lehrpersonen-Sicht** (`/teacher`): Übersicht aller Sessions mit Fortschritt, Niveau und Quote; Klick auf eine Zeile zeigt den vollständigen Lernverlauf (Event-Log).
 - **Lektionen erstellen** (`/teacher/lessons/new`): Lehrpersonen erstellen Lektionen direkt im Browser. Material als Text einfügen oder als Datei hochladen (PDF, Word, Text/Markdown), Titel und Lernziele von der KI vorschlagen lassen, optional Hinweise ans Tutorverhalten («Arbeite mit Alltagsbeispielen», «Sei streng bei Fachbegriffen»). Nach dem Speichern erscheint die Lektion in der Auswahl auf der Lernenden-Startseite.
-- **Zugangsschutz für den Klassentest**: Die Lehrpersonen-Sicht ist per Passwort geschützt (`TEACHER_PASSWORD` in der `.env`, Login unter `/teacher/login`, Abmelden möglich). Lernende brauchen einen Zugangscode (`CLASS_CODE`) und werden angehalten, ein Pseudonym statt des richtigen Namens zu verwenden. Beides lässt sich für die lokale Entwicklung deaktivieren, indem die Variablen leer bleiben.
+- **Rollen und Zugangsschutz**: Es gibt die Rollen «lernend» und «lehrperson», durchgesetzt auf dem Server. Alle Seiten unter `/teacher` und alle Endpunkte unter `/api/teacher` hängen an einer zentralen Rollenprüfung (`app/auth.py`); ohne Login gibt es 401 bzw. eine Weiterleitung auf `/teacher/login`. Lernende sehen keine Elemente für Lehrpersonen. Lehrpersonen melden sich mit `TEACHER_PASSWORD` an, Lernende mit Pseudonym plus Zugangscode (`CLASS_CODE`). Beides lässt sich für die lokale Entwicklung deaktivieren, indem die Variablen leer bleiben. Optional übernimmt das ITS Name und Rolle aus Headern eines Proxys wie Cloudflare Access (`ITS_TRUST_PROXY_HEADERS`, siehe `docs/DEPLOYMENT-CLOUDFLARE.md`). Lernsequenzen, die eine Lehrperson startet, sind Testläufe und erscheinen im Monitoring nur mit dem Filter «Testläufe anzeigen».
 - **Deployment-Paket**: Dockerfile und docker-compose mit Caddy-Reverse-Proxy – HTTPS inklusive automatischem Let's-Encrypt-Zertifikat. Schritt-für-Schritt-Anleitung für einen VPS in `docs/DEPLOYMENT.md`; Alternative ohne eigenen Server: lokaler Betrieb mit Cloudflare Tunnel, siehe `docs/DEPLOYMENT-CLOUDFLARE.md`.
 - **LLM-Abstraktion**: Provider per `.env` umschaltbar – Cloud (Anthropic, OpenAI-kompatibel) oder lokal (Ollama). `mock` läuft ganz ohne LLM für Demos und Tests.
 
@@ -91,9 +91,14 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `POST /api/teacher/lessons/extract` | Text aus PDF/Word/Text-Datei extrahieren |
 | `POST /api/teacher/lessons/suggest-goals` | KI-Vorschlag für Titel und Lernziele |
 | `GET /api/session/{id}/state` | Zustand (Basis für Pausieren/Fortsetzen) |
-| `GET /api/teacher/sessions` | Monitoring-Übersicht |
+| `GET /api/me` | Angemeldete Identität und Rolle (für die rollenabhängige Oberfläche) |
+| `POST /api/learner/login` | Anmeldung Lernende mit Name und Zugangscode |
+| `POST /api/learner/logout` | Abmelden bzw. Person wechseln |
+| `POST /api/teacher/login` | Anmeldung Lehrperson mit Passwort |
+| `GET /api/teacher/sessions` | Monitoring-Übersicht (`?testlaeufe=true` zeigt Testläufe) |
 | `GET /api/teacher/sessions/{id}` | Vollständiger Lernverlauf |
-| `GET /api/teacher/timings` | Antwortzeiten der letzten LLM-Aufrufe |
+| `GET /api/teacher/timings` | Antwortzeiten, Fehler und Fallbacks der letzten LLM-Aufrufe |
+| `GET /api/llm-test` | Verbindungstest zum Sprachmodell (nur Lehrpersonen) |
 | `GET /api/info` | Aktiver Provider, verfügbare Lektionen |
 
 ## Konfiguration (.env)
@@ -114,6 +119,10 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |
 | `TEACHER_PASSWORD` | Passwort für `/teacher`; leer = kein Login (nur lokal) |
 | `CLASS_CODE` | Zugangscode für Lernende; leer = kein Code |
+| `ITS_TRUST_PROXY_HEADERS` | Name und Rolle aus Proxy-Headern übernehmen (Standard `false`) |
+| `ITS_USER_HEADER` | Header mit dem Benutzernamen (Standard `X-Forwarded-User`) |
+| `ITS_ROLES_HEADER` | Header mit den Rollen (Standard `X-User-Roles`) |
+| `ITS_TEACHER_ROLE` | Rollenname für Lehrpersonen (Standard `teacher`) |
 | `ITS_DOMAIN` | Domain für den HTTPS-Betrieb mit Docker/Caddy |
 
 ## Tests
@@ -137,8 +146,8 @@ python3 tests/ui/ui_checks.py          # alle Szenarien, oder z.B. t02
 
 ## Bewusste Grenzen (MVP)
 
-Kein Benutzerverzeichnis und keine Rollen (nur ein gemeinsames
-Lehrpersonen-Passwort und ein Klassencode), kein RAG über grosse Dokumente
+Kein eigenes Benutzerverzeichnis (ein gemeinsames Lehrpersonen-Passwort und ein
+Klassencode, optional Anmeldung über einen Proxy), kein RAG über grosse Dokumente
 (das Material geht direkt in den Kontext, sehr lange Dokumente daher kürzen).
 
 ## Sinnvolle nächste Schritte

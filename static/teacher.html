@@ -27,6 +27,7 @@
   .pill { font-size:.75rem; padding:2px 10px; border-radius:999px; border:1px solid var(--border); }
   .pill.finished { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
   .pill.learning { background:#eff6ff; color:var(--accent); border-color:#bfdbfe; }
+  .pill.test { background:#f5f3ff; color:#7c3aed; border-color:#ddd6fe; }
   .pill.assessment { background:#fffbeb; color:#d97706; border-color:#fde68a; }
   .bar { width:120px; height:8px; background:var(--border); border-radius:4px; overflow:hidden; display:inline-block; vertical-align:middle; }
   .bar > div { height:100%; background:var(--accent); }
@@ -59,7 +60,11 @@
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <strong>Aktive und abgeschlossene Lernsequenzen</strong>
-      <button class="small" onclick="loadSessions()">Aktualisieren</button>
+      <span>
+        <label class="muted" style="font-size:.85rem;margin-right:12px">
+          <input type="checkbox" id="show-tests" onchange="loadSessions()"> Testläufe anzeigen</label>
+        <button class="small" onclick="loadSessions()">Aktualisieren</button>
+      </span>
     </div>
     <table>
       <thead><tr>
@@ -104,13 +109,14 @@ const LABEL = { basic:"Grundlagen", intermediate:"Fortgeschritten", advanced:"Ve
 const PHASE = { assessment:"Einstufung", learning:"Am Lernen", finished:"Abgeschlossen" };
 
 async function loadSessions() {
-  const r = await fetch("/api/teacher/sessions");
+  const tests = document.getElementById("show-tests").checked;
+  const r = await fetch("/api/teacher/sessions" + (tests ? "?testlaeufe=true" : ""));
   if (r.status === 401) { location.href = "/teacher/login"; return; }
   const list = await r.json();
   document.getElementById("empty").style.display = list.length ? "none" : "block";
   document.getElementById("rows").innerHTML = list.map(s => `
     <tr class="clickable" onclick="loadDetail('${s.session_id}', '${esc(s.name)}')">
-      <td><strong>${esc(s.name)}</strong></td>
+      <td><strong>${esc(s.name)}</strong>${s.testlauf ? ' <span class="pill test">Testlauf</span>' : ""}</td>
       <td class="muted">${esc(s.lesson_id)}</td>
       <td><span class="pill ${s.phase}">${PHASE[s.phase] || s.phase}</span></td>
       <td><span class="bar"><div style="width:${100 * s.step / s.total_steps}%"></div></span>

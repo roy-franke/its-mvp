@@ -69,17 +69,19 @@ def _migrate(c):
     # T-01: vorab erzeugter nächster Schritt, getrennt vom Profil gespeichert,
     # damit ein laufender Vorabruf keine gleichzeitige Profiländerung überschreibt.
     _add_column(c, "sessions", "vorabruf", "TEXT")
+    # T-04: von Lehrpersonen gestartete Durchläufe (Entscheid E3)
+    _add_column(c, "sessions", "testlauf", "INTEGER NOT NULL DEFAULT 0")
     c.execute("CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, id)")
 
 
-def create_session(name: str, lesson_id: str, profile: dict) -> str:
+def create_session(name: str, lesson_id: str, profile: dict, testlauf: bool = False) -> str:
     sid = uuid.uuid4().hex[:12]
     now = time.time()
     with _conn() as c:
         c.execute(
-            "INSERT INTO sessions (id, name, lesson_id, phase, profile, created_at, updated_at) "
-            "VALUES (?, ?, ?, 'assessment', ?, ?, ?)",
-            (sid, name, lesson_id, json.dumps(profile, ensure_ascii=False), now, now),
+            "INSERT INTO sessions (id, name, lesson_id, phase, profile, created_at, updated_at, testlauf) "
+            "VALUES (?, ?, ?, 'assessment', ?, ?, ?, ?)",
+            (sid, name, lesson_id, json.dumps(profile, ensure_ascii=False), now, now, int(testlauf)),
         )
     return sid
 

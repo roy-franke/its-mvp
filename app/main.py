@@ -22,9 +22,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# .env ausdrücklich aus dem Projektordner laden, unabhängig vom Arbeitsordner.
+# Bereits gesetzte Umgebungsvariablen haben Vorrang (so auch in den Tests).
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -40,6 +42,30 @@ LESSONS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="ITS MVP")
 store.init_db()
+# Beim Start sichtbar machen, welcher Schutz aktiv ist (T-04: Passwortproblem
+# war von aussen nicht erkennbar).
+log.info("Zugangsschutz Lehrpersonen: %s | Klassencode: %s | Header-Anmeldung: %s",
+         "aktiv" if auth.auth_enabled() else "AUS (TEACHER_PASSWORD leer)",
+         "aktiv" if auth.class_code() else "aus",
+         f"aktiv ({auth.user_header()}, {auth.roles_header()})" if auth.trust_headers() else "aus")
+
+# Rollenprüfung zentral als Abhängigkeit der Router (T-04): Jede Route unter
+# /api/teacher und /teacher ist damit geschützt, ohne dass sie einzeln daran
+# denken muss. Ausnahmen (Login, Logout) hängen bewusst direkt an `app`.
+teacher_api = APIRouter(prefix="/api/teacher", dependencies=[Depends(auth.require_teacher)])
+teacher_pages = APIRouter(prefix="/teacher", dependencies=[Depends(auth.require_teacher_page)])
+
+
+@app.middleware("http")
+async def block_static_pages(request: Request, call_next):
+    """HTML-Seiten nur über ihre Routen ausliefern.
+
+    Ohne diese Sperre war /static/teacher.html am Login vorbei erreichbar,
+    weil StaticFiles den ganzen Ordner ausliefert.
+    """
+    if request.url.path.startswith("/static/") and request.url.path.endswith(".html"):
+        return Response("Nicht gefunden", status_code=404)
+    return await call_next(request)
 
 
 def load_lesson(lesson_id: str) -> dict:
@@ -59,7 +85,7 @@ def default_lesson_id() -> str:
 # ---------------------------------------------------------------- Requests
 
 class StartRequest(BaseModel):
-    name: str
+    name: str | None = None   # ohne Name: angemeldete Identität (Cookie oder Header)
     lesson_id: str | None = None
     code: str | None = None   # Zugangscode der Klasse (falls konfiguriert)
 
@@ -111,7 +137,7 @@ def lessons_list():
     return out
 
 
-@app.post("/api/teacher/lessons", dependencies=[Depends(auth.require_teacher)])
+@teacher_api.post("/lessons")
 def lesson_create(req: LessonCreateRequest):
     """Neue Lektion anlegen (Lehrpersonen-Modul light)."""
     titel = req.titel.strip()
@@ -144,7 +170,7 @@ def lesson_create(req: LessonCreateRequest):
     return {"id": lesson_id, "titel": titel}
 
 
-@app.post("/api/teacher/lessons/extract", dependencies=[Depends(auth.require_teacher)])
+@teacher_api.post("/lessons/extract")
 async def lesson_extract(file: UploadFile = File(...)):
     """Extrahiert Text aus einer hochgeladenen Datei (PDF, Word, Text)."""
     data = await file.read()
@@ -158,7 +184,7 @@ async def lesson_extract(file: UploadFile = File(...)):
     return {"filename": file.filename, "text": text, "chars": len(text)}
 
 
-@app.post("/api/teacher/lessons/suggest-goals", dependencies=[Depends(auth.require_teacher)])
+@teacher_api.post("/lessons/suggest-goals")
 def lesson_suggest_goals(req: SuggestGoalsRequest):
     """KI-Vorschlag für Titel und Lernziele aus dem Material."""
     if len(req.material.strip()) < 100:
@@ -200,16 +226,22 @@ def _unique_slug(titel: str) -> str:
 # ---------------------------------------------------------------- Lernende
 
 @app.post("/api/session/start")
-def start_session(req: StartRequest):
-    if not auth.check_class_code(req.code):
-        raise HTTPException(403, "Falscher Zugangscode. Frag deine Lehrperson "
-                                 "nach dem aktuellen Code.")
+def start_session(req: StartRequest, request: Request, response: Response):
+    ident = auth.identity(request)
+    if req.name and (ident.via != "header") and auth.normalize_user(req.name) != ident.key:
+        name = _login_learner(request, response, req.name, req.code)
+    elif ident.name:
+        name = ident.name
+    else:
+        name = _login_learner(request, response, req.name, req.code)
     lesson_id = req.lesson_id or default_lesson_id()
     lesson = load_lesson(lesson_id)
     profile = tutor.new_profile()
-    sid = store.create_session(req.name.strip() or "Anonym", lesson_id, profile)
+    testlauf = ident.is_teacher
+    sid = store.create_session(name, lesson_id, profile, testlauf=testlauf)
     questions = tutor.generate_assessment(lesson)
-    store.log_event(sid, "session_started", {"name": req.name, "lesson": lesson["titel"]})
+    store.log_event(sid, "session_started", {"name": name, "lesson": lesson["titel"],
+                                             "testlauf": testlauf})
     store.log_event(sid, "assessment_questions", {"questions": questions})
     profile["assessment_questions"] = questions
     store.update_session(sid, profile=profile)
@@ -474,10 +506,13 @@ def _session(sid: str) -> dict:
 
 # ---------------------------------------------------------------- Lehrperson
 
-@app.get("/api/teacher/sessions", dependencies=[Depends(auth.require_teacher)])
-def teacher_sessions():
+@teacher_api.get("/sessions")
+def teacher_sessions(testlaeufe: bool = False):
+    """Monitoring-Übersicht. Testläufe von Lehrpersonen nur mit ?testlaeufe=true (E3)."""
     out = []
     for s in store.list_sessions():
+        if s.get("testlauf") and not testlaeufe:
+            continue
         p = s["profile"]
         out.append({
             "session_id": s["id"],
@@ -491,18 +526,19 @@ def teacher_sessions():
             "confidence_avg": (round(sum(c) / len(c), 1)
                                if (c := p.get("confidence", [])) else None),
             "covered": p.get("covered", []),
+            "testlauf": bool(s.get("testlauf")),
             "created_at": s["created_at"],
             "updated_at": s["updated_at"],
         })
     return out
 
 
-@app.get("/api/teacher/sessions/{sid}", dependencies=[Depends(auth.require_teacher)])
+@teacher_api.get("/sessions/{sid}")
 def teacher_session_detail(sid: str):
     s = _session(sid)
     return {
         "session": {"id": s["id"], "name": s["name"], "phase": s["phase"],
-                    "profile": s["profile"]},
+                    "testlauf": bool(s.get("testlauf")), "profile": s["profile"]},
         "events": store.get_events(sid),
     }
 
@@ -514,14 +550,68 @@ def access_info():
             "teacher_login_required": auth.auth_enabled()}
 
 
+@app.get("/api/me")
+def me(request: Request):
+    """Wer bin ich? Grundlage für die rollenabhängige Oberfläche (T-04)."""
+    ident = auth.identity(request)
+    header = ident.via == "header"
+    return {
+        "angemeldet": bool(ident.name) or ident.is_teacher,
+        "name": ident.name,
+        "rolle": ident.rolle,
+        "lehrperson": ident.is_teacher,
+        "name_fixiert": header,
+        "header_anmeldung": header,
+        "code_required": bool(auth.class_code()) and not header,
+        "teacher_login_required": auth.auth_enabled(),
+    }
+
+
+class LearnerLoginRequest(BaseModel):
+    name: str
+    code: str | None = None
+
+
+@app.post("/api/learner/login")
+def learner_login(req: LearnerLoginRequest, request: Request, response: Response):
+    """Anmeldung für Lernende ohne Header: Name (Pseudonym) plus Klassencode."""
+    name = _login_learner(request, response, req.name, req.code)
+    return {"ok": True, "name": name}
+
+
+def _login_learner(request: Request, response: Response, name: str | None,
+                   code: str | None) -> str:
+    """Prüft Anmeldedaten und setzt das Lernenden-Cookie. Gibt den Namen zurück."""
+    ident = auth.identity(request)
+    if ident.via == "header":
+        return ident.name            # Name kommt vom Proxy und ist nicht änderbar
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(400, "Bitte einen Namen oder ein Pseudonym eingeben")
+    if not auth.check_class_code(code) and not ident.is_teacher:
+        raise HTTPException(403, "Falscher Zugangscode. Frag deine Lehrperson "
+                                 "nach dem aktuellen Code.")
+    response.set_cookie(auth.LEARNER_COOKIE, auth.make_learner_token(name),
+                        max_age=auth.LEARNER_COOKIE_MAX_AGE, httponly=True, samesite="lax")
+    return name
+
+
+@app.post("/api/learner/logout")
+def learner_logout(response: Response):
+    response.delete_cookie(auth.LEARNER_COOKIE)
+    return {"ok": True}
+
+
 @app.post("/api/teacher/login")
 def teacher_login(req: TeacherLoginRequest, response: Response):
-    if not auth.auth_enabled():
-        return {"ok": True, "hinweis": "Zugangsschutz ist deaktiviert (TEACHER_PASSWORD leer)"}
-    if not auth.check_password(req.password):
+    if auth.auth_enabled() and not auth.check_password(req.password):
         raise HTTPException(401, "Falsches Passwort")
+    # Auch ohne Passwort (lokale Entwicklung) ein Cookie setzen: Es markiert
+    # Lernsequenzen, die eine Lehrperson startet, als Testlauf (E3).
     response.set_cookie(auth.COOKIE_NAME, auth.make_token(),
                         max_age=auth.COOKIE_MAX_AGE, httponly=True, samesite="lax")
+    if not auth.auth_enabled():
+        return {"ok": True, "hinweis": "Zugangsschutz ist deaktiviert (TEACHER_PASSWORD leer)"}
     return {"ok": True}
 
 
@@ -538,7 +628,7 @@ def info():
             "lessons": [p.stem for p in sorted(LESSONS_DIR.glob('*.json'))]}
 
 
-@app.get("/api/teacher/timings", dependencies=[Depends(auth.require_teacher)])
+@teacher_api.get("/timings")
 def teacher_timings():
     """Antwortzeiten der letzten LLM-Aufrufe – Grundlage für Optimierungen.
 
@@ -553,7 +643,7 @@ def teacher_timings():
     }
 
 
-@app.get("/api/llm-test")
+@app.get("/api/llm-test", dependencies=[Depends(auth.require_teacher)])
 def llm_test():
     """Diagnose: Testet die Verbindung zum konfigurierten LLM und zeigt Fehler an."""
     import time
@@ -599,10 +689,8 @@ def index():
     return _page("index.html")
 
 
-@app.get("/teacher")
-def teacher(request: Request):
-    if not auth.is_teacher(request):
-        return RedirectResponse("/teacher/login")
+@teacher_pages.get("")
+def teacher():
     return _page("teacher.html")
 
 
@@ -613,11 +701,11 @@ def teacher_login_page(request: Request):
     return _page("teacher_login.html")
 
 
-@app.get("/teacher/lessons/new")
-def lesson_editor(request: Request):
-    if not auth.is_teacher(request):
-        return RedirectResponse("/teacher/login")
+@teacher_pages.get("/lessons/new")
+def lesson_editor():
     return _page("lesson_editor.html")
 
 
+app.include_router(teacher_api)
+app.include_router(teacher_pages)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")

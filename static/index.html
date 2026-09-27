@@ -81,7 +81,8 @@
 <div class="wrap">
   <header>
     <h1>🎓 ITS – Dein Lerntutor</h1>
-    <a href="/teacher">Lehrpersonen-Sicht</a>
+    <!-- Nur für Lehrpersonen sichtbar (T-04); der Server prüft die Rolle zusätzlich -->
+    <a href="/teacher" id="teacher-link" class="hidden">Lehrpersonen-Sicht</a>
   </header>
 
   <!-- Onboarding -->
@@ -347,13 +348,20 @@ async function loadLessons() {
 }
 loadLessons();
 
-// ---------- Zugangscode (nur sichtbar, wenn auf dem Server konfiguriert)
-let codeRequired = false;
+// ---------- Rolle und Anmeldung (T-04)
+let codeRequired = false, me = null;
 (async () => {
   try {
-    const a = await api("/access", null, "GET");
-    codeRequired = a.code_required;
+    me = await api("/me", null, "GET");
+    codeRequired = me.code_required;
     $("code-box").classList.toggle("hidden", !codeRequired);
+    $("teacher-link").classList.toggle("hidden", !me.lehrperson);
+    if (me.name) $("name").value = me.name;
+    if (me.name_fixiert) {
+      // Anmeldung über den Proxy: Name ist vorgegeben und nicht änderbar
+      $("name").readOnly = true;
+      $("name").title = "Dein Name kommt aus der Anmeldung deiner Schule.";
+    }
   } catch { /* im Zweifel ohne Code starten, der Server prüft ohnehin */ }
 })();
 

@@ -23,6 +23,17 @@ if errorlevel 1 (
     echo.
 )
 
+rem Umgebungsvariablen von Windows haben Vorrang vor der .env (load_dotenv
+rem ueberschreibt nichts). Ein leeres TEACHER_PASSWORD in den Windows-
+rem Einstellungen wuerde den Login still abschalten.
+if defined TEACHER_PASSWORD (
+    echo ---------------------------------------------------------------
+    echo HINWEIS: TEACHER_PASSWORD ist in den Windows-Umgebungsvariablen
+    echo gesetzt und hat Vorrang vor dem Wert in der .env-Datei.
+    echo ---------------------------------------------------------------
+    echo.
+)
+
 echo Server laeuft gleich auf http://localhost:8010
 echo Lernende:   http://localhost:8010/
 echo Lehrperson: http://localhost:8010/teacher

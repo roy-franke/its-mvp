@@ -220,6 +220,46 @@ def t02_wartezustand(pw):
               "etwas länger" in page.locator("#waiting").inner_text())
 
 
+@scenario("t04")
+def t04_rollen(pw):
+    """T-04 AK2/AK4: Startseite ohne Lehrpersonen-Elemente, Header-Name fest."""
+    with server(TEACHER_PASSWORD="geheim", CLASS_CODE="BM2026") as base:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(base + "/")
+        page.wait_for_load_state("networkidle")
+        body = page.locator("body").inner_text()
+        check("T-04 AK2 kein Link zur Lehrpersonen-Sicht",
+              not page.locator("#teacher-link").is_visible() and "Lehrpersonen-Sicht" not in body)
+        check("T-04 AK2 kein Link zum Erfassen von Lektionen",
+              page.locator("a[href*='/teacher']:visible").count() == 0)
+        r = page.goto(base + "/teacher/lessons/new")
+        check("T-04 direkter Aufruf führt zum Login", page.url.endswith("/teacher/login"), page.url)
+        r = page.goto(base + "/static/teacher.html")
+        check("T-04 statische Seite gesperrt", r.status == 404, str(r.status))
+        # Als Lehrperson angemeldet: Link sichtbar
+        page.goto(base + "/teacher/login")
+        page.fill("#pw", "geheim")
+        page.click("#btn")
+        page.wait_for_url(base + "/teacher")
+        page.goto(base + "/")
+        expect(page.locator("#teacher-link")).to_be_visible()
+        check("T-04 Lehrperson sieht den Link", True)
+        browser.close()
+    with server(ITS_TRUST_PROXY_HEADERS="true") as base:
+        browser = pw.chromium.launch()
+        ctx = browser.new_context(extra_http_headers={"X-Forwarded-User": "mia.muster",
+                                                       "X-User-Roles": "student"})
+        page = ctx.new_page()
+        page.goto(base + "/")
+        expect(page.locator("#name")).to_have_value("mia.muster")
+        check("T-04 AK4 Namensfeld vorausgefüllt und schreibgeschützt",
+              not page.locator("#name").is_editable())
+        check("T-04 AK4 Rolle lernend: kein Lehrpersonen-Link",
+              not page.locator("#teacher-link").is_visible())
+        browser.close()
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

@@ -183,8 +183,59 @@ einem Fehler 502.
 - **Seite lädt, aber Tutor antwortet generisch**: Ollama läuft nicht oder
   falsches Modell in der `.env` → auf dem PC http://localhost:8010/api/llm-test
   aufrufen.
+- **Fehler 1033, obwohl der Tunnel «Healthy» ist und die Routen stimmen**:
+  Nach dem Löschen eines Tunnels bleiben dessen DNS-Einträge stehen, und
+  Cloudflare überschreibt sie beim Anlegen einer Route nicht. Verräterisch:
+  Die Hostnamen zeigen im DNS auf verschiedene Tunnel-UUIDs. Lösung in dieser
+  Reihenfolge: DNS-Einträge löschen, Routen löschen, Routen neu anlegen. Den
+  DNS-Eintrag erzeugt Cloudflare nur im Moment der Neuanlage.
+- **`/api/llm-test` antwortet mit 401**: Der Diagnose-Endpunkt ist nur für
+  angemeldete Lehrpersonen erreichbar. Zuerst unter `/teacher/login` anmelden.
 - Der PC darf nicht in den Ruhezustand gehen, solange Lernende arbeiten
   (Windows-Einstellungen → Energie: Ruhezustand auf «Nie» im Netzbetrieb).
+
+## Anmeldung über Cloudflare Access (optional)
+
+Standardmässig melden sich Lehrpersonen mit `TEACHER_PASSWORD` an und
+Lernende mit Pseudonym plus `CLASS_CODE`. Alternativ kann das ITS Name und
+Rolle aus HTTP-Headern eines vorgelagerten Proxys übernehmen:
+
+```ini
+ITS_TRUST_PROXY_HEADERS=true
+ITS_USER_HEADER=X-Forwarded-User      # Header mit dem Benutzernamen
+ITS_ROLES_HEADER=X-User-Roles         # Header mit den Rollen, kommagetrennt
+ITS_TEACHER_ROLE=teacher              # Rollenname für Lehrpersonen
+```
+
+**Wichtig, bevor du das einschaltest:** Beim Betrieb über Cloudflare Tunnel
+kommen alle Anfragen von localhost. Eine Prüfung der Absender-IP schützt
+deshalb nicht. Den Headern darf das ITS nur vertrauen, wenn der Proxy
+gleichnamige Header aus eingehenden Anfragen entfernt und selbst setzt.
+Ein nackter Cloudflare Tunnel tut das nicht: Jede Person könnte dann
+`X-Forwarded-User: irgendwer` und `X-User-Roles: teacher` mitschicken und wäre
+Lehrperson. Deshalb bleibt die Option standardmässig aus.
+
+Sicher ist die Kombination mit **Cloudflare Access** (Zero Trust → Access →
+Applications → Self-hosted, Hostname tutor.casaai.me, Policy zum Beispiel
+«E-Mails, die auf @schule.ch enden»). Access lässt nur angemeldete Personen
+durch und setzt selbst den Header `Cf-Access-Authenticated-User-Email`, den ein
+Client nicht fälschen kann. In der `.env` dann:
+
+```ini
+ITS_TRUST_PROXY_HEADERS=true
+ITS_USER_HEADER=Cf-Access-Authenticated-User-Email
+```
+
+Cloudflare Access liefert keine Rollen. Alle Personen gelten dann zunächst als
+Lernende, ihr Name ist die E-Mail-Adresse und im Formular nicht änderbar.
+Lehrpersonen melden sich zusätzlich unter `/teacher/login` mit
+`TEACHER_PASSWORD` an; das Passwort macht sie zur Lehrperson. Wer Rollen
+braucht, kann sie über eine Cloudflare-Transform-Rule oder einen Worker als
+eigenen Header setzen und `ITS_ROLES_HEADER` darauf zeigen lassen.
+
+Ist die Option aus oder fehlt der Header in einer Anfrage, gilt das
+bisherige Verfahren mit Passwort und Klassencode. Gesetzte Header haben dann
+keinerlei Wirkung.
 
 ## Hinweis Datenschutz
 
