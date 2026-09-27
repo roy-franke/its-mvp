@@ -543,6 +543,7 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
     profile["last_type"] = step_type
     profile["wartet_auf"] = "weiter" if step_type == "theorie" else "antwort"
     profile["letztes_feedback"] = None
+    profile["antworten_aktuell"] = []
     concept = task.get("konzept")
     if concept and concept not in profile["covered"]:
         profile["covered"].append(concept)
@@ -569,7 +570,8 @@ def answer(sid: str, req: AnswerRequest, request: Request):
     confidence = req.confidence if req.confidence in range(1, 11) else None
     store.log_event(sid, "answer_submitted",
                     {"answer": req.answer, "confidence": confidence})
-    result = tutor.evaluate_answer(lesson, profile, task, req.answer)
+    vorher = profile.get("antworten_aktuell") or []
+    result = tutor.evaluate_answer(lesson, profile, task, req.answer, vorher)
     _log_llm_meta(sid, "ANTWORT_BEWERTEN", result)
     if result["bewertung"] == "unbewertet":
         # Technischer Fehler bei der Bewertung: zählt weder als richtig noch
@@ -605,7 +607,16 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         "feedback": result.get("feedback", ""),
         "hinweis": result.get("hinweis", ""), "adaption": action,
         "adaption_begruendung": reason, "level": profile["level"],
+        # D-05: Einzelbewertung der Elemente, damit Fehlbewertungen nachvollziehbar sind
+        "elemente": result.get("elemente", []),
+        "bewertung_modell": result.get("bewertung_modell"),
+        "versuch": len(vorher) + 1,
     })
+    if action == "retry":
+        profile["antworten_aktuell"] = vorher + [{"antwort": req.answer, "bewertung": result["bewertung"],
+                                                  "hinweis": result.get("hinweis", "")}]
+    else:
+        profile["antworten_aktuell"] = []
     finished = profile["step"] >= tutor.total_steps() and action != "retry"
     profile["wartet_auf"] = "antwort" if action == "retry" else "weiter"
     profile["letztes_feedback"] = {

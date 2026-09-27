@@ -47,6 +47,7 @@
   .event.fallback_used { border-color:#dc2626; background:#fef2f2; }
   .event.regel_verstoss, .event.vorabruf_verworfen { border-color:#d97706; background:#fffbeb; }
   .fb { color:#dc2626; font-weight:600; }
+  ul.elemente { margin:4px 0 2px; padding-left:18px; font-size:.85rem; }
   .muted { color:var(--muted); }
   button.small { background:none; border:1px solid var(--border); border-radius:6px;
                  padding:4px 12px; cursor:pointer; font-size:.8rem; }
@@ -164,7 +165,10 @@ async function loadDetail(sid, name) {
       cls += bew === "korrekt" ? " ok" : bew === "teilweise" ? "" : " nok";
       const label = bew === "korrekt" ? "✅ richtig" : bew === "teilweise" ? "🔶 teilweise richtig"
         : bew === "unbewertet" ? '<span class="fb">⚠️ nicht bewertet (technischer Fehler)</span>' : "❌ falsch";
-      body = `${label} – ${esc(p.feedback)}`
+      body = `${label}${p.versuch > 1 ? ` <span class="muted">(Versuch ${p.versuch}, zusammen mit den früheren bewertet)</span>` : ""} – ${esc(p.feedback)}`
+        + ((p.elemente || []).length ? `<ul class="elemente">${p.elemente.map(e =>
+            `<li class="el-${esc(e.status)}">${e.status === "korrekt" ? "✅" : e.status === "falsch" ? "❌" : "◻️"} ${esc(e.element)} <span class="muted">(${esc(e.status)})</span></li>`).join("")}</ul>` : "")
+        + (p.bewertung_modell ? `<span class="muted">Urteil aus den Elementen abgeleitet; das Modell hatte «${esc(p.bewertung_modell)}» vorgeschlagen.</span><br>` : "")
         + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "");
     }
     else if (ev.type === "chat_question") body = `❓ ${p.art === "theorie" ? "«Theorie dazu»" : p.art === "genauer" ? "«Genauer erklären»" : p.art === "allgemeinwissen" ? "Allgemeinwissen angenommen" : "Verständnisfrage"}${p.stufe ? ` <span class="muted">(Stufe ${p.stufe})</span>` : ""}: <em>${esc(p.frage)}</em>`;

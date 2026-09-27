@@ -104,6 +104,39 @@ REGELN: dict[str, dict] = {
                  "und verweise nicht in jedem Satz auf das Material.",
         "pruefbar": True,
     },
+    # ------------------------------------------------------------ D-05 Bewertung
+    "D05_ZWEI_SCHRITTE": {
+        "paket": "D-05", "bereich": "bewertung",
+        "titel": "Bewertung in zwei Schritten",
+        "regel": "Bestimme zuerst die zentralen Elemente einer vollständigen Antwort und prüfe "
+                 "dann für jedes Element, ob es in der Antwort korrekt, falsch oder gar nicht "
+                 "vorkommt. Erst daraus folgt das Urteil.",
+        "pruefbar": True,
+    },
+    "D05_URTEIL": {
+        "paket": "D-05", "bereich": "bewertung",
+        "titel": "Urteil aus den Elementen",
+        "regel": "Richtig heisst: alle zentralen Elemente sind korrekt vorhanden. Teilweise "
+                 "richtig heisst: mindestens ein Element ist korrekt und keines widerspricht der "
+                 "Lösung. Falsch heisst: kein Element ist korrekt oder die Antwort enthält einen "
+                 "sachlichen Widerspruch. Sachliche Fehler gelten nie als richtig.",
+        "pruefbar": True,
+    },
+    "D05_FEEDBACK_BEZUG": {
+        "paket": "D-05", "bereich": "bewertung",
+        "titel": "Feedback bezieht sich auf die Antwort",
+        "regel": "Das Feedback bezieht sich ausdrücklich auf das, was die lernende Person "
+                 "geschrieben hat: Es bestätigt die korrekten Teile und korrigiert genau die "
+                 "fehlenden oder falschen.",
+        "pruefbar": False,
+    },
+    "D05_MATERIAL": {
+        "paket": "D-05", "bereich": "bewertung",
+        "titel": "Bewertung bleibt materialgebunden",
+        "regel": "Bewertet wird nur anhand des Lektionsmaterials, auch wenn du in Erklärungen "
+                 "Allgemeinwissen verwenden darfst.",
+        "pruefbar": False,
+    },
 }
 
 
@@ -187,6 +220,32 @@ def ueberschneidung(a: str, b: str, ausnahmen: set[str] | None = None) -> tuple[
     sb = staemme(b)
     gemeinsam = {x for x in sa if _kommt_vor(x, sb)}
     return (len(gemeinsam) / len(sa) if sa else 0.0), gemeinsam
+
+
+# ---------------------------------------------------------------- D-05
+
+ELEMENT_STATUS = ("korrekt", "falsch", "fehlt")
+
+
+def urteil_aus_elementen(elemente, widerspruch: bool = False) -> str | None:
+    """Leitet das Urteil deterministisch aus der Einzelbewertung ab (D-05).
+
+    Gibt None zurück, wenn keine brauchbaren Elemente vorliegen; dann gilt das
+    Urteil des Modells.
+    """
+    if not isinstance(elemente, list):
+        return None
+    status = [str(e.get("status", "")).strip().lower() for e in elemente if isinstance(e, dict)]
+    status = [s for s in status if s in ELEMENT_STATUS]
+    if not status:
+        return None
+    if widerspruch or "falsch" in status:
+        return "falsch"
+    if all(s == "korrekt" for s in status):
+        return "korrekt"
+    if "korrekt" in status:
+        return "teilweise"
+    return "falsch"
 
 
 # ---------------------------------------------------------------- D-01

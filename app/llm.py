@@ -281,21 +281,31 @@ def _mock_text(system: str, user: str) -> str:
     if "ANTWORT_BEWERTEN" in user:
         # Heuristik statt fester Antwort, damit die Adaption auch ohne LLM
         # sichtbar wird: lange Antworten korrekt, mittlere teilweise, kurze falsch.
-        m = re.search(r"Antwort des Lernenden:\s*(.+)", user)
+        m = (re.search(r"Nachbesserung des Lernenden:\s*(.+)", user)
+             or re.search(r"Antwort des Lernenden:\s*(.+)", user))
         ans = (m.group(1).strip() if m else "")
         if len(ans) >= 40:
             return json.dumps({
+                "elemente": [{"element": "Voraussetzungen genannt", "status": "korrekt"},
+                             {"element": "auf den Fall angewendet", "status": "korrekt"}],
+                "sachlicher_widerspruch": False,
                 "bewertung": "korrekt",
                 "feedback": "Richtig: Es braucht Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
                 "hinweis": "",
             }, ensure_ascii=False)
         if len(ans) >= 15:
             return json.dumps({
+                "elemente": [{"element": "Schaden erkannt", "status": "korrekt"},
+                             {"element": "übrige Voraussetzungen", "status": "fehlt"}],
+                "sachlicher_widerspruch": False,
                 "bewertung": "teilweise",
                 "feedback": "Der Ansatz stimmt, aber es fehlen wesentliche Voraussetzungen der Haftung. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
                 "hinweis": "Welche vier Voraussetzungen verlangt Art. 41 OR?",
             }, ensure_ascii=False)
         return json.dumps({
+            "elemente": [{"element": "Voraussetzungen genannt", "status": "fehlt"},
+                         {"element": "auf den Fall angewendet", "status": "fehlt"}],
+            "sachlicher_widerspruch": False,
             "bewertung": "falsch",
             "feedback": "Das ist noch zu knapp. Nenne die vier Voraussetzungen der Verschuldenshaftung und wende sie auf den Fall an. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
             "hinweis": "Denk an Art. 41 OR: Schaden, Widerrechtlichkeit, Kausalzusammenhang, Verschulden.",

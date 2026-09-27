@@ -359,6 +359,112 @@ def eval_d04(b: Bericht, anzahl: int):
         b.text(f"- «{satz}» → {zitat(r.get('antwort'), 300)[2:]}")
 
 
+# ---------------------------------------------------------------- D-05
+
+A, K, T, F = "ausgewogen", "korrekt", "teilweise", "falsch"
+AUFGABEN_D05 = {
+    "hund": (HAFTUNG, {
+        "inhalt": "Der Hund von Frau Meier springt über den Gartenzaun und beisst einen Passanten ins Bein.",
+        "frage": "Welche Haftung greift hier für Frau Meier?",
+        "erwartete_antwort": "Die Tierhalterhaftung nach Art. 56 OR: Frau Meier haftet als Halterin auch ohne eigenes Verschulden.",
+        "schluesselbegriffe": ["Tierhalterhaftung"], "konzept": "Tierhalterhaftung"}),
+    "velo": (HAFTUNG, {
+        "inhalt": "Lena stösst beim Velofahren aus Unaufmerksamkeit einen Fussgänger um, der sich dabei die Hand bricht.",
+        "frage": "Haftet Lena nach Art. 41 OR? Begründe deine Antwort.",
+        "erwartete_antwort": "Ja: Schaden (Heilungskosten), Widerrechtlichkeit (Körperverletzung), adäquater Kausalzusammenhang und Verschulden (Fahrlässigkeit) liegen vor.",
+        "schluesselbegriffe": ["Schaden", "Widerrechtlichkeit", "Kausalzusammenhang", "Verschulden"],
+        "konzept": "Verschuldenshaftung"}),
+    "pizza": (BRUCH, {
+        "inhalt": "Eine Pizza wird in 8 gleich grosse Stücke geteilt. Tim isst 3 Stücke.",
+        "frage": "Welcher Bruchteil der Pizza bleibt übrig?",
+        "erwartete_antwort": "5/8 der Pizza", "schluesselbegriffe": ["5/8"], "konzept": "Bruchteile"}),
+    "nenner": (BRUCH, {
+        "inhalt": "Beim Bruch 3/4 steht die 4 unter dem Bruchstrich.",
+        "frage": "Was gibt die 4 an?",
+        "erwartete_antwort": "Der Nenner gibt an, in wie viele gleich grosse Teile das Ganze geteilt wird.",
+        "schluesselbegriffe": ["Nenner", "gleich grosse Teile"], "konzept": "Nenner"}),
+    "ort": (QUANTEN, {
+        "inhalt": "Eine Forscherin bestimmt den Ort eines Elektrons sehr genau.",
+        "frage": "Was folgt daraus für die Bestimmung seines Impulses, und warum?",
+        "erwartete_antwort": "Der Impuls lässt sich dann nur sehr ungenau bestimmen, weil Ort und Impuls nach der Heisenbergschen Unschärferelation nicht gleichzeitig beliebig genau messbar sind.",
+        "schluesselbegriffe": ["ungenau", "Unschärferelation"], "konzept": "Unschärferelation"}),
+    "abhoeren": (QUANTEN, {
+        "inhalt": "Eine Bank überträgt Schlüssel mit verschränkten Photonen. Ein Angreifer versucht mitzuhören.",
+        "frage": "Warum kann der Abhörversuch erkannt werden?",
+        "erwartete_antwort": "Weil das Abhören eine Messung ist, die die Verschränkung bzw. den Zustand der Photonen stört; diese Störung lässt sich nachweisen.",
+        "schluesselbegriffe": ["Messung", "Verschränkung", "Störung"], "konzept": "Quantenverschränkung"}),
+}
+# (Aufgabe, Antwort(en), erlaubte Urteile bei ausgewogen, erlaubte Urteile bei streng, sachlich falsch?)
+TESTSET_D05 = [
+    ("hund", ["Kausalhaftung"], {T}, {T}, False),                       # Screenshot 4
+    ("hund", ["Die Tierhalterhaftung nach Art. 56 OR. Frau Meier haftet als Halterin, auch wenn sie selbst nichts falsch gemacht hat."], {K}, {K}, False),
+    ("hund", ["Frau Meier haftet nur, wenn sie den Hund absichtlich auf den Passanten gehetzt hat."], {F}, {F}, True),
+    ("hund", ["Die Halterin muss zahlen, auch wenn sie nichts falsch gemacht hat."], {T, K}, {T}, False),
+    ("velo", ["Ja. Es gibt einen Schaden (Arztkosten), die Körperverletzung ist widerrechtlich, ihr Stoss hat den Bruch verursacht, und sie war unaufmerksam, also fahrlässig."], {K}, {K, T}, False),
+    ("velo", ["Ja, weil sie fahrlässig war."], {T}, {T}, False),
+    ("velo", ["Nein, weil sie den Fussgänger nicht absichtlich umgestossen hat."], {F}, {F}, True),
+    ("velo", ["Ja, weil sie fahrlässig war.",
+              "Dazu kommen der Schaden durch die gebrochene Hand, die widerrechtliche Körperverletzung und dass ihr Stoss den Bruch verursacht hat."], {K, T}, {K, T}, False),
+    ("pizza", ["5/8"], {K}, {K}, False),
+    ("pizza", ["3/8"], {F}, {F}, True),
+    ("pizza", ["Es bleiben 5 Stücke übrig."], {T, F}, {T, F}, False),
+    ("nenner", ["Die 4 ist der Nenner und sagt, in wie viele gleich grosse Teile man das Ganze teilt."], {K}, {K}, False),
+    ("nenner", ["Die 4 sagt, wie viele Teile man nimmt."], {F}, {F}, True),
+    ("ort", ["Der Impuls wird entsprechend ungenau, weil Ort und Impuls nach der Unschärferelation nicht gleichzeitig genau messbar sind."], {K}, {K}, False),
+    ("ort", ["Dann ist auch der Impuls sehr genau bekannt."], {F}, {F}, True),
+    ("ort", ["Das Messgerät ist einfach zu ungenau für beides."], {F}, {F}, True),
+    ("abhoeren", ["Abhören ist eine Messung, und die stört die Verschränkung. Das merken die Empfänger."], {K}, {K, T}, False),
+    ("abhoeren", ["Die Verbindung wird unterbrochen."], {T, F}, {T, F}, False),
+]
+
+
+@paket("D-05")
+def eval_d05(b: Bericht, anzahl: int):
+    """Bewertungsgenauigkeit: Testset mit festgelegten Urteilen, ausgewogen und streng."""
+    from app import tutor
+    b.abschnitt("D-05 Bewertungsgenauigkeit",
+                f"{len(TESTSET_D05)} Antworten zu drei Lektionen mit festgelegtem erwartetem Urteil. "
+                "Wo zwei Urteile vertretbar sind, zählen beide als richtig. Jede Antwort wird bei "
+                "«ausgewogen» und «streng» bewertet, bei «nachsichtig» nur zur Information.")
+    zeilen = ["| Aufgabe | Antwort | erwartet (ausgewogen) | ausgewogen | streng | nachsichtig |",
+              "|---|---|---|---|---|---|"]
+    treffer = {"ausgewogen": 0, "streng": 0}
+    falsch_als_richtig = []
+    screenshot4 = {}
+    for nr, (key, antworten, ok_a, ok_s, sachlich_falsch) in enumerate(TESTSET_D05):
+        lid, task = AUFGABEN_D05[key]
+        urteile = {}
+        for strenge in ("ausgewogen", "streng", "nachsichtig"):
+            lesson = dict(lektion(lid), einstellungen={"bewertungsstrenge": strenge})
+            vorher = []
+            for i, antwort in enumerate(antworten):
+                r = tutor.evaluate_answer(lesson, tutor.new_profile(), dict(task, typ="aufgabe"), antwort, vorher)
+                vorher.append({"antwort": antwort, "hinweis": r.get("hinweis", "")})
+            urteile[strenge] = r
+        for strenge, erlaubt in (("ausgewogen", ok_a), ("streng", ok_s)):
+            if urteile[strenge]["bewertung"] in erlaubt:
+                treffer[strenge] += 1
+            if sachlich_falsch and urteile[strenge]["bewertung"] == "korrekt":
+                falsch_als_richtig.append((key, antworten[-1], strenge))
+        if nr == 0:
+            screenshot4 = {s: urteile[s]["bewertung"] for s in ("ausgewogen", "streng")}
+        zeilen.append(f"| {key} | {' → '.join(antworten)} | {'/'.join(sorted(ok_a))} | "
+                      + " | ".join(urteile[s]["bewertung"] for s in ("ausgewogen", "streng", "nachsichtig")) + " |")
+        if nr in (0, 5, 7):
+            r = urteile["ausgewogen"]
+            b.text(f"\n**Beispiel {key}: «{antworten[-1]}»** – Elemente bei ausgewogen: "
+                   + "; ".join(f"{e['element']} ({e['status']})" for e in r.get("elemente", []))
+                   + f"\n\nFeedback: {zitat(r.get('feedback'), 400)[2:]}\n")
+    b.text("\n" + "\n".join(zeilen))
+    n = len(TESTSET_D05)
+    b.ak("D-05", "AK 1 mindestens zehn Urteile stimmen (ausgewogen)", treffer["ausgewogen"] >= 10,
+         f"ausgewogen {treffer['ausgewogen']}/{n}, streng {treffer['streng']}/{n}")
+    b.ak("D-05", "AK 1 keine sachlich falsche Antwort als richtig", not falsch_als_richtig,
+         "; ".join(f"{k} ({s})" for k, _, s in falsch_als_richtig) or "keine")
+    b.ak("D-05", "AK 2 Screenshot 4 bei ausgewogen und streng teilweise",
+         screenshot4 == {"ausgewogen": "teilweise", "streng": "teilweise"}, str(screenshot4))
+
+
 # ---------------------------------------------------------------- Ablauf
 
 def main():

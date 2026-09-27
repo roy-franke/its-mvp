@@ -155,8 +155,24 @@ def _einstellungen_block(lesson: dict) -> str:
     """Lektionseinstellungen als Anweisungen (konstant innerhalb der Lektion)."""
     e = einstellungen.settings(lesson)
     zeilen = ["EINSTELLUNGEN DIESER LEKTION:", EINSATZART_TEXT[e["einsatzart"]],
-              WISSEN_TEXT["allgemeinwissen" if "allgemeinwissen" in e["wissensstufen"] else "material"]]
+              WISSEN_TEXT["allgemeinwissen" if "allgemeinwissen" in e["wissensstufen"] else "material"],
+              STRENGE_TEXT[e["bewertungsstrenge"]]]
     return "\n".join(zeilen) + "\n\n"
+
+
+STRENGE_TEXT = {
+    "nachsichtig": "BEWERTUNGSSTRENGE: nachsichtig. Zentrale Elemente sind nur die Kernaussagen. "
+                   "Eigene Worte statt Fachbegriffe gelten als korrekt, solange sie sachlich "
+                   "stimmen. Sachliche Fehler gelten trotzdem nie als richtig.",
+    "ausgewogen": "BEWERTUNGSSTRENGE: ausgewogen. Alle zentralen Elemente müssen vorhanden sein; "
+                  "Fachbegriffe verlangst du dort, wo sie für das Verständnis wichtig sind. Nennt "
+                  "die Antwort nur einen Oberbegriff, wo ein spezifischer Begriff gefragt ist "
+                  "(etwa «Kausalhaftung» statt «Tierhalterhaftung»), ist dieses Element nicht "
+                  "erfüllt. Sachliche Fehler gelten nie als richtig.",
+    "streng": "BEWERTUNGSSTRENGE: streng. Die Antwort muss vollständig sein und die korrekten "
+              "Fachbegriffe verwenden; ungenaue oder nur umschriebene Begriffe erfüllen ein "
+              "Element nicht. Sachliche Fehler gelten nie als richtig.",
+}
 
 
 WISSEN_TEXT = {
@@ -421,38 +437,68 @@ def fuer_lernende(task: dict | None) -> dict | None:
 BEWERTUNGEN = ("korrekt", "teilweise", "falsch")
 
 
-def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str) -> dict:
+def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
+                    vorher: list[dict] | None = None) -> dict:
     """Bewertet eine Antwort dreistufig und liefert KI-Feedback.
 
-    Bewertungskategorien und Feedback-Regeln nach dem Vorbild des
-    LLMTutor-Projekts von Swiss Learning Analytics.
+    D-05: Die Bewertung läuft in zwei Schritten. Das Modell bestimmt die
+    zentralen Elemente einer vollständigen Antwort und prüft jedes einzeln
+    (korrekt, falsch, fehlt). Das Urteil leitet der Code daraus ab
+    (didaktik.urteil_aus_elementen). Die Elemente landen im Lernverlauf.
+
+    `vorher` enthält die früheren Versuche zur selben Aufgabe. Eine
+    Nachbesserung wird zusammen mit dem ersten Versuch bewertet; zuvor wurde
+    sie allein bewertet, sodass eine knappe Ergänzung als falsch galt.
+
+    Kategorien und Feedback-Regeln nach dem Vorbild des LLMTutor-Projekts von
+    Swiss Learning Analytics.
     """
+    vorher = vorher or []
+    optionen = task.get("optionen") or []
+    kontext = (f"Aufgabe: {task.get('inhalt', '')}\n"
+               f"Frage: {task.get('frage', '')}\n")
+    if optionen:
+        kontext += "Antwortoptionen: " + " | ".join(
+            f"{'ABCDEFGH'[i]}) {o}" for i, o in enumerate(optionen)) + "\n"
+    if task.get("erwartete_antwort"):
+        kontext += (f"Musterlösung (nur für dich, nie verraten): {task['erwartete_antwort']}\n")
+    if task.get("schluesselbegriffe"):
+        kontext += "Schlüsselbegriffe der Lösung: " + ", ".join(task["schluesselbegriffe"]) + "\n"
+    if vorher:
+        for i, v in enumerate(vorher, 1):
+            kontext += (f"Versuch {i} des Lernenden: {v.get('antwort', '')}\n"
+                        f"Dein Hinweis dazu: {v.get('hinweis', '')}\n")
+        kontext += (f"Nachbesserung des Lernenden: {answer}\n"
+                    "Bewerte die GESAMTANTWORT aus allen Versuchen zusammen. Eine Nachbesserung "
+                    "ergänzt den ersten Versuch; sie muss nicht alles wiederholen.\n\n")
+    else:
+        kontext += f"Antwort des Lernenden: {answer}\n\n"
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: ANTWORT_BEWERTEN\n"
-        f"Aufgabe: {task.get('inhalt', '')}\n"
-        f"Frage: {task.get('frage', '')}\n"
-        f"Antwort des Lernenden: {answer}\n\n"
-        "Bewerte die Antwort mit genau einer dieser Kategorien:\n"
-        "- 'korrekt': Der zentrale inhaltliche Kern ist richtig erfasst und das "
-        "Grundprinzip verstanden, auch wenn Randdetails fehlen oder kleinere "
-        "Ungenauigkeiten vorliegen, die das Verständnis nicht beeinträchtigen.\n"
-        "- 'teilweise': Ein wesentlicher, für das Verständnis entscheidender "
-        "Aspekt fehlt, oder die Antwort ist fachlich unpräzis oder "
-        "missverständlich formuliert.\n"
-        "- 'falsch': Der Kern der Antwort ist nicht richtig.\n"
-        "Faustregel im Zweifel: Wurde das Prinzip verstanden? Wenn ja -> korrekt.\n\n"
+        + kontext +
+        "Gehe in zwei Schritten vor:\n"
+        "1. Bestimme 2-4 zentrale Elemente einer vollständigen Antwort (gemäss der "
+        "Bewertungsstrenge dieser Lektion).\n"
+        "2. Prüfe für jedes Element, ob es in der Antwort korrekt vorkommt, falsch ist "
+        "(der Lösung widerspricht) oder fehlt.\n"
+        "Urteil: 'korrekt' = alle Elemente korrekt. 'teilweise' = mindestens ein Element "
+        "korrekt und keines falsch. 'falsch' = kein Element korrekt oder ein sachlicher "
+        "Widerspruch.\n\n"
         "Feedback-Regeln:\n"
-        "- korrekt: kurz und präzis bestätigen (max. 1 Satz), dann knapp die "
-        "wichtigsten fehlenden Aspekte ergänzen.\n"
-        "- teilweise: kurz benennen, was unpräzis oder unvollständig ist; im "
-        "Hinweis eine Rückfrage oder einen Denkanstoss geben, OHNE die Antwort "
-        "zu verraten.\n"
-        "- falsch: knapp erklären, was nicht stimmt, ohne die richtige Antwort "
-        "zu nennen; im Hinweis einen gezielten sokratischen Denkanstoss geben. "
-        "Keine positiven Floskeln.\n"
-        "Verrate die Lösung nie, auch nicht implizit.\n\n"
-        'Format: {"bewertung": "korrekt|teilweise|falsch", '
+        "- Beziehe dich ausdrücklich auf das, was der Lernende geschrieben hat: bestätige die "
+        "korrekten Teile und korrigiere genau die fehlenden oder falschen.\n"
+        "- korrekt: kurz und präzis bestätigen (max. 1 Satz), dann knapp ergänzen, was "
+        "noch dazugehört.\n"
+        "- teilweise: benennen, was stimmt und was fehlt; im Hinweis einen Denkanstoss zur "
+        "Ergänzung geben, OHNE die Antwort zu verraten.\n"
+        "- falsch: knapp erklären, was nicht stimmt, ohne die richtige Antwort zu nennen; im "
+        "Hinweis einen gezielten Denkanstoss geben. Keine positiven Floskeln.\n"
+        "Formuliere den Hinweis als Anstoss, nicht als neue Frage, die statt der Aufgabe "
+        "beantwortet werden soll. Verrate die Lösung nie, auch nicht implizit.\n\n"
+        'Format: {"elemente": [{"element": "zentrales Element", "status": "korrekt|falsch|fehlt"}], '
+        '"sachlicher_widerspruch": false, '
+        '"bewertung": "korrekt|teilweise|falsch", '
         '"feedback": "2-4 Sätze direkt an den Lernenden", '
         '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
         fallback=dict(FALLBACK_TEXTE["bewertung"]),
@@ -466,6 +512,15 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str) -> dic
     if data.get("bewertung") not in BEWERTUNGEN:
         # Rückwärtskompatibilität: alte Antworten mit korrekt=true/false
         data["bewertung"] = "korrekt" if data.get("korrekt") else "falsch"
+    elemente = [
+        {"element": str(e.get("element", "")).strip(), "status": str(e.get("status", "")).strip().lower()}
+        for e in (data.get("elemente") or []) if isinstance(e, dict)
+    ]
+    data["elemente"] = [e for e in elemente if e["status"] in didaktik.ELEMENT_STATUS]
+    urteil = didaktik.urteil_aus_elementen(data["elemente"], bool(data.get("sachlicher_widerspruch")))
+    if urteil and urteil != data["bewertung"]:
+        data["bewertung_modell"] = data["bewertung"]
+        data["bewertung"] = urteil
     data["korrekt"] = data["bewertung"] == "korrekt"
     return data
 

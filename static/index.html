@@ -278,7 +278,7 @@ const $ = id => document.getElementById(id);
 let sessionId = null, questions = [], qIndex = 0, assessAnswers = [];
 let answerEnabled = true;
 let confidenceAsked = false, pendingAnswer = "";
-let me = null, codeRequired = false, currentLessonTitle = "";
+let me = null, codeRequired = false, currentLessonTitle = "", currentTask = null;
 
 class ApiError extends Error {
   constructor(status, detail) {
@@ -677,6 +677,7 @@ async function nextTask(adaptation) {
 }
 
 function renderTask(t, adaptation, prefetch) {
+  currentTask = t;
   if (t.typ === "fehler") {
     // Technisches Problem: ehrlich sagen und «Nochmals versuchen» anbieten
     addMsg("tutor bad", "⚠️ " + (t.inhalt || ""), "Tutor");
@@ -762,6 +763,10 @@ async function submitAnswer(text, confidence) {
     renderFeedback(d);
     if (d.niveau_frage) addLevelQuestion(d.niveau_frage);
     if (d.adaption === "retry") {
+      // Aufgabe nochmals einblenden: Der zweite Versuch beantwortet die Aufgabe,
+      // nicht den Hinweis (Beobachtung aus dem Testlauf, D-04/D-05).
+      if (currentTask && currentTask.frage)
+        addMsg("tutor question", "↩️ Ergänze deine Antwort zur Aufgabe: " + currentTask.frage, "Tutor");
       setAnswerMode(true);
       $("chat-input").focus();
     } else {
