@@ -429,12 +429,15 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
     if theorie:
         beispiel = theorie.get("beispiel") or theorie.get("inhalt", "")[:400]
         instruction += (
-            f"Beispiel aus der letzten Theorie (NICHT wiederverwenden, wähle einen anderen "
-            f"Fall mit anderem Kontext und anderen Beteiligten): {beispiel}\n"
+            f"Beispiel aus der letzten Theorie (NICHT wiederverwenden und NICHT abwandeln; "
+            f"erfinde einen neuen Fall mit anderem Ort, anderen Beteiligten und anderem "
+            f"Gegenstand): {beispiel}\n"
         )
     instruction += (
-        "Die erwartete Antwort und ihre Schlüsselbegriffe dürfen weder in der Frage "
-        "noch im Aufgabentext vorkommen (ausser bei Multiple Choice).\n"
+        "Die erwartete Antwort und ihre Schlüsselbegriffe dürfen nicht in der Frage vorkommen "
+        "(ausser bei Multiple Choice). Schlüsselbegriffe sind nur Fachbegriffe aus dem Material, "
+        "die der Lernende selbst nennen oder anwenden muss (z.B. «Tierhalterhaftung», «Nenner»), "
+        "keine Personen, Alltagswörter oder Zahlen aus dem Fall. Sprich den Lernenden mit «du» an.\n"
         'Format: {"titel": "kurzer Titel", '
         '"inhalt": "Fallbeschreibung oder Situation (2-5 Sätze), ohne die Lösung", '
         '"frage": "eine konkrete Frage an den Lernenden", '
@@ -447,7 +450,7 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
     texte = erklaerte_texte(history)
 
     def pruefen(d: dict) -> str | None:
-        return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie)
+        return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie, lesson)
                 or (unerklaert(d, erklaert, texte) if einfuehrung else None))
 
     data = llm.chat_json(_system_prompt(lesson), instruction, fallback={}, check=pruefen)

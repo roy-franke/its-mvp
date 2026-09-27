@@ -178,3 +178,53 @@ def test_regelkatalog_vollstaendig(regel):
     r = didaktik.REGELN[regel]
     assert {"paket", "bereich", "titel", "regel", "pruefbar"} <= set(r)
     assert r["regel"] in didaktik.regeln_fuer_prompt()
+
+
+# ---------------------------------------------------------------- Befunde aus der Evaluation mit qwen3:30b
+
+HAFTUNG = json.loads(open("app/lessons/haftungsrecht.json", encoding="utf-8").read())
+BRUCH = json.loads(open("app/lessons/bruchbegriff-verstehen-und-anwenden.json", encoding="utf-8").read())
+
+
+@pytest.mark.parametrize("lesson,task", [
+    (HAFTUNG, {"frage": "Haften die Eltern des verletzten Jugendlichen für die Schäden, die durch das "
+                        "Verhalten der Betreuerin entstanden sind?", "schluesselbegriffe": ["Betreuerin"]}),
+    (BRUCH, {"inhalt": "Eine Pizza wird in fünf gleich grosse Stücke geteilt.",
+             "frage": "Wie viel Pizza bekommt jedes Kind?", "erwartete_antwort": "ein Fünftel"}),
+    (BRUCH, {"frage": "Wie viele Gramm Mehl benötigt die Bäckerei, wenn sie 3/4 eines Kilogramms braucht?",
+             "schluesselbegriffe": ["3/4 Kilogramm"]}),
+])
+def test_keine_fehlalarme_beim_loesungswort(lesson, task):
+    assert didaktik.loesungswort_in_aufgabe(task, didaktik.fachvokabular(lesson)) is None
+
+
+def test_screenshot4_bleibt_mit_fachvokabular_erkannt():
+    assert didaktik.loesungswort_in_aufgabe(SCREENSHOT_4, didaktik.fachvokabular(HAFTUNG))
+
+
+def test_abgewandeltes_beispiel_wird_erkannt():
+    theorie = {"konzept": "Familienhauptshaftung", "beispiel": "Ein 10-jähriges Kind stösst versehentlich "
+               "einen Fahrradfahrer um, weil die Eltern es im Park unbeaufsichtigt gelassen haben."}
+    task = {"inhalt": "Ein 12-jähriges Kind läuft alleine auf die Strasse und stösst versehentlich einen "
+                      "Fahrradfahrer um. Die Eltern haben es nicht ausreichend beaufsichtigt.",
+            "frage": "Müssen die Eltern haften?", "konzept": "Familienhauptshaftung"}
+    assert didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(HAFTUNG))
+
+
+def test_themenwoerter_allein_sind_kein_wiederverwendetes_beispiel():
+    theorie = {"konzept": "Verschuldenshaftung", "beispiel": "Beim Fussballspielen zerschlägt jemand "
+               "versehentlich eine Fensterscheibe und haftet für den Schaden, weil er fahrlässig war."}
+    task = {"inhalt": "Anna putzt das Fenster im zweiten Stock, rutscht von der Leiter und beschädigt "
+                      "die Gardine des Nachbarn.", "frage": "Warum haftet Anna für den Schaden?",
+            "konzept": "Verschuldenshaftung"}
+    assert didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(HAFTUNG)) is None
+
+
+@pytest.mark.parametrize("text,verstoss", [
+    ("Begründen Sie Ihre Antwort.", True),
+    ("Wie würden Sie entscheiden?", True),
+    ("Begründe deine Antwort.", False),
+    ("Sie rutscht von der Leiter. Wer haftet?", False),
+])
+def test_sie_anrede(text, verstoss):
+    assert bool(didaktik.sie_anrede(text)) is verstoss

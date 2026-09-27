@@ -116,8 +116,9 @@ def eval_d01(b: Bericht, anzahl: int):
                 task = tutor.generate_task(lesson, p, history)
                 eintrag = {
                     "lektion": lesson["titel"], "niveau": level, "theorie": theorie, "task": task,
-                    "loesungswort": didaktik.loesungswort_in_aufgabe(task),
-                    "beispiel": didaktik.beispiel_wiederverwendet(task, theorie),
+                    "loesungswort": didaktik.loesungswort_in_aufgabe(task, didaktik.fachvokabular(lesson)),
+                    "beispiel": didaktik.beispiel_wiederverwendet(task, theorie, didaktik.themenwoerter(lesson)),
+                    "sie": didaktik.sie_anrede(f"{task.get('inhalt', '')} {task.get('frage', '')}"),
                     "abschreibbar": didaktik.abschreibbar(task, theorie),
                     "neu_generiert": task.get("_versuche", 1) > 1,
                     "fallback": bool(task.get("_fallback")),
@@ -133,6 +134,8 @@ def eval_d01(b: Bericht, anzahl: int):
     b.ak("D-01", "AK 1 keine Aufgabe mit Lösungswort in der Frage", not lw,
          f"{len(lw)} von {len(echt)}")
     b.ak("D-01", "AK 2 kein wiederverwendetes Theorie-Beispiel", not bsp, f"{len(bsp)} von {len(echt)}")
+    sie = [e for e in echt if e["sie"]]
+    b.ak("D-01", "Lernende werden geduzt", not sie, f"{len(sie)} von {len(echt)} mit «Sie»")
     b.text(f"\nAufgaben insgesamt: {len(alle)}, davon Fallbacks: {len(alle) - len(echt)}. "
            f"Nach einem Regelverstoss neu generiert: {len(neu)}. Abschreibbar trotz Prüfung: {len(ab)}. "
            "Multiple-Choice-Aufgaben: "

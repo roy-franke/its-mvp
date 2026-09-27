@@ -24,6 +24,13 @@ REGELN: dict[str, dict] = {
         "pruefbar": True,
     },
     # ------------------------------------------------------------ D-01 Aufgaben
+    "T03_DU": {
+        "paket": "T-03", "bereich": "allgemein",
+        "titel": "Lernende duzen",
+        "regel": "Sprich die Lernenden immer mit «du» an, nie mit «Sie», auch in Aufgaben "
+                 "(«Begründe …», nicht «Begründen Sie …»).",
+        "pruefbar": True,
+    },
     "D01_EIGENLEISTUNG": {
         "paket": "D-01", "bereich": "aufgabe",
         "titel": "Eigenleistung statt Abschreiben",
@@ -43,15 +50,17 @@ REGELN: dict[str, dict] = {
     "D01_KEIN_LOESUNGSWORT": {
         "paket": "D-01", "bereich": "aufgabe",
         "titel": "Lösungswort nicht in der Frage",
-        "regel": "Die erwartete Antwort und ihre Wortstämme kommen weder in der Frage noch im "
-                 "Aufgabentext vor. Ausgenommen sind Multiple-Choice-Aufgaben.",
+        "regel": "Die erwartete Antwort und ihre Wortstämme kommen nicht in der Frage vor. "
+                 "Ausgenommen sind Multiple-Choice-Aufgaben.",
         "pruefbar": True,
     },
     "D01_NEUER_FALL": {
         "paket": "D-01", "bereich": "aufgabe",
         "titel": "Neuer Fall statt Theorie-Beispiel",
-        "regel": "Die Aufgabe verwendet einen anderen Fall als das Beispiel der Theorie, mit "
-                 "anderem Kontext und anderen Beteiligten.",
+        "regel": "Die Aufgabe verwendet einen neu erfundenen Fall, nicht das Beispiel der Theorie "
+                 "und auch keine leichte Abwandlung davon (anderes Alter, anderer Name): anderer "
+                 "Ort, andere Beteiligte, anderer Gegenstand. Übernimm auch keine Fälle, die "
+                 "wörtlich im Material stehen.",
         "pruefbar": True,
     },
     "D01_EINFACHER_ABER_DENKEN": {
@@ -262,26 +271,57 @@ def schluesselbegriffe(task: dict) -> list[str]:
     return begriffe
 
 
-def loesungswort_in_aufgabe(task: dict) -> str | None:
-    """Kommt ein Lösungsbegriff (oder sein Wortstamm) in Frage oder Aufgabentext vor?"""
+def loesungswort_in_aufgabe(task: dict, fachwoerter: set[str] | None = None) -> str | None:
+    """Kommt ein Lösungsbegriff (oder sein Wortstamm) in der Frage vor?
+
+    Geprüft wird die Frage, nicht die Fallbeschreibung: Die Fallbeschreibung
+    darf Angaben enthalten, mit denen gerechnet oder argumentiert wird.
+    Begriffe mit Zahlen (Mengen, Brüche) sind Rechenergebnisse, keine
+    Lösungswörter. Mit `fachwoerter` (Stämme aus Material, Lernzielen und
+    Titel) zählen nur Fachbegriffe der Lektion; so löst ein vom Modell
+    ungeschickt gewählter Alltagsbegriff wie «Betreuerin» keinen Verstoss aus.
+    """
     if (task.get("aufgabentyp") or "").lower() in ("multiple_choice", "multiple-choice", "mc"):
         return None
-    text_staemme = staemme(_aufgabentext(task))
+    frage_staemme = staemme(task.get("frage") or "")
     for begriff in schluesselbegriffe(task):
+        if re.search(r"\d", begriff):
+            continue
         teile = staemme(begriff)
-        if teile and all(_kommt_vor(t, text_staemme) for t in teile):
+        if not teile:
+            continue
+        if fachwoerter is not None and not all(_kommt_vor(t, fachwoerter) for t in teile):
+            continue
+        if all(_kommt_vor(t, frage_staemme) for t in teile):
             return (f"Der Lösungsbegriff «{begriff}» oder sein Wortstamm steht bereits in der "
-                    "Frage oder im Aufgabentext. Formuliere die Aufgabe so, dass die Lernenden "
-                    "den Begriff selbst finden müssen.")
+                    "Frage. Formuliere die Frage so, dass die Lernenden den Begriff selbst "
+                    "finden müssen.")
     return None
 
 
-def beispiel_wiederverwendet(task: dict, theorie: dict | None) -> str | None:
-    """Nutzt die Aufgabe denselben Fall wie das Beispiel der letzten Theorie?"""
+def fachvokabular(lesson: dict) -> set[str]:
+    """Stämme der Fachbegriffe einer Lektion (Material, Lernziele, Titel)."""
+    return staemme(" ".join([lesson.get("titel", ""), " ".join(lesson.get("lernziele", [])),
+                             lesson.get("material", "")]))
+
+
+def themenwoerter(lesson: dict) -> set[str]:
+    """Wörter, die in jeder Aufgabe der Lektion vorkommen dürfen (Titel, Lernziele)."""
+    return staemme(" ".join([lesson.get("titel", ""), " ".join(lesson.get("lernziele", []))]))
+
+
+def beispiel_wiederverwendet(task: dict, theorie: dict | None,
+                             themen: set[str] | None = None) -> str | None:
+    """Nutzt die Aufgabe denselben Fall wie das Beispiel der letzten Theorie?
+
+    Wörter aus Titel und Lernzielen der Lektion (`themen`, etwa «haften»,
+    «Schaden», «Bruch») zählen nicht als Gemeinsamkeit, weil sie in jedem Fall
+    der Lektion vorkommen.
+    """
     if not theorie:
         return None
     ausnahmen = staemme(" ".join([theorie.get("konzept") or "", task.get("konzept") or ""]
-                                 + schluesselbegriffe(task)))
+                                 + schluesselbegriffe(task))) | (themen or set())
     beispiel = (theorie.get("beispiel") or "").strip()
     if beispiel:
         anteil, gemeinsam = ueberschneidung(beispiel, _aufgabentext(task), ausnahmen)
@@ -360,12 +400,31 @@ def aehnlichkeit(neu: str, bisherige: list[str]) -> float:
     return max((ueberschneidung(neu, alt)[0] for alt in bisherige), default=0.0)
 
 
-def pruefe_aufgabe(task: dict, theorie: dict | None, direkt_nach_theorie: bool) -> str | None:
+def pruefe_aufgabe(task: dict, theorie: dict | None, direkt_nach_theorie: bool,
+                   lesson: dict | None = None) -> str | None:
     """Alle deterministischen Prüfungen einer Aufgabe (D-01, T-01)."""
+    fach = fachvokabular(lesson) if lesson else None
+    themen = themenwoerter(lesson) if lesson else None
     return (pruefe_felder(task, ("inhalt", "frage"))
-            or loesungswort_in_aufgabe(task)
-            or beispiel_wiederverwendet(task, theorie)
+            or loesungswort_in_aufgabe(task, fach)
+            or beispiel_wiederverwendet(task, theorie, themen)
             or (abschreibbar(task, theorie) if direkt_nach_theorie else None))
+
+
+_SIE_ANREDE = re.compile(
+    r"\b(begründen|erklären|beschreiben|nennen|vergleichen|überlegen|geben|berechnen|schreiben|"
+    r"bestimmen|stellen|prüfen|ergänzen|entscheiden|beurteilen|zeigen|finden|lesen|denken|"
+    r"schätzen|ordnen|wenden|formulieren|begründe[nt]?) Sie\b|\bIhre?[nmrs]? (Antwort|Meinung|"
+    r"Lösung|Begründung|Entscheidung|Einschätzung)\b|\bkönnen Sie\b|\bwürden Sie\b", re.UNICODE)
+
+
+def sie_anrede(text: str) -> str | None:
+    """Die Lernenden werden geduzt. Erkennt die Höflichkeitsform in Aufgaben."""
+    m = _SIE_ANREDE.search(text or "")
+    if m:
+        return (f"Die Aufgabe spricht die Lernenden mit «Sie» an («{m.group(0)}»). "
+                "Duze sie durchgehend.")
+    return None
 
 
 # ---------------------------------------------------------------- T-01
@@ -408,4 +467,4 @@ def pruefe_felder(data: dict, felder: tuple[str, ...]) -> str | None:
     nächsten Feld und ist damit kein Verstoss.
     """
     text = "\n".join(str(data.get(f) or "") for f in felder).strip()
-    return leere_ankuendigung(text)
+    return leere_ankuendigung(text) or sie_anrede(text)
