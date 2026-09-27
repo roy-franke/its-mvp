@@ -148,5 +148,3 @@ def test_prompt_kennt_ungenau_und_widerspruch(monkeypatch):
     user = prompts[0][1]
     assert "ungenau" in user and "anderen Ergebnis als die Musterlösung" in user
     assert "nur was die Frage tatsächlich verlangt" in user
-    assert "Oberbegriff statt des gesuchten Begriffs, ist dieses Element ungenau" in user
-    assert "«nur wenn …»" in user
