@@ -81,6 +81,9 @@
   .msg.tutor.extern.web .who { color: #c2410c; }
   .msg ul.links { margin: 8px 0 0; padding-left: 18px; font-size: .85rem; }
   .msg ul.links a { color: #1d4ed8; word-break: break-word; }
+  .chat.verlauf { display: flex; flex-direction: column; gap: 10px; }
+  .msg.markiert { outline: 3px solid #f59e0b; outline-offset: 2px; transition: outline-color .3s; }
+  .status.archiviert { background: #f1f5f9; color: var(--muted); }
   .msg.tutor.selbst { background: #f5f3ff; border-color: #c4b5fd; }
   .msg .quelle { display: block; margin-top: 8px; font-size: .75rem; color: #64748b; }
   .msg.tutor.extern .who { opacity: 1; color: #0e7490; font-weight: 600; }
@@ -171,7 +174,11 @@
         <h2 style="margin:0">Hallo <span id="home-name"></span></h2>
         <button class="linkbtn" id="btn-logout">Nicht du? Abmelden</button>
       </div>
-      <p class="muted" style="margin:6px 0 4px">Deine Lernsequenzen</p>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin:6px 0 4px">
+        <p class="muted" style="margin:0">Deine Lernsequenzen</p>
+        <label class="muted" style="font-size:.8rem;margin:0;font-weight:400">
+          <input type="checkbox" id="show-archived"> Archivierte anzeigen</label>
+      </div>
       <div id="seq-list"></div>
       <p class="muted" id="seq-empty">Du hast noch keine Lernsequenz begonnen.</p>
     </div>
@@ -253,6 +260,19 @@
     </div>
   </div>
 
+  <!-- Eigener Lernverlauf (N-05) -->
+  <div id="view-verlauf" class="hidden">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <h2 style="margin:0">📜 <span id="v-titel"></span></h2>
+        <button class="small secondary" id="btn-verlauf-home">Zur Übersicht</button>
+      </div>
+      <div class="badges" id="v-stats" style="margin-top:8px"></div>
+      <div id="v-schwaechen" class="adaption hidden" style="border-color:var(--warn);background:#fffbeb;margin-top:12px"></div>
+    </div>
+    <div class="card"><div id="v-eintraege" class="chat verlauf"></div></div>
+  </div>
+
   <!-- Abschluss -->
   <div id="view-done" class="hidden">
     <div class="card">
@@ -309,7 +329,7 @@ async function api(path, body, method = "POST") {
   return r.json();
 }
 
-const VIEWS = ["view-start", "view-home", "view-assess", "view-learn", "view-done"];
+const VIEWS = ["view-start", "view-home", "view-assess", "view-learn", "view-done", "view-verlauf"];
 function show(view) {
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== view);
   window.scrollTo(0, 0);
@@ -509,7 +529,7 @@ $("btn-logout").onclick = async () => {
 };
 
 const STATUS_LABEL = { aktiv: "aktiv", pausiert: "pausiert", abgeschlossen: "abgeschlossen",
-                       abgebrochen: "abgebrochen" };
+                       abgebrochen: "abgebrochen", archiviert: "archiviert" };
 let mySequences = [];
 
 async function showHome() {
@@ -518,7 +538,7 @@ async function showHome() {
   show("view-home");
   showError("start-error", "");
   const [seqs, lessons] = await Promise.all([
-    api("/me/sequenzen", null, "GET").catch(() => []),
+    api("/me/sequenzen" + ($("show-archived").checked ? "?archivierte=true" : ""), null, "GET").catch(() => []),
     api("/lessons", null, "GET").catch(() => []),
   ]);
   mySequences = seqs;
@@ -534,7 +554,8 @@ async function showHome() {
       </div>
       <span class="btnrow" style="margin:0">
         ${sq.fortsetzbar ? `<button class="small" data-act="resume">Fortsetzen</button>` : ""}
-        <button class="small secondary" data-act="restart" data-lesson="${esc(sq.lesson_id)}">Neu beginnen</button>
+        ${sq.verlauf_sichtbar ? `<button class="small secondary" data-act="verlauf">Verlauf</button>` : ""}
+        ${sq.status !== "archiviert" ? `<button class="small secondary" data-act="restart" data-lesson="${esc(sq.lesson_id)}">Neu beginnen</button>` : ""}
       </span>
     </div>`).join("");
   $("lesson-select").innerHTML = lessons.map(l =>
@@ -549,6 +570,7 @@ $("seq-list").onclick = async e => {
   btn.disabled = true;
   try {
     if (btn.dataset.act === "resume") await resumeSession(sid);
+    else if (btn.dataset.act === "verlauf") await showVerlauf(sid);
     else await startLesson(btn.dataset.lesson, true, true);
   } catch (err) { showError("start-error", err.message); }
   finally { btn.disabled = false; }
@@ -966,6 +988,93 @@ function renderDone(d) {
   show("view-done");
 }
 $("btn-done-home").onclick = () => showHome();
+
+// ---------- Eigener Lernverlauf (N-05)
+$("show-archived").onchange = () => showHome();
+$("btn-verlauf-home").onclick = () => showHome();
+const BEW_LABEL = { korrekt: "✅ Richtig", teilweise: "🔶 Teilweise richtig", falsch: "❌ Falsch" };
+
+async function showVerlauf(sid) {
+  const v = await api(`/me/sequenzen/${sid}/verlauf`, null, "GET");
+  $("v-titel").textContent = v.lesson_titel;
+  $("v-stats").innerHTML =
+    `<span class="badge">${esc(STATUS_LABEL[v.status] || v.status)}</span>` +
+    `<span class="badge">Niveau ${esc(v.level_label)}</span>` +
+    `<span class="badge">✅ ${v.correct} richtig</span>` +
+    (v.partial ? `<span class="badge">🔶 ${v.partial} teilweise</span>` : "") +
+    `<span class="badge">❌ ${v.wrong} falsch</span>`;
+  const sw = v.schwaechen || [];
+  $("v-schwaechen").innerHTML = sw.length
+    ? `<strong>Hier lohnt sich Wiederholen</strong><ul style="margin:6px 0 0;padding-left:18px">` +
+      sw.map(x => `<li><a href="#${esc(x.anker)}" data-anker="${esc(x.anker)}">${esc(x.konzept)}</a>
+        <span class="muted">(${[x.falsch ? x.falsch + " falsch" : "", x.teilweise ? x.teilweise + " teilweise" : ""]
+          .filter(Boolean).join(", ")})</span></li>`).join("") + "</ul>"
+    : "";
+  $("v-schwaechen").classList.toggle("hidden", !sw.length);
+  const box = $("v-eintraege");
+  box.innerHTML = "";
+  for (const e of v.eintraege) box.appendChild(verlaufEintrag(e));
+  renderMath(box);
+  show("view-verlauf");
+}
+
+$("v-schwaechen").onclick = ev => {
+  const a = ev.target.closest("a[data-anker]");
+  if (!a) return;
+  ev.preventDefault();
+  const ziel = document.getElementById(a.dataset.anker);
+  if (ziel) {
+    ziel.scrollIntoView({ behavior: "smooth", block: "center" });
+    ziel.classList.add("markiert");
+    setTimeout(() => ziel.classList.remove("markiert"), 2000);
+  }
+};
+
+function verlaufEintrag(e) {
+  const div = document.createElement("div");
+  const zeile = (who, text, cls) => {
+    div.className = "msg " + cls;
+    const w = document.createElement("span");
+    w.className = "who"; w.textContent = who;
+    div.appendChild(w);
+    div.appendChild(document.createTextNode(text));
+  };
+  if (e.art === "theorie") {
+    zeile("Theorie", "📖 " + (e.titel ? e.titel + "\n\n" : "") + (e.inhalt || "") +
+      (e.beispiel ? "\n\n💡 Beispiel: " + e.beispiel : ""), "tutor theory");
+    quellenZeile(div, e.quelle);
+  } else if (e.art === "aufgabe") {
+    zeile("Aufgabe" + (e.konzept ? " · " + e.konzept : ""), (e.titel ? e.titel + "\n\n" : "") +
+      (e.inhalt || "") + (e.frage ? "\n\n❓ " + e.frage : "") +
+      ((e.optionen || []).length ? "\n" + e.optionen.map((o, i) => "ABCDEFGH"[i] + ") " + o).join("\n") : ""),
+      "tutor question");
+  } else if (e.art === "antwort") {
+    zeile("Deine Antwort" + (e.sicherheit ? ` · Sicherheit ${e.sicherheit}/10` : ""), e.text || "", "user");
+  } else if (e.art === "bewertung") {
+    const cls = e.bewertung === "korrekt" ? "good" : e.bewertung === "teilweise" ? "mid" : "bad";
+    zeile("Bewertung", (BEW_LABEL[e.bewertung] || e.bewertung) + ". " + (e.feedback || "") +
+      (e.hinweis ? "\n💡 Hinweis: " + e.hinweis : "") +
+      (e.selbsteinschaetzung ? "\n🪞 " + e.selbsteinschaetzung : ""), "tutor " + cls);
+  } else if (e.art === "frage") {
+    zeile("Deine Frage", e.text || "", "user ask");
+  } else if (e.art === "tutor") {
+    zeile(e.internet ? "Tutor · Internetrecherche" : e.ausserhalb_material ? "Tutor · ausserhalb des Materials" : "Tutor",
+      e.text || "", "tutor" + (e.internet ? " extern web" : e.ausserhalb_material ? " extern" : ""));
+    if ((e.links || []).length) {
+      const ul = document.createElement("ul"); ul.className = "links";
+      for (const l of e.links) {
+        const li = document.createElement("li"), a = document.createElement("a");
+        a.href = l.url; a.textContent = l.titel || l.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+        li.appendChild(a); ul.appendChild(li);
+      }
+      div.appendChild(ul);
+    }
+  } else if (e.art === "abschluss") {
+    zeile("Abschluss", "🎉 " + (e.zusammenfassung || "") + (e.empfehlung ? "\n💡 " + e.empfehlung : ""), "tutor good");
+  }
+  if (e.id) div.id = e.id;
+  return div;
+}
 
 // ---------- Pausieren und Abbrechen (T-06)
 function homeBanner(text) {

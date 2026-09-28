@@ -846,14 +846,14 @@ def abort(sid: str, request: Request):
 
 
 @app.get("/api/me/sequenzen")
-def my_sequences(request: Request):
-    """Die nicht archivierten Lernsequenzen der angemeldeten Person (T-05)."""
+def my_sequences(request: Request, archivierte: bool = False):
+    """Die Lernsequenzen der angemeldeten Person (T-05), archivierte nur auf Wunsch (N-05)."""
     ident = auth.identity(request)
     if not ident.key:
         raise HTTPException(401, "Bitte melde dich zuerst an.")
     titel = _lesson_titles()
     out = []
-    for s in store.sessions_of_user(ident.key):
+    for s in store.sessions_of_user(ident.key, include_archived=archivierte):
         p = s["profile"]
         out.append({
             "session_id": s["id"], "lesson_id": s["lesson_id"],
@@ -864,8 +864,39 @@ def my_sequences(request: Request):
             "level_label": tutor.LEVEL_LABELS.get(p.get("level", "basic"), ""),
             "updated_at": s["updated_at"],
             "fortsetzbar": s["status"] in ("aktiv", "pausiert"),
+            "verlauf_sichtbar": s["status"] in VERLAUF_STATUS,
         })
     return out
+
+
+# N-05: Lernende sehen den Verlauf eigener Sequenzen, die nicht mehr laufen.
+VERLAUF_STATUS = ("abgeschlossen", "pausiert", "archiviert", "abgebrochen")
+
+
+@app.get("/api/me/sequenzen/{sid}/verlauf")
+def my_history(sid: str, request: Request):
+    """Eigener Lernverlauf (N-05): Aufgaben, eigene Antworten, Bewertungen, Feedback.
+
+    Nur die eigene Sequenz, auch Lehrpersonen erhalten hier keine fremden
+    Verläufe (sie haben dafür das Monitoring). Interne Angaben wie
+    Adaptionsbegründungen, Antwortzeiten, Fallbacks, Regelverstösse,
+    Musterlösungen und Bewertungselemente bleiben der Lehrperson vorbehalten.
+    """
+    ident = auth.identity(request)
+    if not ident.key:
+        raise HTTPException(401, "Bitte melde dich zuerst an.")
+    s = _session(sid)
+    if s.get("user_key") != ident.key:
+        raise HTTPException(403, "Diese Lernsequenz gehört jemand anderem.")
+    if s["status"] not in VERLAUF_STATUS:
+        raise HTTPException(409, "Den Verlauf kannst du ansehen, sobald die Sequenz pausiert "
+                                 "oder abgeschlossen ist.")
+    eintraege, schwaechen = tutor.verlauf_fuer_lernende(store.get_events(sid))
+    p = s["profile"]
+    return {"session_id": sid, "lesson_titel": _lesson_titles().get(s["lesson_id"], s["lesson_id"]),
+            "status": s["status"], "level_label": tutor.LEVEL_LABELS.get(p.get("level", "basic"), ""),
+            "correct": p.get("correct", 0), "partial": p.get("partial", 0), "wrong": p.get("wrong", 0),
+            "kalibrierung": tutor.kalibrierung(p), "schwaechen": schwaechen, "eintraege": eintraege}
 
 
 def _lesson_titles() -> dict[str, str]:

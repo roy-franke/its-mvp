@@ -832,6 +832,57 @@ def _kalibrierung_deutung(r: float | None, f: float | None) -> str:
             "woran du merkst, dass du etwas wirklich verstanden hast.")
 
 
+# ---------------------------------------------------------------- N-05
+
+def verlauf_fuer_lernende(events: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Baut den Lernverlauf für die lernende Person aus dem Event-Log (N-05).
+
+    Übernommen werden nur ausdrücklich erlaubte Felder (Whitelist), damit neue
+    interne Angaben im Log nie versehentlich bei Lernenden landen.
+    Rückgabe: (Einträge, Schwächen). Schwächen sind Konzepte mit falschen oder
+    teilweise richtigen Antworten, jeweils mit Anker auf die erste Aufgabe.
+    """
+    eintraege: list[dict] = []
+    schwaechen: dict[str, dict] = {}
+    aufgabe = None
+    for ev in events:
+        p, typ, zeit = ev["payload"], ev["type"], ev["created_at"]
+        if typ == "task" and p.get("typ") in ("theorie", "aufgabe"):
+            e = {"art": p["typ"], "id": f"e{ev['id']}", "zeit": zeit,
+                 **{k: p.get(k) for k in ("titel", "inhalt", "frage", "beispiel", "konzept", "quelle")
+                    if p.get(k)}}
+            if p.get("optionen"):
+                e["optionen"] = list(p["optionen"])
+            eintraege.append(e)
+            aufgabe = e if p["typ"] == "aufgabe" else aufgabe
+        elif typ == "answer_submitted":
+            eintraege.append({"art": "antwort", "zeit": zeit, "text": p.get("answer", ""),
+                              "sicherheit": p.get("confidence")})
+        elif typ == "answer_evaluated" and p.get("bewertung") != "unbewertet":
+            bew = p.get("bewertung") or ("korrekt" if p.get("korrekt") else "falsch")
+            eintraege.append({"art": "bewertung", "zeit": zeit, "bewertung": bew,
+                              **{k: p.get(k) for k in ("feedback", "hinweis", "selbsteinschaetzung")
+                                 if p.get(k)}})
+            if bew in ("falsch", "teilweise") and aufgabe:
+                konzept = aufgabe.get("konzept") or aufgabe.get("titel") or "ohne Konzept"
+                eintrag = schwaechen.setdefault(konzept, {"konzept": konzept, "anker": aufgabe["id"],
+                                                          "falsch": 0, "teilweise": 0})
+                eintrag[bew] += 1
+        elif typ == "chat_question":
+            eintraege.append({"art": "frage", "zeit": zeit, "text": p.get("frage", "")})
+        elif typ == "chat_reply":
+            e = {"art": "tutor", "zeit": zeit, "text": p.get("antwort", ""),
+                 "ausserhalb_material": bool(p.get("ausserhalb_material")),
+                 "internet": bool(p.get("internet"))}
+            if p.get("links"):
+                e["links"] = [{"titel": l.get("titel"), "url": l.get("url")} for l in p["links"]]
+            eintraege.append(e)
+        elif typ == "finished":
+            eintraege.append({"art": "abschluss", "zeit": zeit,
+                              **{k: p.get(k) for k in ("zusammenfassung", "empfehlung") if p.get(k)}})
+    return eintraege, list(schwaechen.values())
+
+
 INTERNET_HINWEIS = ("Diese Inhalte stammen aus dem Internet und sind nicht von deiner "
                     "Lehrperson geprüft. Vergleiche sie mit dem Lektionsmaterial.")
 
