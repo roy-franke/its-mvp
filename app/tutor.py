@@ -356,6 +356,13 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
             "Führe das nächste sinnvolle Konzept aus dem Material ein, das noch "
             "nicht behandelt wurde.\n"
         )
+    quellen = didaktik.quellen_der_lektion(lesson)
+    if quellen:
+        # N-01: Die Quellenliste ist konstant, steht aber im Benutzerteil, damit
+        # der Systemprompt für alle Schrittarten gleich bleibt.
+        instruction += ("Das Material ist nach Quellen gegliedert («### Quelle: …»). Gib im Feld "
+                        "quelle genau den Namen der Quelle an, aus der deine Erklärung stammt: "
+                        + ", ".join(quellen) + ".\n")
     instruction += (
         "Erkläre verständlich und strukturiert (4-8 Sätze), passend zum Niveau: was gilt, "
         "und warum bzw. wie es funktioniert. Gib zusätzlich genau ein konkretes Beispiel "
@@ -364,7 +371,8 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         'Format: {"titel": "kurzer Titel", '
         '"inhalt": "die Erklärung ohne das Beispiel", '
         '"beispiel": "das Beispiel mit kurzer Begründung", '
-        '"konzept": "behandeltes Konzept in 1-3 Worten"}'
+        '"konzept": "behandeltes Konzept in 1-3 Worten"'
+        + (', "quelle": "Name der verwendeten Quelle"' if quellen else "") + "}"
     )
     data = llm.chat_json(_system_prompt(lesson), instruction, fallback={},
                          check=lambda d: (didaktik.pruefe_felder(d, ("inhalt", "beispiel"))
@@ -373,7 +381,24 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
     if data.get("_fallback"):
         return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"
+    _quelle_setzen(data, lesson)
     return data
+
+
+def _quelle_setzen(data: dict, lesson: dict) -> None:
+    """N-01: Nur eine Quelle, die es in der Lektion gibt, wird angezeigt.
+
+    Eine erfundene oder fehlende Angabe verschwindet; die ursprüngliche Angabe
+    bleibt für die Lehrperson unter `quelle_verworfen` im Lernverlauf.
+    """
+    angabe = data.pop("quelle", None)
+    if not didaktik.quellen_der_lektion(lesson):
+        return
+    geprueft = didaktik.quelle_pruefen(angabe, lesson)
+    if geprueft:
+        data["quelle"] = geprueft
+    elif angabe:
+        data["quelle_verworfen"] = str(angabe)[:200]
 
 
 def generate_task(lesson: dict, profile: dict, history: list[dict],
@@ -494,7 +519,7 @@ def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
 
 # Felder, die nur der Server und die Lehrperson sehen (nie die Lernenden):
 # Die Musterlösung würde die Aufgabe verraten.
-INTERNE_FELDER = ("erwartete_antwort", "schluesselbegriffe")
+INTERNE_FELDER = ("erwartete_antwort", "schluesselbegriffe", "quelle_verworfen")
 
 
 def fuer_lernende(task: dict | None) -> dict | None:
@@ -875,9 +900,13 @@ def theory_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: d
         return _fehler_schritt(meta)
     idx, abschnitt = treffer
     t = FALLBACK_TEXTE["theorie_material"]
-    return {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
-            "konzept": "", "typ": "theorie", "material_abschnitt": idx,
-            "_fallback": True, "_fehler": meta.get("_fehler", "")}
+    schritt = {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
+               "konzept": "", "typ": "theorie", "material_abschnitt": idx,
+               "_fallback": True, "_fehler": meta.get("_fehler", "")}
+    quelle = didaktik.quelle_fuer_abschnitt(lesson, abschnitt)
+    if quelle:
+        schritt["quelle"] = quelle
+    return schritt
 
 
 def task_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dict) -> dict:

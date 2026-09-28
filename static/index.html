@@ -77,6 +77,7 @@
   .msg.tutor.error { background: #fef2f2; border-color: #fecaca; }
   /* Ergänzung ausserhalb des Lektionsmaterials (D-03, Entscheid E4) */
   .msg.tutor.extern { background: #ecfeff; border-color: #67e8f9; }
+  .msg .quelle { display: block; margin-top: 8px; font-size: .75rem; color: #64748b; }
   .msg.tutor.extern .who { opacity: 1; color: #0e7490; font-weight: 600; }
   .offer { align-self: flex-start; margin: -4px 0 4px; }
 
@@ -358,6 +359,15 @@ function addMsg(cls, text, who) {
   $("chat").insertBefore(div, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
   return div;
+}
+// N-01: kleine Quellenzeile unter einem Theorieschritt. Der Server liefert
+// nur Quellen, die es in der Lektion gibt; ohne Quelle entfällt die Zeile.
+function quellenZeile(div, quelle) {
+  if (!div || !quelle) return;
+  const q = document.createElement("span");
+  q.className = "quelle";
+  q.textContent = "Quelle: " + quelle;
+  div.appendChild(q);
 }
 function addNote(text) {
   const div = document.createElement("div");
@@ -685,8 +695,9 @@ function renderTask(t, adaptation, prefetch) {
     return;
   }
   if (t.typ === "theorie") {
-    addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || "") +
+    const m = addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || "") +
       (t.beispiel ? "\n\n💡 Beispiel: " + t.beispiel : ""), "Tutor – Theorie");
+    quellenZeile(m, t.quelle);
     setTheoryMode();
     // Auf Theorie folgt immer eine Aufgabe – die kann schon entstehen,
     // während der Lernende die Erklärung liest.

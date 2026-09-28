@@ -559,3 +559,61 @@ def pruefe_felder(data: dict, felder: tuple[str, ...]) -> str | None:
     """
     text = "\n".join(str(data.get(f) or "") for f in felder).strip()
     return leere_ankuendigung(text) or sie_anrede(text)
+
+
+# ---------------------------------------------------------------- N-01
+
+_QUELLE_KOPF = re.compile(r"^###\s*Quelle:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def quellen_der_lektion(lesson: dict) -> list[str]:
+    """Namen der Quellen einer Lektion.
+
+    Der Editor setzt das Material aus «### Quelle: <Dateiname>»-Blöcken
+    zusammen; die Quellenliste der Lektion (Feld `quellen`) nennt dieselben
+    Namen. Lektionen ohne Gliederung haben keine Quellen.
+    """
+    namen = [m.strip() for m in _QUELLE_KOPF.findall(lesson.get("material") or "")]
+    namen += [str(q.get("name", "")).strip() for q in lesson.get("quellen") or [] if isinstance(q, dict)]
+    out: list[str] = []
+    for n in namen:
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def _quellen_schluessel(name: str) -> str:
+    n = name.strip().strip("«»\"'`").lower()
+    n = re.sub(r"^(quelle|source)\s*:\s*", "", n)
+    n = re.sub(r"\.[a-z0-9]{2,5}$", "", n)          # Dateiendung
+    return re.sub(r"[\s_\-]+", " ", n).strip()
+
+
+def quelle_pruefen(angabe, lesson: dict) -> str | None:
+    """Gibt den exakten Quellennamen der Lektion zurück, wenn die Angabe des
+    Modells einer existierenden Quelle entspricht, sonst None (N-01).
+
+    Toleriert werden Gross-/Kleinschreibung, fehlende Dateiendung und ein
+    vorangestelltes «Quelle:». Eine erfundene Quelle wird nie angezeigt.
+    """
+    if not isinstance(angabe, str) or not angabe.strip():
+        return None
+    ziel = _quellen_schluessel(angabe)
+    for name in quellen_der_lektion(lesson):
+        if _quellen_schluessel(name) == ziel:
+            return name
+    return None
+
+
+def quelle_fuer_abschnitt(lesson: dict, abschnitt: str) -> str | None:
+    """Aus welcher Quelle stammt ein Materialabschnitt (für Fallback-Schritte)?"""
+    material = lesson.get("material") or ""
+    teile = _QUELLE_KOPF.split(material)
+    # split liefert [vor, name1, text1, name2, text2, ...]
+    probe = re.sub(r"\s+", " ", abschnitt or "").strip()[:80]
+    if not probe:
+        return None
+    for i in range(1, len(teile) - 1, 2):
+        if probe in re.sub(r"\s+", " ", teile[i + 1]):
+            return teile[i].strip()
+    return None

@@ -262,6 +262,15 @@ def _chat_ollama(system: str, user: str, json_mode: bool = False) -> tuple[str, 
     return data["message"]["content"], _ollama_meta(data)
 
 
+def _mock_quelle(user: str) -> dict:
+    """N-01: Der Mock nennt die erste angebotene Quelle, mit ITS_MOCK_QUELLE eine
+    frei gewählte (für den Test einer erfundenen Quelle)."""
+    m = re.search(r"aus der deine Erklärung stammt: (.+?)\.\n", user)
+    if not m:
+        return {}
+    return {"quelle": os.getenv("ITS_MOCK_QUELLE") or m.group(1).split(", ")[0]}
+
+
 def _mock_text(system: str, user: str) -> str:
     """Deterministischer Fake-Provider für Entwicklung und Demos ohne LLM."""
     if "EINSTUFUNGSFRAGEN" in user:
@@ -283,6 +292,7 @@ def _mock_text(system: str, user: str) -> str:
             "inhalt": "Wer einem anderen widerrechtlich Schaden zufügt, muss ihn ersetzen (Art. 41 OR). Damit jemand haftet, braucht es vier Voraussetzungen: einen Schaden, Widerrechtlichkeit, einen Kausalzusammenhang und ein Verschulden. Fehlt eine davon, entfällt die Haftung, weil das Gesetz alle vier verlangt. (Mock-Theorie – für echten Lerninhalt LLM-Provider konfigurieren.)",
             "beispiel": "Du spielst im Hof Fussball und schiesst eine Fensterscheibe ein. Der Schaden ist die kaputte Scheibe, widerrechtlich ist die Verletzung fremden Eigentums, dein Schuss ist die Ursache, und fahrlässig gehandelt hast du auch. Also haftest du.",
             "konzept": "Verschuldenshaftung",
+            **_mock_quelle(user),
         }, ensure_ascii=False)
     if "NAECHSTE_AUFGABE" in user:
         return json.dumps({
