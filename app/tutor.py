@@ -41,6 +41,7 @@ def new_profile() -> dict:
         "theory_steps": 0,      # Anzahl erhaltener Theorie-Schritte (für Analyse)
         "partial": 0,           # Anzahl teilweise korrekter Antworten (für Analyse)
         "confidence": [],       # Sicherheitsangaben 1-10 vor der Bewertung
+        "kalibrierung": [],     # N-04: {confidence, bewertung} pro bewertete Antwort
         "erklaert": [],         # in dieser Sequenz per Theorie erklärte Konzepte (D-02)
         "aufgaben_seit_theorie": 0,
     }
@@ -765,6 +766,70 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
     data["stufe"] = stufe if art in ("theorie", "genauer") else None
     data["angebot"] = None
     return data
+
+
+# ---------------------------------------------------------------- N-04
+
+SICHER_HOCH = 8      # ab hier gilt eine Angabe als «sehr sicher»
+SICHER_TIEF = 3      # bis hier als «unsicher»
+
+
+def selbsteinschaetzung_rueckmeldung(confidence: int | None, bewertung: str) -> str | None:
+    """Ein Satz zur Selbsteinschätzung, nur bei deutlicher Abweichung (N-04).
+
+    Deterministisch, damit die Rückmeldung nicht zur Routine wird: Sie kommt
+    nur, wenn jemand sehr sicher war und falsch lag oder unsicher war und
+    richtig lag. Teilweise richtige Antworten lösen keine Rückmeldung aus.
+    """
+    if confidence is None:
+        return None
+    if bewertung == "falsch" and confidence >= SICHER_HOCH:
+        return (f"Du warst dir sehr sicher ({confidence} von 10), die Antwort stimmt aber nicht. "
+                "Schau dir die Erklärung nochmals genau an: Gerade bei dem, was sich sicher anfühlt, "
+                "lohnt sich ein zweiter Blick.")
+    if bewertung == "korrekt" and confidence <= SICHER_TIEF:
+        return (f"Du warst unsicher ({confidence} von 10), dabei war deine Antwort richtig. "
+                "Du kannst mehr, als du dir zutraust.")
+    return None
+
+
+def kalibrierung(profile: dict) -> dict:
+    """Durchschnittliche Sicherheit bei richtigen und bei nicht richtigen Antworten.
+
+    «Nicht richtig» umfasst falsche und teilweise richtige Antworten. Grundlage
+    ist jede bewertete Antwort mit Sicherheitsangabe (auch Nachbesserungen).
+    """
+    eintraege = [e for e in profile.get("kalibrierung") or []
+                 if isinstance(e.get("confidence"), int) and e.get("bewertung") in BEWERTUNGEN]
+    richtig = [e["confidence"] for e in eintraege if e["bewertung"] == "korrekt"]
+    falsch = [e["confidence"] for e in eintraege if e["bewertung"] != "korrekt"]
+
+    def schnitt(werte):
+        return round(sum(werte) / len(werte), 1) if werte else None
+    r, f = schnitt(richtig), schnitt(falsch)
+    return {"richtig_avg": r, "falsch_avg": f, "n_richtig": len(richtig), "n_falsch": len(falsch),
+            "deutung": _kalibrierung_deutung(r, f)}
+
+
+def _kalibrierung_deutung(r: float | None, f: float | None) -> str:
+    if r is None and f is None:
+        return ""
+    if f is None:
+        return ("Alle Antworten mit Sicherheitsangabe waren richtig." +
+                (" Du darfst dir ruhig mehr zutrauen." if r <= 5 else ""))
+    if r is None:
+        return ("Keine Antwort mit Sicherheitsangabe war ganz richtig. " +
+                ("Du warst dabei recht sicher; prüfe beim Lernen genauer, ob du etwas wirklich "
+                 "verstanden hast." if f >= 6 else "Wiederhole die Grundlagen, bevor du weitergehst."))
+    if r - f >= 2:
+        return ("Deine Sicherheit passt gut zu deinen Ergebnissen: Bei richtigen Antworten warst du "
+                "deutlich sicherer. Auf dieses Gefühl kannst du beim Lernen bauen.")
+    if f >= r:
+        return ("Bei falschen Antworten warst du gleich sicher oder sicherer als bei richtigen. "
+                "Prüfe beim Lernen für die Prüfung gezielt, ob du ein Thema wirklich kannst, "
+                "zum Beispiel mit einer Aufgabe ohne Hilfsmittel.")
+    return ("Deine Sicherheit unterscheidet noch wenig zwischen richtig und falsch. Achte darauf, "
+            "woran du merkst, dass du etwas wirklich verstanden hast.")
 
 
 INTERNET_HINWEIS = ("Diese Inhalte stammen aus dem Internet und sind nicht von deiner "

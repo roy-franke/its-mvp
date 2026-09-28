@@ -81,6 +81,7 @@
   .msg.tutor.extern.web .who { color: #c2410c; }
   .msg ul.links { margin: 8px 0 0; padding-left: 18px; font-size: .85rem; }
   .msg ul.links a { color: #1d4ed8; word-break: break-word; }
+  .msg.tutor.selbst { background: #f5f3ff; border-color: #c4b5fd; }
   .msg .quelle { display: block; margin-top: 8px; font-size: .75rem; color: #64748b; }
   .msg.tutor.extern .who { opacity: 1; color: #0e7490; font-weight: 600; }
   .offer { align-self: flex-start; margin: -4px 0 4px; }
@@ -261,6 +262,7 @@
       <ul id="done-goals"></ul>
       <div class="adaption" id="done-reco" style="border-color:var(--ok);background:#f0fdf4"></div>
       <div class="badges" id="done-stats"></div>
+      <div class="adaption hidden" id="done-kalib" style="border-color:#a78bfa;background:#f5f3ff;margin-top:12px"></div>
       <div class="btnrow"><button id="btn-done-home">Zur Übersicht</button></div>
     </div>
   </div>
@@ -725,6 +727,8 @@ function renderFeedback(d) {
   if (d.hinweis) fb += "\n💡 Hinweis: " + d.hinweis;
   const cls = d.bewertung === "korrekt" ? "good" : d.bewertung === "teilweise" ? "mid" : "bad";
   addMsg("tutor " + cls, fb, "Tutor");
+  // N-04: nur bei deutlicher Abweichung zwischen Sicherheit und Ergebnis
+  if (d.selbsteinschaetzung) addMsg("tutor selbst", "🪞 " + d.selbsteinschaetzung, "Tutor · Selbsteinschätzung");
   if (d.adaption_begruendung) addNote(d.adaption_begruendung);
 }
 
@@ -949,6 +953,15 @@ function renderDone(d) {
     `<span class="badge">✅ ${p.correct} richtig</span>` +
     `<span class="badge">❌ ${p.wrong} falsch</span>` +
     `<span class="badge">Quote: ${Math.round(p.correct_rate * 100)} %</span>`;
+  // N-04: Kalibrierung der Selbsteinschätzung
+  const k = p.kalibrierung || {};
+  const wert = (v, n) => v != null ? `${v} von 10 <span class="muted">(${n} ${n === 1 ? "Antwort" : "Antworten"})</span>` : "–";
+  $("done-kalib").innerHTML = (k.richtig_avg != null || k.falsch_avg != null)
+    ? `<strong>🪞 Deine Selbsteinschätzung</strong><br>
+       Durchschnittliche Sicherheit bei richtigen Antworten: ${wert(k.richtig_avg, k.n_richtig)}<br>
+       bei falschen oder teilweise richtigen Antworten: ${wert(k.falsch_avg, k.n_falsch)}
+       ${k.deutung ? `<br><span>${esc(k.deutung)}</span>` : ""}` : "";
+  $("done-kalib").classList.toggle("hidden", !$("done-kalib").innerHTML);
   renderMath($("view-done"));
   show("view-done");
 }

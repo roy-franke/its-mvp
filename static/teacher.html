@@ -120,6 +120,12 @@ const STATUS = { aktiv:"aktiv", pausiert:"pausiert", abgeschlossen:"abgeschlosse
                  abgebrochen:"abgebrochen", archiviert:"archiviert" };
 function zeit(t) { return t ? new Date(t * 1000).toLocaleString("de-CH") : ""; }
 
+// N-04: Sicherheit bei richtigen und bei nicht richtigen Antworten
+function kalib(k) {
+  if (!k || (k.richtig_avg == null && k.falsch_avg == null)) return "";
+  return `<br><span class="muted" style="font-size:.75rem" title="Durchschnittliche Sicherheit bei richtigen / nicht richtigen Antworten">✅ ${k.richtig_avg ?? "–"} · ❌ ${k.falsch_avg ?? "–"}</span>`;
+}
+
 async function loadSessions() {
   const tests = document.getElementById("show-tests").checked;
   const r = await fetch("/api/teacher/sessions" + (tests ? "?testlaeufe=true" : ""));
@@ -137,7 +143,7 @@ async function loadSessions() {
           <span class="muted">${s.step}/${s.total_steps}</span></td>
       <td>${LABEL[s.level] || s.level}</td>
       <td>${Math.round(s.correct_rate * 100)} %</td>
-      <td>${s.confidence_avg != null ? s.confidence_avg + "/10" : "–"}</td>
+      <td>${s.confidence_avg != null ? s.confidence_avg + "/10" : "–"}${kalib(s.kalibrierung)}</td>
       <td class="muted">${s.covered.map(esc).join(", ") || "–"}</td>
       <td class="muted">${new Date(s.updated_at * 1000).toLocaleString("de-CH")}</td>
     </tr>`).join("");
@@ -167,11 +173,12 @@ async function loadDetail(sid, name) {
         : bew === "unbewertet" ? '<span class="fb">⚠️ nicht bewertet (technischer Fehler)</span>' : "❌ falsch";
       body = `${label}${p.versuch > 1 ? ` <span class="muted">(Versuch ${p.versuch}, zusammen mit den früheren bewertet)</span>` : ""} – ${esc(p.feedback)}`
         + ((p.elemente || []).length ? `<ul class="elemente">${p.elemente.map(e =>
-            `<li class="el-${esc(e.status)}">${e.status === "korrekt" ? "✅" : e.status === "falsch" ? "❌" : "◻️"} ${esc(e.element)} <span class="muted">(${esc(e.status)})</span></li>`).join("")}</ul>` : "")
+            `<li class="el-${esc(e.status)}">${e.status === "korrekt" ? "✅" : e.status === "falsch" ? "❌" : e.status === "ungenau" ? "🔸" : "◻️"} ${esc(e.element)} <span class="muted">(${esc(e.status)})</span></li>`).join("")}</ul>` : "")
         + (p.bewertung_modell ? `<span class="muted">Urteil aus den Elementen abgeleitet; das Modell hatte «${esc(p.bewertung_modell)}» vorgeschlagen.</span><br>` : "")
-        + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "");
+        + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "")
+        + (p.selbsteinschaetzung ? `<br><span class="muted">🪞 ${esc(p.selbsteinschaetzung)}</span>` : "");
     }
-    else if (ev.type === "chat_question") body = `❓ ${p.art === "theorie" ? "«Theorie dazu»" : p.art === "genauer" ? "«Genauer erklären»" : p.art === "allgemeinwissen" ? "Allgemeinwissen angenommen" : "Verständnisfrage"}${p.stufe ? ` <span class="muted">(Stufe ${p.stufe})</span>` : ""}: <em>${esc(p.frage)}</em>`;
+    else if (ev.type === "chat_question") body = `❓ ${p.art === "theorie" ? "«Theorie dazu»" : p.art === "genauer" ? "«Genauer erklären»" : p.art === "allgemeinwissen" ? "Allgemeinwissen angenommen" : p.art === "internet" ? "Internetrecherche angenommen" : "Verständnisfrage"}${p.stufe ? ` <span class="muted">(Stufe ${p.stufe})</span>` : ""}: <em>${esc(p.frage)}</em>`;
     else if (ev.type === "chat_reply") body = `💬 Tutor${p.internet ? ' <span class="pill test">Internet</span>' : p.ausserhalb_material ? ' <span class="pill test">ausserhalb Material</span>' : ""}: ${esc(p.antwort)}${(p.links || []).length ? "<br>" + p.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.titel)}</a>`).join(" · ") : ""}${p.suchanfrage ? `<br><span class="muted">Suchanfrage: ${esc(p.suchanfrage)}</span>` : ""}`
       + (p.aehnlichkeit != null ? `<br><span class="muted">Ähnlichkeit zu bisherigen Erklärungen: ${Math.round(p.aehnlichkeit * 100)} %</span>` : "");
     else if (ev.type === "finished") body = `🎉 Abgeschlossen – ${esc(p.zusammenfassung)}`;

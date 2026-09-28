@@ -610,6 +610,9 @@ def answer(sid: str, req: AnswerRequest, request: Request):
                 "progress": _progress(profile)}
     if confidence is not None:
         profile.setdefault("confidence", []).append(confidence)
+        profile.setdefault("kalibrierung", []).append({"confidence": confidence,
+                                                       "bewertung": result["bewertung"]})
+    selbsteinschaetzung = tutor.selbsteinschaetzung_rueckmeldung(confidence, result["bewertung"])
     kontext = {
         "einsatzart": _einsatzart(lesson),
         "konzept_erklaert": tutor.konzept_erklaert(task.get("konzept"), profile.get("erklaert") or []),
@@ -634,6 +637,8 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         "elemente": result.get("elemente", []),
         "bewertung_modell": result.get("bewertung_modell"),
         "versuch": len(vorher) + 1,
+        "confidence": confidence,
+        "selbsteinschaetzung": selbsteinschaetzung,
     })
     if action == "retry":
         profile["antworten_aktuell"] = vorher + [{"antwort": req.answer, "bewertung": result["bewertung"],
@@ -646,6 +651,7 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         "bewertung": result["bewertung"], "feedback": result.get("feedback", ""),
         "hinweis": result.get("hinweis", ""), "adaption": action,
         "adaption_begruendung": reason, "finished": finished,
+        "selbsteinschaetzung": selbsteinschaetzung,
     }
     store.update_session(sid, profile=profile)
     return {
@@ -656,6 +662,7 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         "adaption": action,           # next | retry | simplify | explain
         "adaption_begruendung": reason,
         "niveau_frage": niveau_frage,
+        "selbsteinschaetzung": selbsteinschaetzung,
         "finished": finished,
         "progress": _progress(profile),
     }
@@ -901,6 +908,7 @@ def _progress(profile: dict) -> dict:
         "partial": profile.get("partial", 0),
         "confidence_avg": (round(sum(c) / len(c), 1)
                            if (c := profile.get("confidence", [])) else None),
+        "kalibrierung": tutor.kalibrierung(profile),
         "niveauanpassung": profile.get("niveauanpassung", "automatisch"),
         "niveau_fixiert": bool(profile.get("niveau_fixiert")),
         "niveau_frage_offen": bool(profile.get("niveau_frage_offen")),
@@ -971,6 +979,7 @@ def teacher_sessions(testlaeufe: bool = False):
             "correct_rate": tutor.correct_rate(p) if "correct" in p else 0.0,
             "confidence_avg": (round(sum(c) / len(c), 1)
                                if (c := p.get("confidence", [])) else None),
+            "kalibrierung": tutor.kalibrierung(p),
             "covered": p.get("covered", []),
             "testlauf": bool(s.get("testlauf")),
             "status": s.get("status", "aktiv"),
