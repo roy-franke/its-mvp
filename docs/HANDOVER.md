@@ -82,6 +82,14 @@ Tutor-Einstellungen pro Lektion (`app/einstellungen.py`), Regelkatalog
 Bewertung in zwei Schritten mit Elementen, Materialprüfung im Editor.
 Details pro Paket in den Statusnotizen `claude/status-*.md` im Claude-Projekt.
 
+Phase 4 (28.9.2026): Quellenzeile unter Theorieschritten mit Prüfung gegen die
+«### Quelle:»-Blöcke (N-01), Lehrpersonen-Sicht mit Seitenleiste, Filtern und
+Zeitleiste (N-02), Internetrecherche als dritte Wissensstufe über SearXNG,
+global mit `ITS_WEB_SEARCH` abschaltbar und standardmässig aus (N-03, Modul
+`app/websuche.py`), Rückmeldung zur Selbsteinschätzung und Kalibrierung
+(N-04), eigener Lernverlauf für Lernende über eine Whitelist aus dem Event-Log
+(N-05, `tutor.verlauf_fuer_lernende`). Bewertung läuft mit Temperatur 0.
+
 Prüfwerkzeuge neben pytest: `tests/ui/ui_checks.py` (Playwright gegen eine
 eigens gestartete Instanz) und `tests/eval/eval_didaktik.py` (Evaluation der
 didaktischen Pakete gegen das echte Modell, schreibt einen Bericht nach
@@ -178,7 +186,7 @@ weil Port 8000 von der anderen Anwendung belegt ist. Merksatz: Pro Rechner
 genau ein Tunnel und ein cloudflared-Dienst; weitere Anwendungen kommen als
 zusätzliche Routen mit eigenem Port dazu, nicht als zweiter Tunnel.
 Noch offen: gleiches Tunnel-Muster später für RIB-AI-01 im Pilot.
-2. **Anpassungen aus dem ersten Testdurchlauf – Phasen 1 bis 3 UMGESETZT (27.9.2026)**: T-01 bis T-07 und D-01 bis D-06. Als Nächstes: `python tests/eval/eval_didaktik.py` mit qwen3:30b laufen lassen, Bericht sichten, dann einen Testdurchlauf mit echtem Modell. Phase 4 (N-01 bis N-05: Quellenverweise, Auswertungsansicht mit Seitenleiste, Internetrecherche, Rückmeldung zur Selbsteinschätzung, Lernverlauf für Lernende) erst danach. Material der Quantenphysik-Lektion überarbeiten (D-06).
+2. **Anpassungen aus dem ersten Testdurchlauf – Phasen 1 bis 4 UMGESETZT (27./28.9.2026)**: T-01 bis T-07, D-01 bis D-06 und N-01 bis N-05. Evaluation mit qwen3:30b gelaufen (Berichte unter `tests/eval/berichte/`, Befunde in den Statusnotizen D-01 und D-05). Offen: Klassentest mit echtem Modell, Material der Quantenphysik-Lektion überarbeiten (D-06), für die Internetrecherche einen SearXNG-Dienst aufsetzen. Kandidat für später: Bewertungselemente schon bei der Aufgabengenerierung festlegen statt bei jeder Bewertung neu (siehe D-05).
 3. **Prompt-Tuning** mit Roys Praxisbeobachtungen auf Basis der Evaluationsberichte (Vergleich Ollama vs. Cloud als Evaluationsergebnis).
 4. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
 5. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.
