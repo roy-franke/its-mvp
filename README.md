@@ -129,6 +129,8 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `OLLAMA_NUM_PREDICT` | Obergrenze für die Antwortlänge in Token (Standard 1024) |
 | `OLLAMA_THINK` | Denkmodus von Reasoning-Modellen (`false` = schnell, Standard) |
 | `ITS_BEWERTUNG_TEMPERATUR` | Temperatur der Antwortbewertung (Standard `0`, damit dieselbe Antwort gleich bewertet wird) |
+| `ITS_WEB_SEARCH` | Internetrecherche als dritte Wissensstufe (`false` = aus, Standard). Wirkt nur in Lektionen, die sie freigeben |
+| `ITS_SEARXNG_URL` | Adresse eines SearXNG-Dienstes mit JSON-Ausgabe, z.B. `http://localhost:8888` |
 | `LLM_TIMEOUT` | Zeitlimit pro LLM-Aufruf in Sekunden (Standard 300) |
 | `OLLAMA_FORMAT_JSON` | Ollama erzwingt gültiges JSON, wo der Tutor JSON erwartet (Standard `true`) |
 | `ITS_MOCK_DELAY` | Nur für Tests: Verzögerung des Mock-Providers in Sekunden |

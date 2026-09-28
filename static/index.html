@@ -77,6 +77,10 @@
   .msg.tutor.error { background: #fef2f2; border-color: #fecaca; }
   /* Ergänzung ausserhalb des Lektionsmaterials (D-03, Entscheid E4) */
   .msg.tutor.extern { background: #ecfeff; border-color: #67e8f9; }
+  .msg.tutor.extern.web { background: #fff7ed; border-color: #fdba74; }
+  .msg.tutor.extern.web .who { color: #c2410c; }
+  .msg ul.links { margin: 8px 0 0; padding-left: 18px; font-size: .85rem; }
+  .msg ul.links a { color: #1d4ed8; word-break: break-word; }
   .msg .quelle { display: block; margin-top: 8px; font-size: .75rem; color: #64748b; }
   .msg.tutor.extern .who { opacity: 1; color: #0e7490; font-weight: 600; }
   .offer { align-self: flex-start; margin: -4px 0 4px; }
@@ -800,12 +804,33 @@ async function sendChat(text, art) {
   setChatBusy(true);
   try {
     const d = await api(`/session/${sessionId}/chat`, { message: text, art: art || "frage" });
-    if (d.ausserhalb_material) {
+    if (d.internet) {
+      // N-03: Internetrecherche mit Quellenlinks und Hinweis auf fehlende Prüfung
+      const m = addMsg("tutor extern web", d.antwort,
+        "Tutor · Internetrecherche, nicht von der Lehrperson geprüft");
+      if ((d.links || []).length) {
+        const ul = document.createElement("ul");
+        ul.className = "links";
+        for (const l of d.links) {
+          const li = document.createElement("li");
+          const a = document.createElement("a");
+          a.href = l.url; a.textContent = l.titel || l.url;
+          a.target = "_blank"; a.rel = "noopener noreferrer";
+          li.appendChild(a); ul.appendChild(li);
+        }
+        m.appendChild(ul);
+      }
+      if (d.hinweis) {
+        const h = document.createElement("span");
+        h.className = "quelle"; h.textContent = "⚠️ " + d.hinweis;
+        m.appendChild(h);
+      }
+    } else if (d.ausserhalb_material) {
       addMsg("tutor extern", d.antwort, "Tutor · Ergänzung ausserhalb des Lektionsmaterials");
     } else {
       addMsg("tutor", d.antwort, "Tutor");
     }
-    if (d.angebot === "allgemeinwissen") addOffer();
+    if (d.angebot === "allgemeinwissen" || d.angebot === "internet") addOffer(d.angebot);
     if (d.progress) { renderProgress(d.progress); pendingNext = null; }
   } catch (e) { addError(e); }
   finally { setChatBusy(false); }
@@ -851,14 +876,16 @@ $("level-control").onchange = async () => {
 };
 
 // Angebot nach ausgeschöpftem Material: Erklärung aus Allgemeinwissen
-function addOffer() {
+function addOffer(art) {
+  const internet = art === "internet";
   const btn = document.createElement("button");
   btn.className = "small secondary action offer";
-  btn.textContent = "Ja, erklär es mir mit Allgemeinwissen";
+  btn.textContent = internet ? "Ja, schau im Internet nach" : "Ja, erklär es mir mit Allgemeinwissen";
   btn.onclick = () => {
     if (busy) return;
     btn.remove();
-    sendChat("Erklär es mir bitte mit Allgemeinwissen.", "allgemeinwissen");
+    if (internet) sendChat("Schau bitte im Internet nach.", "internet");
+    else sendChat("Erklär es mir bitte mit Allgemeinwissen.", "allgemeinwissen");
   };
   $("chat").insertBefore(btn, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;

@@ -172,7 +172,7 @@ async function loadDetail(sid, name) {
         + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "");
     }
     else if (ev.type === "chat_question") body = `❓ ${p.art === "theorie" ? "«Theorie dazu»" : p.art === "genauer" ? "«Genauer erklären»" : p.art === "allgemeinwissen" ? "Allgemeinwissen angenommen" : "Verständnisfrage"}${p.stufe ? ` <span class="muted">(Stufe ${p.stufe})</span>` : ""}: <em>${esc(p.frage)}</em>`;
-    else if (ev.type === "chat_reply") body = `💬 Tutor${p.ausserhalb_material ? ' <span class="pill test">ausserhalb Material</span>' : ""}: ${esc(p.antwort)}`
+    else if (ev.type === "chat_reply") body = `💬 Tutor${p.internet ? ' <span class="pill test">Internet</span>' : p.ausserhalb_material ? ' <span class="pill test">ausserhalb Material</span>' : ""}: ${esc(p.antwort)}${(p.links || []).length ? "<br>" + p.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.titel)}</a>`).join(" · ") : ""}${p.suchanfrage ? `<br><span class="muted">Suchanfrage: ${esc(p.suchanfrage)}</span>` : ""}`
       + (p.aehnlichkeit != null ? `<br><span class="muted">Ähnlichkeit zu bisherigen Erklärungen: ${Math.round(p.aehnlichkeit * 100)} %</span>` : "");
     else if (ev.type === "finished") body = `🎉 Abgeschlossen – ${esc(p.zusammenfassung)}`;
     else if (ev.type === "fallback_used") body = `⚠️ <strong>Fallback</strong> bei ${esc(SCHRITT[p.schrittart] || p.schrittart)} – Grund: <span class="muted">${esc(p.grund)}</span>`;

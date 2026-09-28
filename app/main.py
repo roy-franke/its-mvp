@@ -140,7 +140,8 @@ class AnswerRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     # frage (freie Verständnisfrage) | theorie («Theorie dazu») |
-    # genauer («Genauer erklären») | allgemeinwissen (Angebot angenommen)
+    # genauer («Genauer erklären») | allgemeinwissen (Angebot angenommen) |
+    # internet (Recherche angenommen, N-03)
     art: str = "frage"
 
 
@@ -222,6 +223,13 @@ def lesson_create(req: LessonCreateRequest):
     _save_lesson(lesson)
     log.info("Lektion erstellt: %s", lesson_id)
     return {"id": lesson_id, "titel": felder["titel"]}
+
+
+@teacher_api.get("/websuche")
+def websuche_status():
+    """N-03: Ist die Internetrecherche auf diesem Server eingeschaltet?"""
+    from . import websuche
+    return {"aktiv": websuche.aktiv()}
 
 
 @teacher_api.get("/lessons")
@@ -662,8 +670,11 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
     message = req.message.strip()
     if not message:
         raise HTTPException(400, "Leere Nachricht")
-    art = req.art if req.art in ("frage", "theorie", "genauer", "allgemeinwissen") else "frage"
+    art = req.art if req.art in ("frage", "theorie", "genauer", "allgemeinwissen", "internet") else "frage"
     if art == "allgemeinwissen" and not einstellungen.allgemeinwissen_erlaubt(lesson):
+        art = "frage"
+    if art == "internet" and not einstellungen.internet_erlaubt(lesson):
+        # N-03: ausgeschaltet oder nicht freigegeben, dann kein Aufruf nach aussen
         art = "frage"
     task = profile.get("current_task")
     stufe = None
@@ -672,7 +683,12 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
         store.update_session(sid, profile=profile)
     store.log_event(sid, "chat_question", {"frage": message, "art": art, "stufe": stufe})
     history = store.get_events(sid)
-    result = tutor.answer_question(lesson, profile, task, message, history, art, stufe)
+    if art == "internet":
+        result = tutor.answer_internet(lesson, profile, task)
+    else:
+        result = tutor.answer_question(lesson, profile, task, message, history, art, stufe)
+    if art == "allgemeinwissen" and not result.get("_fallback") and einstellungen.internet_erlaubt(lesson):
+        result["angebot"] = "internet"       # nächste Stufe anbieten
     _log_llm_meta(sid, "FRAGE_BEANTWORTEN", result)
     antwort = result.get("antwort", "")
     niveau = None
@@ -702,11 +718,15 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
     store.log_event(sid, "chat_reply", {
         "antwort": antwort, "art": art, "stufe": stufe, "konzept": result.get("konzept", ""),
         "ausserhalb_material": ausserhalb, "angebot": result.get("angebot"),
+        "internet": bool(result.get("internet")), "links": result.get("links") or [],
+        "suchanfrage": result.get("suchanfrage"),
         "aehnlichkeit": round(didaktik.aehnlichkeit(
             antwort, tutor.bisherige_erklaerungen(history, result.get("konzept", ""))), 2)
         if art in ("theorie", "genauer") and stufe and stufe < 3 else None,
     })
     return {"antwort": antwort, "ausserhalb_material": ausserhalb,
+            "internet": bool(result.get("internet")), "links": result.get("links") or [],
+            "hinweis": result.get("hinweis"),
             "angebot": result.get("angebot"), "stufe": stufe, "progress": niveau}
 
 

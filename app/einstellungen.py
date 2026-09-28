@@ -37,6 +37,7 @@ EINSTELLUNGEN: dict[str, dict] = {
         "werte": {
             "material": "Lektionsmaterial (immer)",
             "allgemeinwissen": "Allgemeinwissen des Modells, gekennzeichnet",
+            "internet": "Internetrecherche mit Quellenlinks, nicht von der Lehrperson geprüft",
         },
         "standard": ["material", "allgemeinwissen"],
         "liste": True,
@@ -77,3 +78,9 @@ def validate(roh: dict | None) -> dict:
 
 def allgemeinwissen_erlaubt(lesson: dict) -> bool:
     return "allgemeinwissen" in settings(lesson)["wissensstufen"]
+
+
+def internet_erlaubt(lesson: dict) -> bool:
+    """N-03: in der Lektion freigegeben UND auf dem Server eingeschaltet."""
+    from . import websuche
+    return "internet" in settings(lesson)["wissensstufen"] and websuche.aktiv()

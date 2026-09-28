@@ -12,7 +12,7 @@ import json
 import os
 import re
 
-from . import didaktik, einstellungen, llm
+from . import didaktik, einstellungen, llm, websuche
 
 LEVELS = ["basic", "intermediate", "advanced"]
 
@@ -668,6 +668,11 @@ def eskalationsstufe(profile: dict, konzept: str) -> int:
 def ausgeschoepft(lesson: dict, konzept: str) -> dict:
     """Stufe 3: ehrliche Aussage ohne LLM-Aufruf, verbunden mit einem Angebot."""
     k = f"«{konzept}»" if konzept else "diesem Thema"
+    if not einstellungen.allgemeinwissen_erlaubt(lesson) and einstellungen.internet_erlaubt(lesson):
+        return {"antwort": f"Zu {k} habe ich dir alles gezeigt, was das Lektionsmaterial hergibt. "
+                           "Ich kann für dich im Internet nachschauen. Solche Inhalte sind nicht "
+                           "von deiner Lehrperson geprüft und entsprechend markiert.",
+                "angebot": "internet"}
     if einstellungen.allgemeinwissen_erlaubt(lesson):
         return {"antwort": f"Zu {k} habe ich dir alles gezeigt, was das Lektionsmaterial hergibt. "
                            "Ich kann es dir zusätzlich mit Allgemeinwissen erklären. Das geht "
@@ -760,6 +765,53 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
     data["stufe"] = stufe if art in ("theorie", "genauer") else None
     data["angebot"] = None
     return data
+
+
+INTERNET_HINWEIS = ("Diese Inhalte stammen aus dem Internet und sind nicht von deiner "
+                    "Lehrperson geprüft. Vergleiche sie mit dem Lektionsmaterial.")
+
+
+def answer_internet(lesson: dict, profile: dict, task: dict | None) -> dict:
+    """N-03, Stufe 3 der Wissensquellen: Erklärung aus einer Internetrecherche.
+
+    An den Suchdienst geht nur die fachliche Suchanfrage (Konzept und Titel),
+    nie Name, Antworten oder Chattext. Die Antwort nennt die verwendeten
+    Treffer als Links und trägt einen Hinweis auf die fehlende Prüfung.
+    Die Bewertung von Antworten bleibt davon unberührt ans Material gebunden.
+    """
+    konzept = (task or {}).get("konzept") or ""
+    anfrage = websuche.suchanfrage(lesson, konzept)
+    treffer = websuche.suchen(anfrage)
+    basis = {"konzept": konzept, "ausserhalb_material": True, "internet": True,
+             "suchanfrage": anfrage, "stufe": None, "angebot": None}
+    if not treffer:
+        return dict(basis, antwort="Die Internetrecherche hat gerade nichts Brauchbares geliefert. "
+                                   "Frag am besten deine Lehrperson.", links=[], angebot="lehrperson",
+                    ausserhalb_material=False, internet=False)
+    liste = "\n".join(f"[{i + 1}] {t['titel']} ({t['url']}): {t['auszug']}" for i, t in enumerate(treffer))
+    data = llm.chat_json(
+        _system_prompt(lesson),
+        "AUFGABE: FRAGE_BEANTWORTEN\n"
+        f"Aktuelles Konzept: {konzept}\n"
+        f"Niveau des Lernenden: {profile['level']}.\n"
+        "INTERNETRECHERCHE: Das Lektionsmaterial ist zu diesem Konzept ausgeschöpft, der Lernende "
+        "hat eine Recherche im Internet angenommen. Erkläre das Konzept verständlich (3-7 Sätze) "
+        "NUR anhand dieser Suchergebnisse. Widerspricht ein Ergebnis dem Lektionsmaterial, gilt "
+        "das Material. Gib in quellen die Nummern der Ergebnisse an, die du verwendet hast. "
+        "Verrate die Lösung der aktuellen Aufgabe nicht.\n"
+        f"Suchergebnisse:\n{liste}\n\n"
+        'Format: {"antwort": "...", "quellen": [1, 2]}',
+        fallback=dict(FALLBACK_TEXTE["frage"]),
+        check=lambda d: didaktik.pruefe_felder(d, ("antwort",)),
+    )
+    if data.get("_fallback"):
+        return dict(data, konzept=konzept, links=[], ausserhalb_material=False, internet=False,
+                    stufe=None, angebot=None)
+    nummern = [n for n in (data.get("quellen") or []) if isinstance(n, int) and 1 <= n <= len(treffer)]
+    links = [{"titel": treffer[n - 1]["titel"], "url": treffer[n - 1]["url"]}
+             for n in dict.fromkeys(nummern)] or [{"titel": t["titel"], "url": t["url"]} for t in treffer]
+    return dict(basis, antwort=data.get("antwort", ""), links=links, hinweis=INTERNET_HINWEIS,
+                **{k: v for k, v in data.items() if k.startswith("_")})
 
 
 def generate_summary(lesson: dict, profile: dict, history: list[dict]) -> dict:

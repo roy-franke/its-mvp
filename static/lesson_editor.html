@@ -166,6 +166,13 @@
           <span class="sub">Reicht das Material nicht, darf der Tutor auf Nachfrage mit eigenem Wissen
             erklären. Solche Ergänzungen sind für Lernende deutlich gekennzeichnet. Bewertet wird
             immer nur anhand des Materials.</span></span></label>
+      <label style="font-weight:600;display:flex;gap:8px;align-items:flex-start">
+        <input type="checkbox" id="s-internet" style="margin-top:4px">
+        <span>Internetrecherche erlauben
+          <span class="sub">Ist das Material ausgeschöpft, darf der Tutor auf Nachfrage im Internet
+            nachschauen. Die Antwort zeigt die Quellen als Links und den Hinweis, dass sie nicht von
+            dir geprüft sind. An den Suchdienst gehen nur Konzept und Lektionstitel, nie Namen oder
+            Antworten. <span id="websuche-status"></span></span></span></label>
     </div>
 
     <label>5. Material prüfen <span class="sub">– optional: Deckt das Material jedes Lernziel mit
@@ -439,7 +446,8 @@ function collectSettings() {
     einsatzart: $("s-einsatzart").value,
     niveauanpassung: $("s-niveauanpassung").value,
     bewertungsstrenge: $("s-bewertungsstrenge").value,
-    wissensstufen: $("s-allgemeinwissen").checked ? ["material", "allgemeinwissen"] : ["material"],
+    wissensstufen: ["material"].concat($("s-allgemeinwissen").checked ? ["allgemeinwissen"] : [],
+                                       $("s-internet").checked ? ["internet"] : []),
   };
 }
 function applySettings(e) {
@@ -447,7 +455,10 @@ function applySettings(e) {
   if (e.einsatzart) $("s-einsatzart").value = e.einsatzart;
   if (e.niveauanpassung) $("s-niveauanpassung").value = e.niveauanpassung;
   if (e.bewertungsstrenge) $("s-bewertungsstrenge").value = e.bewertungsstrenge;
-  if (e.wissensstufen) $("s-allgemeinwissen").checked = e.wissensstufen.includes("allgemeinwissen");
+  if (e.wissensstufen) {
+    $("s-allgemeinwissen").checked = e.wissensstufen.includes("allgemeinwissen");
+    $("s-internet").checked = e.wissensstufen.includes("internet");
+  }
 }
 
 /* ------------------------------------------------------- Bearbeiten (T-07) */
@@ -499,6 +510,13 @@ async function loadForEdit() {
 
 renderSources();
 if (editId) loadForEdit();
+// N-03: zeigen, ob die Recherche auf dem Server überhaupt eingeschaltet ist
+fetch("/api/teacher/websuche").then(r => r.ok ? r.json() : null).then(d => {
+  if (!d) return;
+  document.getElementById("websuche-status").textContent = d.aktiv
+    ? "Auf diesem Server eingeschaltet."
+    : "Auf diesem Server ausgeschaltet (ITS_WEB_SEARCH), die Einstellung wirkt erst nach dem Einschalten.";
+}).catch(() => {});
 </script>
 </body>
 </html>
