@@ -995,6 +995,7 @@ def _owned(request: Request, sid: str, aktion: bool = False) -> dict:
 def teacher_sessions(testlaeufe: bool = False):
     """Monitoring-Übersicht. Testläufe von Lehrpersonen nur mit ?testlaeufe=true (E3)."""
     out = []
+    titel = _lesson_titles()
     for s in store.list_sessions():
         if s.get("testlauf") and not testlaeufe:
             continue
@@ -1002,7 +1003,9 @@ def teacher_sessions(testlaeufe: bool = False):
         out.append({
             "session_id": s["id"],
             "name": s["name"],
+            "user_key": s.get("user_key"),
             "lesson_id": s["lesson_id"],
+            "lesson_titel": titel.get(s["lesson_id"], s["lesson_id"]),
             "phase": s["phase"],
             "step": p.get("step", 0),
             "total_steps": tutor.total_steps(),
@@ -1029,7 +1032,10 @@ def teacher_session_detail(sid: str):
         "session": {"id": s["id"], "name": s["name"], "phase": s["phase"],
                     "status": s.get("status"), "status_at": s.get("status_at"),
                     "archived_at": s.get("archived_at"),
-                    "testlauf": bool(s.get("testlauf")), "profile": s["profile"]},
+                    "testlauf": bool(s.get("testlauf")), "profile": s["profile"],
+                    "lesson_id": s["lesson_id"],
+                    "lesson_titel": _lesson_titles().get(s["lesson_id"], s["lesson_id"]),
+                    "kalibrierung": tutor.kalibrierung(s["profile"])},
         "events": store.get_events(sid),
     }
 

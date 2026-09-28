@@ -13,33 +13,53 @@
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,sans-serif;
          background:var(--bg); color:var(--text); }
-  .wrap { max-width: 1000px; margin:0 auto; padding:24px 16px 80px; }
-  header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:20px; }
-  header h1 { font-size:1.25rem; margin:0; }
-  header a { color:var(--muted); font-size:.85rem; text-decoration:none; }
+  header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;
+           padding:14px 20px; background:var(--card); border-bottom:1px solid var(--border);
+           position:sticky; top:0; z-index:5; }
+  header h1 { font-size:1.15rem; margin:0; }
+  header nav a { color:var(--muted); font-size:.85rem; text-decoration:none; margin-left:14px; }
+  .layout { display:grid; grid-template-columns: 300px 1fr; min-height: calc(100vh - 56px); }
+  /* ---- Seitenleiste (N-02) */
+  aside { background:var(--card); border-right:1px solid var(--border); padding:14px;
+          overflow-y:auto; max-height: calc(100vh - 56px); position:sticky; top:56px; }
+  aside h2 { font-size:.8rem; text-transform:uppercase; color:var(--muted); margin:0 0 8px; }
+  .filters { display:grid; gap:8px; margin-bottom:12px; font-size:.85rem; }
+  .filters select, .filters input[type=search] { width:100%; padding:6px 8px; border:1px solid var(--border);
+          border-radius:6px; font:inherit; }
+  .filters label.cb { color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .person { margin-bottom:10px; }
+  .person-name { font-weight:600; font-size:.9rem; padding:4px 2px; }
+  .seq-item { display:block; width:100%; text-align:left; background:none; border:1px solid transparent;
+              border-radius:8px; padding:6px 8px; cursor:pointer; font:inherit; font-size:.82rem; color:inherit; }
+  .seq-item:hover { background:#f8fafc; border-color:var(--border); }
+  .seq-item.active { background:#eff6ff; border-color:#bfdbfe; }
+  .seq-item .meta { color:var(--muted); font-size:.75rem; }
+  main { padding:20px; min-width:0; }
+  .tabs { display:flex; gap:6px; margin-bottom:14px; }
+  .tabs button { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 14px;
+                 cursor:pointer; font:inherit; font-size:.85rem; }
+  .tabs button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
   .card { background:var(--card); border:1px solid var(--border); border-radius:12px;
           padding:20px; margin-bottom:16px; }
   table { width:100%; border-collapse:collapse; font-size:.9rem; }
   th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); }
   th { color:var(--muted); font-weight:600; font-size:.8rem; text-transform:uppercase; }
-  tr.clickable { cursor:pointer; }
-  tr.clickable:hover { background:#f8fafc; }
-  .pill { font-size:.75rem; padding:2px 10px; border-radius:999px; border:1px solid var(--border); }
-  .pill.finished { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
-  .pill.learning { background:#eff6ff; color:var(--accent); border-color:#bfdbfe; }
+  .pill { font-size:.72rem; padding:2px 9px; border-radius:999px; border:1px solid var(--border); white-space:nowrap; }
   .pill.st-aktiv { background:#eff6ff; color:var(--accent); border-color:#bfdbfe; }
   .pill.st-pausiert { background:#fffbeb; color:#d97706; border-color:#fde68a; }
   .pill.st-abgeschlossen { background:#f0fdf4; color:#16a34a; border-color:#bbf7d0; }
   .pill.st-abgebrochen { background:#fef2f2; color:#dc2626; border-color:#fecaca; }
   .pill.st-archiviert { background:#f1f5f9; color:#64748b; }
-  .event.status_geaendert { border-color:#64748b; }
-  .event.niveau_geaendert, .event.niveau_wunsch, .event.niveau_frage, .event.niveau_entscheid { border-color:#0891b2; }
   .pill.test { background:#f5f3ff; color:#7c3aed; border-color:#ddd6fe; }
-  .pill.assessment { background:#fffbeb; color:#d97706; border-color:#fde68a; }
   .bar { width:120px; height:8px; background:var(--border); border-radius:4px; overflow:hidden; display:inline-block; vertical-align:middle; }
   .bar > div { height:100%; background:var(--accent); }
+  .kopf { display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; font-size:.88rem; margin-top:8px; }
+  /* ---- Zeitleiste */
+  .timeline { position:relative; margin-left:8px; }
   .event { border-left:3px solid var(--border); padding:8px 12px; margin:6px 0; font-size:.88rem; }
   .event .t { color:var(--muted); font-size:.75rem; }
+  .event.status_geaendert { border-color:#64748b; }
+  .event.niveau_geaendert, .event.niveau_wunsch, .event.niveau_frage, .event.niveau_entscheid { border-color:#0891b2; }
   .event.task { border-color:var(--accent); }
   .event.answer_evaluated.ok { border-color:#16a34a; }
   .event.answer_evaluated.nok { border-color:#dc2626; }
@@ -51,110 +71,232 @@
   .muted { color:var(--muted); }
   button.small { background:none; border:1px solid var(--border); border-radius:6px;
                  padding:4px 12px; cursor:pointer; font-size:.8rem; }
+  #btn-sidebar { display:none; }
   pre { white-space:pre-wrap; margin:4px 0 0; font:inherit; }
+  .hidden { display:none !important; }
+  /* ---- schmale Bildschirme: Seitenleiste klappt ein */
+  @media (max-width: 800px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { position:static; max-height:none; border-right:0; border-bottom:1px solid var(--border); }
+    aside.eingeklappt { display:none; }
+    #btn-sidebar { display:inline-block; }
+    main { padding:14px; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1>👩‍🏫 ITS – Lehrpersonen-Monitoring</h1>
-    <span>
-      <a href="/teacher/lessons" style="margin-right:14px">📚 Lektionen verwalten</a>
-      <a href="/teacher/lessons/new" style="margin-right:14px">＋ Neue Lektion</a>
-      <a href="/" style="margin-right:14px">Zur Lernenden-Ansicht</a>
-      <a href="/teacher/logout">Abmelden</a>
-    </span>
-  </header>
+<header>
+  <span style="display:flex;gap:10px;align-items:center">
+    <button class="small" id="btn-sidebar" aria-controls="sidebar" aria-expanded="false">☰ Lernende</button>
+    <h1>👩‍🏫 ITS – Monitoring</h1>
+  </span>
+  <nav>
+    <a href="/teacher/lessons">📚 Lektionen verwalten</a>
+    <a href="/teacher/lessons/new">＋ Neue Lektion</a>
+    <a href="/">Zur Lernenden-Ansicht</a>
+    <a href="/teacher/logout">Abmelden</a>
+  </nav>
+</header>
 
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <strong>Aktive und abgeschlossene Lernsequenzen</strong>
-      <span>
-        <label class="muted" style="font-size:.85rem;margin-right:12px">
-          <input type="checkbox" id="show-tests" onchange="loadSessions()"> Testläufe anzeigen</label>
-        <button class="small" onclick="loadSessions()">Aktualisieren</button>
-      </span>
+<div class="layout">
+  <aside id="sidebar">
+    <h2>Lernende und Sequenzen</h2>
+    <div class="filters">
+      <input type="search" id="f-name" placeholder="Name suchen" aria-label="Name suchen">
+      <select id="f-lektion" aria-label="Lektion"><option value="">Alle Lektionen</option></select>
+      <select id="f-status" aria-label="Status">
+        <option value="">Alle Status</option>
+        <option value="aktiv">aktiv</option><option value="pausiert">pausiert</option>
+        <option value="abgeschlossen">abgeschlossen</option><option value="abgebrochen">abgebrochen</option>
+        <option value="archiviert">archiviert</option>
+      </select>
+      <label class="cb"><input type="checkbox" id="show-tests"> Testläufe anzeigen</label>
     </div>
-    <table>
-      <thead><tr>
-        <th>Name</th><th>Lektion</th><th>Status</th><th>Fortschritt</th><th>Niveau</th>
-        <th>Quote</th><th>Sicherheit</th><th>Konzepte</th><th>Zuletzt aktiv</th>
-      </tr></thead>
-      <tbody id="rows"></tbody>
-    </table>
-    <p class="muted" id="empty" style="display:none">Noch keine Sessions vorhanden.</p>
-  </div>
+    <div id="liste"></div>
+    <p class="muted" id="empty" style="display:none;font-size:.85rem">Keine Lernsequenzen für diese Auswahl.</p>
+    <button class="small" id="btn-refresh" style="margin-top:8px">Aktualisieren</button>
+  </aside>
 
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <strong>Antwortzeiten des Sprachmodells</strong>
-      <span>
-        <span class="muted" id="timing-model" style="font-size:.8rem;margin-right:10px"></span>
-        <button class="small" onclick="loadTimings()">Aktualisieren</button>
-      </span>
+  <main>
+    <div class="tabs" role="tablist">
+      <button class="active" data-tab="verlauf" role="tab">Lernverlauf</button>
+      <button data-tab="zeiten" role="tab">Antwortzeiten</button>
     </div>
-    <table>
-      <thead><tr>
-        <th>Schritt</th><th>Aufrufe</th><th>Median</th><th>Langsamster</th><th>Fehler</th><th>Fallbacks</th>
-      </tr></thead>
-      <tbody id="timing-rows"></tbody>
-    </table>
-    <p class="muted" id="timing-empty" style="display:none">
-      Noch keine Aufrufe seit dem letzten Serverstart.</p>
-    <p class="muted" id="timing-last" style="font-size:.8rem;margin-bottom:0"></p>
-  </div>
 
-  <div class="card" id="detail" style="display:none">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <strong id="detail-title"></strong>
-      <button class="small" onclick="document.getElementById('detail').style.display='none'">Schliessen</button>
-    </div>
-    <div id="detail-events"></div>
-  </div>
+    <section id="tab-verlauf">
+      <div class="card" id="hinweis-wahl">
+        <span class="muted">Wähle links eine Lernsequenz, um ihren Verlauf zu sehen.</span>
+      </div>
+      <div class="card hidden" id="detail">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
+          <strong id="detail-title"></strong>
+          <button class="small" id="btn-detail-refresh">Aktualisieren</button>
+        </div>
+        <div class="kopf" id="detail-kopf"></div>
+        <div class="timeline" id="detail-events" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <section id="tab-zeiten" class="hidden">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <strong>Antwortzeiten des Sprachmodells</strong>
+          <span>
+            <span class="muted" id="timing-model" style="font-size:.8rem;margin-right:10px"></span>
+            <button class="small" onclick="loadTimings()">Aktualisieren</button>
+          </span>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Schritt</th><th>Aufrufe</th><th>Median</th><th>Langsamster</th><th>Fehler</th><th>Fallbacks</th>
+          </tr></thead>
+          <tbody id="timing-rows"></tbody>
+        </table>
+        <p class="muted" id="timing-empty" style="display:none">
+          Noch keine Aufrufe seit dem letzten Serverstart.</p>
+        <p class="muted" id="timing-last" style="font-size:.8rem;margin-bottom:0"></p>
+      </div>
+    </section>
+  </main>
 </div>
 
 <script>
+const $ = id => document.getElementById(id);
 const LABEL = { basic:"Grundlagen", intermediate:"Fortgeschritten", advanced:"Vertieft" };
 const PHASE = { assessment:"Einstufung", learning:"Am Lernen", finished:"Abgeschlossen" };
 const STATUS = { aktiv:"aktiv", pausiert:"pausiert", abgeschlossen:"abgeschlossen",
                  abgebrochen:"abgebrochen", archiviert:"archiviert" };
 function zeit(t) { return t ? new Date(t * 1000).toLocaleString("de-CH") : ""; }
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g,
+    c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
 
 // N-04: Sicherheit bei richtigen und bei nicht richtigen Antworten
 function kalib(k) {
   if (!k || (k.richtig_avg == null && k.falsch_avg == null)) return "";
-  return `<br><span class="muted" style="font-size:.75rem" title="Durchschnittliche Sicherheit bei richtigen / nicht richtigen Antworten">✅ ${k.richtig_avg ?? "–"} · ❌ ${k.falsch_avg ?? "–"}</span>`;
+  return `<span title="Durchschnittliche Sicherheit bei richtigen / nicht richtigen Antworten">🪞 Sicherheit bei richtigen ${k.richtig_avg ?? "–"}, bei nicht richtigen ${k.falsch_avg ?? "–"}</span>`;
 }
+
+// ---------- Seitenleiste (N-02): alle Sequenzen einmal laden, Filter wirken sofort
+let alle = [];
+let aktiv = decodeURIComponent(location.hash.slice(1)) || null;
 
 async function loadSessions() {
-  const tests = document.getElementById("show-tests").checked;
-  const r = await fetch("/api/teacher/sessions" + (tests ? "?testlaeufe=true" : ""));
+  // Testläufe immer mitladen und im Browser filtern, damit der Filter ohne
+  // weiteren Serveraufruf sofort wirkt.
+  const r = await fetch("/api/teacher/sessions?testlaeufe=true");
   if (r.status === 401) { location.href = "/teacher/login"; return; }
-  const list = await r.json();
-  document.getElementById("empty").style.display = list.length ? "none" : "block";
-  document.getElementById("rows").innerHTML = list.map(s => `
-    <tr class="clickable" onclick="loadDetail('${s.session_id}', '${esc(s.name)}')">
-      <td><strong>${esc(s.name)}</strong>${s.testlauf ? ' <span class="pill test">Testlauf</span>' : ""}</td>
-      <td class="muted">${esc(s.lesson_id)}</td>
-      <td><span class="pill st-${esc(s.status)}">${esc(STATUS[s.status] || s.status)}</span>
-          ${s.status === "aktiv" || s.status === "pausiert" ? `<br><span class="muted" style="font-size:.75rem">${PHASE[s.phase] || s.phase}</span>` : ""}
-          ${s.status === "archiviert" || s.status === "abgebrochen" ? `<br><span class="muted" style="font-size:.75rem">${esc(zeit(s.archived_at || s.status_at))}</span>` : ""}</td>
-      <td><span class="bar"><div style="width:${100 * s.step / s.total_steps}%"></div></span>
-          <span class="muted">${s.step}/${s.total_steps}</span></td>
-      <td>${LABEL[s.level] || s.level}</td>
-      <td>${Math.round(s.correct_rate * 100)} %</td>
-      <td>${s.confidence_avg != null ? s.confidence_avg + "/10" : "–"}${kalib(s.kalibrierung)}</td>
-      <td class="muted">${s.covered.map(esc).join(", ") || "–"}</td>
-      <td class="muted">${new Date(s.updated_at * 1000).toLocaleString("de-CH")}</td>
-    </tr>`).join("");
+  alle = await r.json();
+  const lekt = $("f-lektion"), gewaehlt = lekt.value;
+  const lektionen = [...new Map(alle.map(s => [s.lesson_id, s.lesson_titel || s.lesson_id])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1], "de"));
+  lekt.innerHTML = '<option value="">Alle Lektionen</option>' +
+    lektionen.map(([id, t]) => `<option value="${esc(id)}">${esc(t)}</option>`).join("");
+  lekt.value = lektionen.some(([id]) => id === gewaehlt) ? gewaehlt : "";
+  renderListe();
+  if (aktiv && !$("detail").dataset.sid) loadDetail(aktiv);
 }
 
-async function loadDetail(sid, name) {
-  const r = await fetch("/api/teacher/sessions/" + sid);
+function gefiltert() {
+  const name = $("f-name").value.trim().toLowerCase();
+  const lektion = $("f-lektion").value, status = $("f-status").value;
+  const tests = $("show-tests").checked;
+  return alle.filter(s => (tests || !s.testlauf) && (!lektion || s.lesson_id === lektion)
+    && (!status || s.status === status) && (!name || s.name.toLowerCase().includes(name)));
+}
+
+function renderListe() {
+  const list = gefiltert();
+  $("empty").style.display = list.length ? "none" : "block";
+  const personen = new Map();
+  for (const s of list) {
+    const key = s.user_key || s.name.toLowerCase();
+    if (!personen.has(key)) personen.set(key, { name: s.name, seqs: [] });
+    personen.get(key).seqs.push(s);
+  }
+  $("liste").innerHTML = [...personen.values()]
+    .sort((a, b) => a.name.localeCompare(b.name, "de"))
+    .map(p => `<div class="person"><div class="person-name">${esc(p.name)}</div>` +
+      p.seqs.map(s => `
+        <button class="seq-item${s.session_id === aktiv ? " active" : ""}" data-sid="${esc(s.session_id)}">
+          ${esc(s.lesson_titel || s.lesson_id)}${s.testlauf ? ' <span class="pill test">Testlauf</span>' : ""}
+          <div class="meta"><span class="pill st-${esc(s.status)}">${esc(STATUS[s.status] || s.status)}</span>
+            Schritt ${s.step}/${s.total_steps} · ${LABEL[s.level] || s.level} · ${Math.round(s.correct_rate * 100)} %</div>
+        </button>`).join("") + "</div>").join("");
+}
+
+$("liste").onclick = e => {
+  const b = e.target.closest(".seq-item");
+  if (!b) return;
+  loadDetail(b.dataset.sid);
+  if (window.matchMedia("(max-width: 800px)").matches) toggleSidebar(false);
+};
+for (const id of ["f-name", "f-lektion", "f-status", "show-tests"])
+  $(id).addEventListener(id === "f-name" ? "input" : "change", renderListe);
+$("btn-refresh").onclick = loadSessions;
+$("btn-detail-refresh").onclick = () => aktiv && loadDetail(aktiv);
+
+function toggleSidebar(offen) {
+  const aside = $("sidebar");
+  offen = offen ?? aside.classList.contains("eingeklappt");
+  aside.classList.toggle("eingeklappt", !offen);
+  $("btn-sidebar").setAttribute("aria-expanded", String(offen));
+}
+$("btn-sidebar").onclick = () => toggleSidebar();
+if (window.matchMedia("(max-width: 800px)").matches && aktiv) toggleSidebar(false);
+
+// ---------- Tabs: Lernverlauf und Antwortzeiten
+for (const b of document.querySelectorAll(".tabs button")) {
+  b.onclick = () => {
+    for (const x of document.querySelectorAll(".tabs button")) x.classList.toggle("active", x === b);
+    $("tab-verlauf").classList.toggle("hidden", b.dataset.tab !== "verlauf");
+    $("tab-zeiten").classList.toggle("hidden", b.dataset.tab !== "zeiten");
+    if (b.dataset.tab === "zeiten") loadTimings();
+  };
+}
+
+// ---------- Lernverlauf der gewählten Sequenz als Zeitleiste, ohne Seitenwechsel
+async function loadDetail(sid) {
+  const r = await fetch("/api/teacher/sessions/" + encodeURIComponent(sid));
   if (r.status === 401) { location.href = "/teacher/login"; return; }
+  if (!r.ok) { aktiv = null; history.replaceState(null, "", location.pathname); return; }
   const d = await r.json();
-  document.getElementById("detail-title").textContent = "Lernverlauf von " + name;
-  document.getElementById("detail-events").innerHTML = d.events.map(ev => {
+  aktiv = sid;
+  history.replaceState(null, "", "#" + encodeURIComponent(sid));
+  for (const b of document.querySelectorAll(".seq-item")) b.classList.toggle("active", b.dataset.sid === sid);
+  const s = d.session, p = s.profile || {};
+  $("detail").dataset.sid = sid;
+  $("detail-title").textContent = `Lernverlauf von ${s.name} · ${s.lesson_titel || s.lesson_id}`;
+  const total = (alle.find(x => x.session_id === sid) || {}).total_steps;
+  $("detail-kopf").innerHTML =
+    `<span class="pill st-${esc(s.status)}">${esc(STATUS[s.status] || s.status)}</span>` +
+    (s.testlauf ? '<span class="pill test">Testlauf</span>' : "") +
+    (total ? `<span><span class="bar"><div style="width:${100 * (p.step || 0) / total}%"></div></span>
+       <span class="muted">${p.step || 0}/${total}</span></span>` : "") +
+    `<span>Niveau ${LABEL[p.level] || p.level || "–"}</span>` +
+    `<span>✅ ${p.correct || 0} · 🔶 ${p.partial || 0} · ❌ ${p.wrong || 0}</span>` +
+    kalib(s.kalibrierung);
+  $("detail-events").innerHTML = d.events.map(renderEvent).join("");
+  if (window.renderMathInElement) {
+    try {
+      renderMathInElement($("detail-events"), {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "\\[", right: "\\]", display: true },
+        ],
+        throwOnError: false,
+      });
+    } catch { /* Rohtext genügt */ }
+  }
+  $("hinweis-wahl").classList.add("hidden");
+  $("detail").classList.remove("hidden");
+}
+
+function renderEvent(ev) {
+
     const time = new Date(ev.created_at * 1000).toLocaleTimeString("de-CH");
     const p = ev.payload;
     let cls = ev.type, body = "";
@@ -193,27 +335,8 @@ async function loadDetail(sid, name) {
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
     else body = esc(JSON.stringify(p));
     return `<div class="event ${cls}"><span class="t">${time}</span><br>${body}</div>`;
-  }).join("");
-  if (window.renderMathInElement) {
-    try {
-      renderMathInElement(document.getElementById("detail-events"), {
-        delimiters: [
-          { left: "$$", right: "$$", display: true },
-          { left: "$", right: "$", display: false },
-          { left: "\\(", right: "\\)", display: false },
-          { left: "\\[", right: "\\]", display: true },
-        ],
-        throwOnError: false,
-      });
-    } catch { /* Rohtext genügt */ }
-  }
-  document.getElementById("detail").style.display = "block";
 }
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g,
-    c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
-}
 // ---------- Antwortzeiten: zeigt, wo die Wartezeit im Dialog entsteht
 const SCHRITT = {
   EINSTUFUNGSFRAGEN: "Einstufungsfragen", EINSTUFUNG_BEWERTEN: "Einstufung bewerten",
@@ -250,9 +373,8 @@ async function loadTimings() {
 }
 
 loadSessions();
-loadTimings();
 setInterval(loadSessions, 15000);
-setInterval(loadTimings, 15000);
+setInterval(() => { if (!$("tab-zeiten").classList.contains("hidden")) loadTimings(); }, 15000);
 </script>
 </body>
 </html>

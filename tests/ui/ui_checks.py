@@ -469,7 +469,7 @@ def lp_lernverlauf(pw):
         page.click("#btn-pause")
         expect(page.locator("#home-banner")).to_be_visible()
         page.goto(base + "/teacher")
-        page.locator("tr.clickable").first.click()
+        page.locator(".seq-item").first.click()
         detail = page.locator("#detail-events")
         expect(detail).to_contain_text("Status", timeout=10000)
         text = detail.inner_text()
@@ -477,8 +477,140 @@ def lp_lernverlauf(pw):
                           "Versuch 2", "Niveau", "pausiert"):
             check(f"Lernverlauf zeigt «{stichwort}»", stichwort in text)
         check("Lernverlauf ohne Skriptfehler", not fehler, "; ".join(fehler))
-        t = page.locator("#timing-rows").inner_text()
-        check("Messübersicht mit Fallback-Spalte", "Einstufung bewerten" in t)
+        page.click(".tabs button[data-tab='zeiten']")
+        expect(page.locator("#timing-rows")).to_contain_text("Einstufung bewerten", timeout=10000)
+        check("Messübersicht mit Fallback-Spalte (eigener Bereich)", True)
+
+
+# ---------------------------------------------------------------- Phase 4
+
+QUELLEN_LEKTION = {
+    "id": "quellen", "titel": "Haftung mit Quellen", "lernziele": ["Haftung erklären"],
+    "material": "### Quelle: Skript_Haftpflicht.pdf\n\n" + "Wer widerrechtlich Schaden zufügt, haftet nach "
+                "Art. 41 OR, wenn Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden vorliegen. " * 4
+                + "\n\n---\n\n### Quelle: Merkblatt.docx\n\n" + "Der Tierhalter haftet ohne Verschulden. " * 5,
+    "einstufungsfragen_fallback": ["a?", "b?", "c?"],
+}
+
+
+def bis_zum_abschluss(page):
+    for _ in range(20):
+        if page.locator("#view-done").is_visible():
+            return
+        if page.locator("#btn-answer").is_visible() and page.locator("#btn-answer").is_enabled():
+            beantworte(page, GUT, 8)
+        elif page.locator("#btn-continue").is_visible():
+            page.click("#btn-continue")
+            page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        else:
+            page.wait_for_timeout(200)
+    raise AssertionError("Abschluss nicht erreicht")
+
+
+@scenario("n01")
+def n01_quellen(pw):
+    """N-01: Theorieschritte zeigen eine Quellenzeile, ohne Quellenliste keine."""
+    with server(extra_lessons={"quellen": QUELLEN_LEKTION}) as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Quellen", lesson="quellen")
+        zeile = page.locator(".msg.tutor.theory .quelle").first
+        expect(zeile).to_be_visible(timeout=30000)
+        check("N-01 Quellenzeile unter der Theorie", zeile.inner_text() == "Quelle: Skript_Haftpflicht.pdf",
+              zeile.inner_text())
+        page2 = launch(pw).new_page()
+        start_lernsequenz(page2, base, name="Ohne Quellen")
+        expect(page2.locator(".msg.tutor.theory").first).to_be_visible(timeout=30000)
+        check("N-01 ohne Quellenliste keine Zeile", page2.locator(".msg .quelle").count() == 0)
+
+
+@scenario("n04")
+def n04_selbsteinschaetzung(pw):
+    """N-04: Rückmeldung nur bei deutlicher Abweichung, Kalibrierung in der Zusammenfassung."""
+    with server() as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Kalibrierung")
+        zur_aufgabe(page)
+        beantworte(page, "weiss nicht", 9)
+        expect(page.locator(".msg.tutor.selbst")).to_have_count(1, timeout=10000)
+        check("N-04 Satz bei sicher und falsch", "sehr sicher" in page.locator(".msg.tutor.selbst").inner_text())
+        beantworte(page, GUT, None)
+        check("N-04 keine Rückmeldung ohne Abweichung", page.locator(".msg.tutor.selbst").count() == 1)
+        bis_zum_abschluss(page)
+        k = page.locator("#done-kalib")
+        expect(k).to_be_visible()
+        text = k.inner_text()
+        check("N-04 Zusammenfassung zeigt beide Durchschnitte",
+              "bei richtigen Antworten" in text and "teilweise richtigen" in text and "9 von 10" in text, text)
+
+
+@scenario("n05")
+def n05_eigener_verlauf(pw):
+    """N-05: Lernende öffnen den eigenen Verlauf mit Schwächenliste und Sprung."""
+    with server() as base:
+        page = launch(pw).new_page()
+        fehler = []
+        page.on("pageerror", lambda e: fehler.append(str(e)))
+        start_lernsequenz(page, base, name="Mein Verlauf")
+        zur_aufgabe(page)
+        beantworte(page, "weiss nicht", 9)
+        beantworte(page, GUT, None)
+        page.click("#btn-pause")
+        expect(page.locator("#view-home")).to_be_visible(timeout=10000)
+        page.locator(".seq button[data-act='verlauf']").click()
+        expect(page.locator("#view-verlauf")).to_be_visible(timeout=10000)
+        text = page.locator("#v-eintraege").inner_text()
+        check("N-05 Verlauf zeigt Aufgabe, Antwort und Bewertung",
+              "Deine Antwort" in text and "weiss nicht" in text and "Falsch" in text, text[:200])
+        check("N-05 keine internen Angaben", "Adaption" not in text and "Erwartet" not in text)
+        link = page.locator("#v-schwaechen a").first
+        expect(link).to_be_visible()
+        link.click()
+        expect(page.locator("#v-eintraege .msg.markiert")).to_have_count(1, timeout=3000)
+        check("N-05 Sprung zur Aufgabe markiert die Stelle", True)
+        check("N-05 ohne Skriptfehler", not fehler, "; ".join(fehler))
+
+
+@scenario("n02")
+def n02_seitenleiste(pw):
+    """N-02: Seitenleiste mit Filtern, Verlauf ohne Seitenwechsel, einklappbar."""
+    with server() as base:
+        for name, lektion in (("Anna Leiste", "haftungsrecht"), ("Ben Leiste", "bruchbegriff-verstehen-und-anwenden")):
+            c = httpx.Client(base_url=base)
+            c.post("/api/learner/login", json={"name": name})
+            c.post("/api/session/start", json={"lesson_id": lektion})
+        page = launch(pw).new_page()
+        fehler = []
+        page.on("pageerror", lambda e: fehler.append(str(e)))
+        page.goto(base + "/teacher")
+        expect(page.locator(".seq-item")).to_have_count(2, timeout=10000)
+        url = page.url
+        page.evaluate("window.__ohneNeuladen = true")   # verschwindet bei jedem Seitenwechsel
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-title")).to_contain_text("Lernverlauf von", timeout=10000)
+        page.locator(".seq-item").nth(1).click()
+        expect(page.locator("#detail-title")).to_contain_text("Ben Leiste", timeout=10000)
+        check("N-02 AK1 Verlauf ohne Seitenwechsel",
+              page.evaluate("window.__ohneNeuladen === true") and page.url.split("#")[0] == url, page.url)
+        page.select_option("#f-lektion", "haftungsrecht")
+        check("N-02 AK1 Lektionsfilter wirkt sofort", page.locator(".seq-item").count() == 1)
+        page.select_option("#f-lektion", "")
+        page.fill("#f-name", "ben")
+        check("N-02 Namenssuche wirkt sofort", page.locator(".seq-item").count() == 1)
+        page.fill("#f-name", "")
+        page.select_option("#f-status", "abgeschlossen")
+        check("N-02 Statusfilter wirkt sofort", page.locator(".seq-item").count() == 0)
+        page.select_option("#f-status", "")
+        page.set_viewport_size({"width": 400, "height": 800})
+        check("N-02 Knopf für die Seitenleiste auf schmalen Bildschirmen", page.locator("#btn-sidebar").is_visible())
+        page.click("#btn-sidebar")
+        zu = not page.locator("#sidebar").is_visible()
+        page.click("#btn-sidebar")
+        auf = page.locator("#sidebar").is_visible()
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-title")).to_contain_text("Anna Leiste", timeout=10000)
+        check("N-02 Seitenleiste klappt ein und nach der Auswahl wieder zu",
+              zu and auf and not page.locator("#sidebar").is_visible())
+        check("N-02 ohne Skriptfehler", not fehler, "; ".join(fehler))
 
 
 def run(names):
