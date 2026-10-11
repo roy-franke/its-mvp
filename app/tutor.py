@@ -675,7 +675,7 @@ BEWERTUNG_TEMPERATUR = float(os.getenv("ITS_BEWERTUNG_TEMPERATUR", "0"))
 
 
 def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
-                    vorher: list[dict] | None = None) -> dict:
+                    vorher: list[dict] | None = None, uebernommen: list[str] | None = None) -> dict:
     """Bewertet eine Antwort dreistufig und liefert KI-Feedback.
 
     D-05: Die Bewertung läuft in zwei Schritten. Das Modell bestimmt die
@@ -711,6 +711,11 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                     "ergänzt den ersten Versuch; sie muss nicht alles wiederholen.\n\n")
     else:
         kontext += f"Antwort des Lernenden: {answer}\n\n"
+    if uebernommen:
+        # D-11: Teilweise übernommen, unterhalb der Schwelle für eine Kopie
+        kontext += ("Wörtlich aus angezeigten Texten übernommen (zählt nicht als Eigenleistung): "
+                    + " | ".join(f"«{u}»" for u in uebernommen[:5]) + "\n"
+                    "Beurteile nur, was der Lernende darüber hinaus selbst formuliert oder angewendet hat.\n\n")
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: ANTWORT_BEWERTEN\n"
@@ -923,6 +928,31 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
     # D-08: Erneute Erklärung zum selben Konzept ist erlaubt, aber gekennzeichnet
     data["nochmals_anders"] = art in ("theorie", "genauer") and bool(bisherige) and not data.get("_fallback")
     return data
+
+
+# ---------------------------------------------------------------- D-11
+
+KOPIE_TEXT = ("Das ist fast wörtlich der Text von oben. Formuliere die Antwort bitte in eigenen Worten. "
+              "Fachbegriffe darfst du natürlich übernehmen.")
+
+
+def kopie_quellen(lesson: dict, events: list[dict]) -> list[tuple[str, str]]:
+    """Alle Texte, die in dieser Sequenz angezeigt wurden, dazu das Lektionsmaterial."""
+    quellen = []
+    for ev in events:
+        p = ev["payload"]
+        if ev["type"] == "task":
+            art = {"theorie": "Theorie", "aufgabe": "Aufgabe"}.get(p.get("typ"), "Tutor")
+            text = " ".join(str(p.get(k) or "") for k in ("titel", "inhalt", "beispiel", "frage"))
+            quellen.append((f"{art}: {p.get('titel') or p.get('konzept') or ''}".strip(), text))
+        elif ev["type"] == "chat_reply":
+            quellen.append(("Antwort des Tutors im Chat", p.get("antwort", "")))
+        elif ev["type"] == "answer_evaluated":
+            quellen.append(("Feedback des Tutors", f"{p.get('feedback', '')} {p.get('hinweis', '')}"))
+        elif ev["type"] == "loesung_gezeigt":
+            quellen.append(("Musterlösung", p.get("loesung", "")))
+    quellen.append(("Lektionsmaterial", lesson.get("material", "")))
+    return quellen
 
 
 # ---------------------------------------------------------------- N-04

@@ -893,6 +893,25 @@ def d07_teilweise(pw):
         browser.close()
 
 
+@scenario("d11")
+def d11_kopie(pw):
+    """D-11 AK1/AK4: Kopierte Theorie wird nicht bewertet, die Lehrperson sieht das Event."""
+    with server() as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Kopie")
+        theorie = page.locator(".msg.tutor.theory .fmt").first.inner_text()
+        zur_aufgabe(page)
+        beantworte(page, theorie, 8)
+        meldung = page.locator(".msg.tutor.mid").last.inner_text()
+        check("D-11 AK1 Hinweis statt Bewertung", "eigenen Worten" in meldung
+              and page.locator(".msg.tutor.good, .msg.tutor.bad").count() == 0, meldung)
+        check("D-11 Antwort bleibt zum Umformulieren stehen", page.input_value("#chat-input").strip() != "")
+        page.goto(base + "/teacher")
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-events")).to_contain_text("Kopie erkannt", timeout=10000)
+        check("D-11 AK4 Event im Lernverlauf der Lehrperson", True)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

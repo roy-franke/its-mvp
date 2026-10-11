@@ -327,6 +327,7 @@ function renderEvent(ev) {
       body = `${label}${p.versuch > 1 ? ` <span class="muted">(Versuch ${p.versuch}, zusammen mit den früheren bewertet)</span>` : ""}${fmt(p.feedback)}`
         + ((p.elemente || []).length ? `<ul class="elemente">${p.elemente.map(e =>
             `<li class="el-${esc(e.status)}">${e.status === "korrekt" ? "✅" : e.status === "falsch" ? "❌" : e.status === "ungenau" ? "🔸" : "◻️"} ${esc(e.element)} <span class="muted">(${esc(e.status)})</span></li>`).join("")}</ul>` : "")
+        + (p.teilkopie ? `<span class="muted">✍️ ${Math.round(p.teilkopie * 100)} % wörtlich übernommen; bewertet wurde nur die Eigenleistung (D-11).</span><br>` : "")
         + (p.bewertung_modell ? `<span class="muted">Urteil aus den Elementen abgeleitet; das Modell hatte «${esc(p.bewertung_modell)}» vorgeschlagen.</span><br>` : "")
         + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "")
         + (p.selbsteinschaetzung ? `<br><span class="muted">🪞 ${esc(p.selbsteinschaetzung)}</span>` : "");
@@ -353,6 +354,7 @@ function renderEvent(ev) {
       + (p.art ? ` <span class="muted">(${p.art === "theorie" ? "Theorie" : "Aufgabe"} konnte nicht erzeugt werden)</span>` : "")
       + (p.ergaenzungen != null ? ` <span class="muted">(bisher ${p.ergaenzungen} ${p.ergaenzungen === 1 ? "Ergänzung" : "Ergänzungen"})</span>` : "")
       + (p.konzept ? ` <span class="muted">Konzept «${esc(p.konzept)}»</span>` : ""); }
+    else if (ev.type === "kopie_erkannt") { cls += " regel_verstoss"; body = `✍️ <strong>Kopie erkannt</strong> (D-11): ${Math.round(p.anteil * 100)} % der Antwort wörtlich aus «${esc(p.quelle || "")}», nicht bewertet und nicht als Versuch gezählt`; }
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
     else body = esc(JSON.stringify(p));

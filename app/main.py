@@ -660,9 +660,27 @@ def answer(sid: str, req: AnswerRequest, request: Request):
 def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: str,
                       confidence: int | None) -> dict:
     """Bewertet eine Antwort und wendet die Adaption an (gemeinsam für /answer und /wahl)."""
-    store.log_event(sid, "answer_submitted", {"answer": text, "confidence": confidence})
+    if confidence is None and profile.get("kopie_confidence"):
+        confidence = profile.pop("kopie_confidence")    # Sicherheit vor einer erkannten Kopie
+    kopie = didaktik.kopie_pruefen(text, tutor.kopie_quellen(lesson, store.get_events(sid)))
+    store.log_event(sid, "answer_submitted", {"answer": text, "confidence": confidence,
+                                              **({"kopie": True} if kopie["anteil"] >= didaktik.KOPIE_SCHWELLE else {})})
+    if kopie["anteil"] >= didaktik.KOPIE_SCHWELLE:
+        # D-11, Entscheid E3: keine Bewertung, freundlicher Hinweis, zählt nicht als Versuch
+        if confidence is not None:
+            profile["kopie_confidence"] = confidence
+        profile["wartet_auf"] = "antwort"
+        store.log_event(sid, "kopie_erkannt", {"anteil": kopie["anteil"], "quelle": kopie["quelle"],
+                                               "meldung": tutor.KOPIE_TEXT})
+        store.update_session(sid, profile=profile)
+        return {"bewertung": "kopie", "korrekt": False, "feedback": tutor.KOPIE_TEXT, "hinweis": "",
+                "adaption": "kopie", "adaption_begruendung": "", "finished": False, "wahl": [],
+                "kopie": {"anteil": kopie["anteil"], "quelle": kopie["quelle"]}, "progress": _progress(profile)}
     vorher = profile.get("antworten_aktuell") or []
-    result = tutor.evaluate_answer(lesson, profile, task, text, vorher)
+    uebernommen = kopie["passagen"] if kopie["anteil"] >= didaktik.TEILKOPIE_SCHWELLE else None
+    result = tutor.evaluate_answer(lesson, profile, task, text, vorher, uebernommen)
+    if uebernommen:
+        result["teilkopie"] = kopie["anteil"]
     _log_llm_meta(sid, "ANTWORT_BEWERTEN", result)
     if result["bewertung"] == "unbewertet":
         return _bewertung_gescheitert(sid, profile, task, text, confidence, result)
@@ -695,6 +713,7 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         # D-05: Einzelbewertung der Elemente, damit Fehlbewertungen nachvollziehbar sind
         "elemente": result.get("elemente", []),
         "bewertung_modell": result.get("bewertung_modell"),
+        "teilkopie": result.get("teilkopie"),
         "versuch": len(vorher) + 1,
         "confidence": confidence,
         "selbsteinschaetzung": selbsteinschaetzung,

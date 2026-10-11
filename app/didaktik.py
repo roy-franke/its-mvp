@@ -715,6 +715,55 @@ def elemente_anzahl_passt(bewertung: dict, festgelegt: list[str]) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- D-11
+#
+# Wer die Theorie kopiert und als Antwort abschickt, erbringt keine
+# Eigenleistung. Gemessen wird der Anteil der Wort-Vierergruppen der Antwort,
+# die wörtlich in einem angezeigten Text oder im Lektionsmaterial stehen.
+# Einzelne Fachbegriffe ergeben keine Vierergruppe und lösen nichts aus.
+
+KOPIE_SCHWELLE = 0.6           # ab hier: Kopie, keine Bewertung (Entscheid E3)
+TEILKOPIE_SCHWELLE = 0.25      # ab hier: übernommene Teile gehen als Hinweis an die Bewertung
+KOPIE_MIN_WOERTER = 12         # kürzere Antworten werden nie als Kopie gewertet
+_N = 4
+
+
+def _wortfolge(text: str) -> list[str]:
+    return re.findall(r"[a-zäöü0-9]+", (text or "").lower().replace("ß", "ss"))
+
+
+def _gruppen(woerter: list[str]) -> set[tuple]:
+    return {tuple(woerter[i:i + _N]) for i in range(len(woerter) - _N + 1)}
+
+
+def kopie_pruefen(antwort: str, quellen: list[tuple[str, str]]) -> dict:
+    """Anteil wörtlich übernommener Wortfolgen und die Quelle mit den meisten Treffern."""
+    w = _wortfolge(antwort)
+    if len(w) < KOPIE_MIN_WOERTER:
+        return {"anteil": 0.0, "quelle": None, "passagen": [], "woerter": len(w)}
+    positionen = list(range(len(w) - _N + 1))
+    getroffen: set[int] = set()
+    beste, beste_n = None, 0
+    for name, text in quellen:
+        g = _gruppen(_wortfolge(text))
+        treffer = {i for i in positionen if tuple(w[i:i + _N]) in g}
+        if len(treffer) > beste_n:
+            beste, beste_n = name, len(treffer)
+        getroffen |= treffer
+    anteil = len(getroffen) / len(positionen) if positionen else 0.0
+    # zusammenhängende übernommene Passagen (für die Bewertung bei Teilkopien)
+    passagen, start, ende = [], None, None
+    for i in sorted(getroffen):
+        if start is None or i > ende + 1:
+            if start is not None:
+                passagen.append(" ".join(w[start:ende + _N]))
+            start = i
+        ende = i
+    if start is not None:
+        passagen.append(" ".join(w[start:ende + _N]))
+    return {"anteil": round(anteil, 2), "quelle": beste, "passagen": passagen, "woerter": len(w)}
+
+
 def theorietext(t: dict | None) -> str:
     t = t or {}
     return " ".join(str(t.get(k) or "") for k in ("inhalt", "beispiel")).strip()

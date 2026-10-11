@@ -934,7 +934,7 @@ async function submitAnswer(text, confidence) {
   try {
     const d = await api(`/session/${sessionId}/answer`,
       { answer: text, confidence });
-    handleAnswer(d);
+    handleAnswer(d, text);
   } catch (e) {
     addError(e);
     $("chat-input").value = $("chat-input").value || text;   // Antwort nicht verlieren
@@ -942,8 +942,16 @@ async function submitAnswer(text, confidence) {
   finally { setChatBusy(false); }
 }
 
-function handleAnswer(d) {
+function handleAnswer(d, text) {
   renderProgress(d.progress);
+  if (d.bewertung === "kopie") {
+    // D-11: fast wörtlich übernommen, keine Bewertung; die Antwort bleibt zum Umformulieren stehen
+    addMsg("tutor mid", "✍️ " + (d.feedback || ""), "Tutor");
+    if (text) $("chat-input").value = text;
+    setAnswerMode(true);
+    $("chat-input").focus();
+    return;
+  }
   if (d.bewertung === "unbewertet") {
     // T-11: Die Antwort bleibt auf dem Server gespeichert. Statt erneut
     // abschicken: «Nochmals bewerten lassen», nach dem zweiten Fehler eine Wahl.
