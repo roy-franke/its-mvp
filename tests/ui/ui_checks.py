@@ -952,6 +952,31 @@ def t18_titel_lernziele(pw):
               and page.input_value("#ziele").count("\n") >= 2)
 
 
+@scenario("t19")
+def t19_material_pruefen(pw):
+    """T-19 AK1/AK2: Nach Vorschlag und Prüfung nur die Meldung der Prüfung, Formular unverändert."""
+    with server() as base:
+        page = launch(pw).new_page()
+        page.goto(base + "/teacher/lessons/new")
+        page.click("#paste-box summary")
+        page.fill("#material", "Die Verschuldenshaftung nach Art. 41 OR verlangt vier Voraussetzungen, "
+                               "zum Beispiel beim Velounfall, weil das Gesetz alle vier verlangt. " * 4)
+        page.fill("#titel", "Verschuldenshaftung")
+        page.click("#btn-suggest")
+        expect(page.locator("#result")).to_contain_text("Lernziele vorgeschlagen", timeout=10000)
+        felder = ["#titel", "#ziele", "#material", "#hinweise", "#s-einsatzart", "#s-niveauanpassung",
+                  "#s-bewertungsstrenge"]
+        vorher = [page.input_value(f) for f in felder]
+        page.click("#btn-check")
+        expect(page.locator("#check-result")).to_be_visible(timeout=10000)
+        meldung = page.inner_text("#result")
+        check("T-19 AK1 nur die Meldung der Prüfung sichtbar",
+              meldung.startswith("Prüfung abgeschlossen") and "vorgeschlagen" not in meldung
+              and page.locator("#result").count() == 1, meldung)
+        check("T-19 Kennzeichnung «experimentell» bei der Prüfung", page.locator("#exp-check").is_visible())
+        check("T-19 AK2 Formularzustand unverändert", [page.input_value(f) for f in felder] == vorher)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

@@ -38,3 +38,18 @@ def test_ak3_editor_kennzeichnet_experimentell():
     html = Path("static/lesson_editor.html").read_text(encoding="utf-8")
     assert 'id="exp-ziele"' in html and "geprüft und ergänzt" in html
     assert "Titel &amp; Lernziele vorschlagen" not in html
+
+
+def test_t19_materialpruefung_experimentell_und_klare_meldung():
+    html = Path("static/lesson_editor.html").read_text(encoding="utf-8")
+    assert 'id="exp-check"' in html and html.count('class="experimentell"') >= 2
+    assert "Prüfung abgeschlossen. Die Hinweise unten sind Empfehlungen, an deiner Lektion" in html
+    assert "Vorschlag übernommen" not in html
+
+
+def test_t19_pruefung_veraendert_die_lektion_nicht():
+    from app.main import load_lesson
+    vorher = load_lesson("haftungsrecht")
+    r = client.post("/api/teacher/lessons/check-material",
+                    json={"lernziele": vorher["lernziele"], "material": vorher["material"]})
+    assert r.status_code == 200 and load_lesson("haftungsrecht") == vorher

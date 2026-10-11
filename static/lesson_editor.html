@@ -130,7 +130,7 @@
       für die Lernziele.</span></label>
     <input type="text" id="titel" placeholder="Titel der Lektion (Pflichtfeld)" required aria-required="true">
     <label for="ziele">3. Lernziele <span class="sub">– eines pro Zeile, selbst schreiben oder vorschlagen lassen</span></label>
-    <div class="btnrow" style="margin-bottom:10px">
+    <div class="btnrow" style="margin-bottom:10px" id="suggest-row">
       <button class="secondary" id="btn-suggest" disabled>✨ Lernziele vorschlagen (KI)</button>
       <span class="experimentell" id="exp-ziele" title="Die Vorschläge sind ein erster Entwurf. Sie müssen geprüft und ergänzt werden.">experimentell</span>
       <span class="sub" id="suggest-hinweis">Die Vorschläge müssen geprüft und ergänzt werden. Möglich, sobald
@@ -186,13 +186,14 @@
 
     <label>6. Material prüfen <span class="sub">– optional: Deckt das Material jedes Lernziel mit
       Erklärung, Beispiel und Begründung ab? Eine Empfehlung, das Speichern bleibt jederzeit möglich.</span></label>
-    <div class="btnrow">
+    <div class="btnrow" id="check-row">
       <button class="secondary" id="btn-check">🔍 Material prüfen (KI)</button>
+      <span class="experimentell" id="exp-check" title="Die Prüfung ist ein erster Hinweis der KI. Sie verändert nichts an deiner Lektion und kann sich irren.">experimentell</span>
       <span class="spinner hidden" id="check-spinner">KI gleicht Material und Lernziele ab …</span>
     </div>
     <div id="check-result" class="check-result hidden"></div>
 
-    <div class="btnrow" style="margin-top:20px">
+    <div class="btnrow" style="margin-top:20px" id="save-row">
       <button id="btn-save">Lektion speichern &amp; veröffentlichen</button>
       <span class="spinner hidden" id="save-spinner">Wird gespeichert …</span>
     </div>
@@ -363,7 +364,7 @@ $("btn-suggest").onclick = async () => {
   const material = collectMaterial();
   const titel = $("titel").value.trim();
   showResult("", "");
-  if (!titel) { showResult("error", "Zuerst einen Titel eingeben. Er setzt den Rahmen für die Lernziele."); $("titel").focus(); return; }
+  if (!titel) { showResult("error", "Zuerst einen Titel eingeben. Er setzt den Rahmen für die Lernziele.", "suggest-row"); $("titel").focus(); return; }
   if (material.length < 100) {
     showResult("error", "Zuerst mindestens eine Datei hochladen oder Text einfügen (mindestens 100 Zeichen).");
     return;
@@ -378,8 +379,8 @@ $("btn-suggest").onclick = async () => {
     if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Vorschlag fehlgeschlagen");
     if (d.lernziele && d.lernziele.length) $("ziele").value = d.lernziele.join("\n");
-    showResult("success", "Lernziele vorgeschlagen (experimentell). Bitte prüfen und ergänzen.");
-  } catch (e) { showResult("error", e.message); }
+    showResult("success", "Lernziele vorgeschlagen (experimentell). Bitte prüfen und ergänzen.", "suggest-row");
+  } catch (e) { showResult("error", e.message, "suggest-row"); }
   $("suggest-spinner").classList.add("hidden"); suggestAktualisieren();
 };
 
@@ -428,10 +429,14 @@ $("btn-save").onclick = async () => {
   $("btn-save").disabled = false; $("save-spinner").classList.add("hidden");
 };
 
-function showResult(cls, html) {
+// T-19: Es gibt genau eine Meldung. Jede Aktion ersetzt die vorherige und zeigt
+// ihre Meldung bei sich an, damit nie eine Meldung zu einer anderen Aktion stehen bleibt.
+function showResult(cls, html, anker) {
   const el = $("result");
   el.className = cls;
   el.innerHTML = html;
+  const ziel = anker ? $(anker) : $("save-row");
+  if (ziel && el.previousElementSibling !== ziel) ziel.after(el);
 }
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,
@@ -442,8 +447,9 @@ function esc(s) {
 $("btn-check").onclick = async () => {
   const material = collectMaterial();
   const lernziele = $("ziele").value.split("\n").map(z => z.trim()).filter(Boolean);
-  if (!lernziele.length) { showResult("error", "Zuerst Lernziele eintragen."); return; }
-  if (material.length < 20) { showResult("error", "Zuerst Material hochladen oder einfügen."); return; }
+  showResult("", "", "check-row");
+  if (!lernziele.length) { showResult("error", "Zuerst Lernziele eintragen.", "check-row"); return; }
+  if (material.length < 20) { showResult("error", "Zuerst Material hochladen oder einfügen.", "check-row"); return; }
   $("btn-check").disabled = true; $("check-spinner").classList.remove("hidden");
   try {
     const r = await fetch("/api/teacher/lessons/check-material", {
@@ -467,7 +473,10 @@ $("btn-check").onclick = async () => {
           <td>${esc(z.hinweis)}</td></tr>`).join("") + "</tbody></table>" : "") +
       (d.gesamt ? `<p class="muted">${esc(d.gesamt)}</p>` : "");
     $("check-result").classList.remove("hidden");
-  } catch (e) { showResult("error", esc(e.message)); }
+    // T-19: klare Meldung, die Prüfung verändert nichts
+    showResult("success", "Prüfung abgeschlossen. Die Hinweise unten sind Empfehlungen, an deiner Lektion " +
+               "wurde nichts verändert.", "check-row");
+  } catch (e) { showResult("error", esc(e.message), "check-row"); }
   $("btn-check").disabled = false; $("check-spinner").classList.add("hidden");
 };
 
