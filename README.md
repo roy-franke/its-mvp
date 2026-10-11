@@ -178,8 +178,11 @@ Instanz mit Mock-Provider (bei Bedarf verzögert oder scheiternd):
 
 ```bash
 pip install playwright && python3 -m playwright install chromium
-python3 tests/ui/ui_checks.py          # alle Szenarien, oder z.B. t02
+python3 tests/ui/ui_checks.py          # alle Szenarien, oder z.B. t02 d07 t22
 ```
+
+Für die Prüfung der Formeldarstellung (T-13) lädt das Skript KaTeX aus einem lokal
+entpackten npm-Paket, wenn `ITS_KATEX_DIR` darauf zeigt (`npm pack katex@0.16.11`).
 
 Die didaktischen Pakete lassen sich zusätzlich gegen ein echtes Sprachmodell
 evaluieren (nicht Teil der normalen Testsuite, schreibt einen Bericht nach
@@ -188,6 +191,8 @@ evaluieren (nicht Teil der normalen Testsuite, schreibt einen Bericht nach
 ```bash
 python3 tests/eval/eval_didaktik.py              # alle Pakete, dauert mit qwen3:30b länger
 python3 tests/eval/eval_didaktik.py D-01 --anzahl 3
+python3 tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <id-der-lektion>
+python3 tests/eval/diagnose_ollama.py            # leere Antworten und Tokenschätzung (T-08/T-09)
 ```
 
 ## Bewusste Grenzen (MVP)
