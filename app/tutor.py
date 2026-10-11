@@ -521,11 +521,20 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         f"Bereits behandelte Konzepte: {covered}.\n"
         f"Bisheriger Verlauf (Kurzfassung): {recent}\n"
     )
-    if direkt_nach_theorie and profile["covered"]:
+    if direkt_nach_theorie and theorie:
+        # D-09: Die zuletzt gezeigte Theorie steht im Benutzerteil (nicht im
+        # Systemprompt). Früher stand hier profile["covered"][-1]; war das
+        # Konzept der Theorie schon früher behandelt worden, war das ein
+        # anderes Konzept und die Aufgabe sprang zu einem anderen Thema.
+        k = theorie.get("konzept") or theorie.get("titel") or ""
         instruction += (
-            f"Soeben wurde das Konzept '{profile['covered'][-1]}' als Theorie "
-            "erklärt. Stelle jetzt eine dazu passende Aufgabe, bei der der Lernende "
-            "das frisch Gelernte selbständig anwendet.\n"
+            "UNMITTELBAR VORANGEHENDE THEORIE (die Aufgabe bezieht sich genau darauf):\n"
+            f"Titel: {theorie.get('titel', '')}\nKonzept: {k}\n"
+            f"Text: {str(theorie.get('inhalt', ''))[:1500]}\n"
+            f"Stelle jetzt eine Aufgabe genau zum Konzept «{k}», die sich mit dem Inhalt dieser Theorie "
+            "beantworten lässt und bei der der Lernende das frisch Gelernte selbständig anwendet. "
+            "Behandelt die Theorie ein Unterthema, bleibt die Aufgabe beim Unterthema; wechsle nicht "
+            f"zum Oberthema oder zu einem anderen Thema. Setze im Feld konzept genau «{k}».\n"
         )
     elif adaptation == "simplify":
         instruction += (
@@ -590,6 +599,8 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
 
     def pruefen(d: dict) -> str | None:
         return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie, lesson)
+                or (didaktik.aufgabe_passt_zur_theorie(d, theorie) if direkt_nach_theorie else None)
+                or (didaktik.begriff_nicht_erklaert(d, texte, lesson) if direkt_nach_theorie else None)
                 or (unerklaert(d, erklaert, texte) if einfuehrung else None))
 
     # Drei Versuche statt zwei: Die Evaluation mit qwen3:30b zeigte, dass das

@@ -600,6 +600,63 @@ def gleiches_konzept(a: str | None, b: str | None) -> bool:
     return ka == kb or (gleicher_stamm(ka, kb) and abs(len(ka) - len(kb)) <= 3)
 
 
+# ---------------------------------------------------------------- D-09
+
+def _stamm_passt(t: str, a: str) -> bool:
+    """Deckt der Stamm a aus dem Aufgabenkonzept den Stamm t aus dem Theoriekonzept ab?
+
+    Gleich, gebeugt (kleiner Unterschied am Ende) oder spezifischer (Zusammensetzung,
+    die t enthält). Allgemeiner ist nicht erlaubt: «haftung» deckt «tierhalterhaftung»
+    nicht ab.
+    """
+    if t == a or (a.startswith(t) and len(a) - len(t) <= 3) or (t.startswith(a) and len(t) - len(a) <= 3):
+        return True
+    return len(t) >= 5 and t in a
+
+
+def aufgabe_passt_zur_theorie(task: dict, theorie: dict | None) -> str | None:
+    """D-09: Das Konzept einer Aufgabe direkt nach einer Theorie ist das Konzept
+    dieser Theorie. Ein anderes Thema oder das Oberthema ist ein Verstoss."""
+    if not theorie:
+        return None
+    tk = (theorie.get("konzept") or "").strip()
+    ak = (task.get("konzept") or "").strip()
+    if not tk:
+        return None
+    nt, na = konzept_normalisieren(tk), konzept_normalisieren(ak)
+    if nt == na or nt.replace(" ", "") == na.replace(" ", ""):
+        return None
+    t_staemme = [x for x in staemme(nt) if len(x) >= 5] or list(staemme(nt))
+    a_staemme = list(staemme(na))
+    if ak and all(any(_stamm_passt(t, a) for a in a_staemme) for t in t_staemme):
+        return None
+    return (f"Die Aufgabe behandelt «{ak or 'kein Konzept'}», die unmittelbar vorangehende Theorie aber "
+            f"«{tk}». Stelle die Aufgabe genau zum Konzept «{tk}» (nicht zum Oberthema und nicht zu "
+            f"einem anderen Thema) und setze im Feld konzept «{tk}».")
+
+
+def begriff_nicht_erklaert(task: dict, erklaerte_texte: str, lesson: dict | None) -> str | None:
+    """D-09: Verlangt die Aufgabe einen zentralen Fachbegriff, der in keiner gezeigten
+    Theorie vorkommt? Gemeldet werden nur klare Fälle: ein Fachbegriff der Lektion,
+    von dem kein einziger Wortstamm in den bisherigen Erklärungen steht."""
+    if not lesson or not erklaerte_texte.strip():
+        return None
+    bekannt = staemme(erklaerte_texte)
+    fach = fachvokabular(lesson)
+    for begriff in list(task.get("schluesselbegriffe") or []) + list(task.get("erwartete_elemente") or []):
+        if not isinstance(begriff, str) or re.search(r"\d", begriff):
+            continue
+        teile = [x for x in staemme(begriff) if len(x) >= 6]
+        if len(teile) != 1 or len(staemme(begriff)) > 2:
+            continue                       # nur einzelne Fachbegriffe, keine Beschreibungen
+        t = teile[0]
+        if _kommt_vor(t, fach) and not _kommt_vor(t, bekannt):
+            return (f"Die Aufgabe verlangt den Fachbegriff «{begriff}», der in keiner bisher gezeigten "
+                    "Theorie vorkommt. Stelle die Aufgabe so, dass sie sich mit der vorangehenden "
+                    "Theorie beantworten lässt.")
+    return None
+
+
 def theorietext(t: dict | None) -> str:
     t = t or {}
     return " ".join(str(t.get(k) or "") for k in ("inhalt", "beispiel")).strip()
