@@ -94,6 +94,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `POST /api/session/{id}/assess` | Einstufung bewerten, Startniveau setzen |
 | `POST /api/session/{id}/next` | Nächste Aufgabe (optional `?adaptation=simplify\|advance`); mit `?prefetch=true` nur vorbereiten, ohne Profil und Verlauf zu ändern |
 | `POST /api/session/{id}/answer` | Antwort bewerten, Feedback + Adaption |
+| `POST /api/session/{id}/wahl` | Wahl in einem offenen Wartezustand (`wahl`): nach gescheiterter Bewertung (T-11), nach einem Fallback (T-12), nach teilweise richtiger Antwort (D-07); `GET …/state` liefert die offenen Möglichkeiten unter `wahl` |
 | `POST /api/session/{id}/chat` | Frage an den Tutor (unbewertet); `art`: `frage`, `theorie`, `genauer`, `allgemeinwissen`, `internet` |
 | `POST /api/session/{id}/niveau` | Niveau steuern: `hoeher_ja`, `hoeher_nein`, `festhalten` (mit `level`), `automatisch` |
 | `GET /api/lessons` | Verfügbare Lektionen (für die Auswahl beim Start) |

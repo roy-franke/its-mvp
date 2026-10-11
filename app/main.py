@@ -626,23 +626,19 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         raise HTTPException(400, "Der aktuelle Schritt ist Theorie – es gibt "
                                  "nichts zu bewerten. Weiter mit /next")
     confidence = req.confidence if req.confidence in range(1, 11) else None
-    store.log_event(sid, "answer_submitted",
-                    {"answer": req.answer, "confidence": confidence})
+    return _antwort_bewerten(sid, lesson, profile, task, req.answer, confidence)
+
+
+def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: str,
+                      confidence: int | None) -> dict:
+    """Bewertet eine Antwort und wendet die Adaption an (gemeinsam für /answer und /wahl)."""
+    store.log_event(sid, "answer_submitted", {"answer": text, "confidence": confidence})
     vorher = profile.get("antworten_aktuell") or []
-    result = tutor.evaluate_answer(lesson, profile, task, req.answer, vorher)
+    result = tutor.evaluate_answer(lesson, profile, task, text, vorher)
     _log_llm_meta(sid, "ANTWORT_BEWERTEN", result)
     if result["bewertung"] == "unbewertet":
-        # Technischer Fehler bei der Bewertung: zählt weder als richtig noch
-        # als falsch, die lernende Person schickt die Antwort nochmals ab.
-        store.log_event(sid, "answer_evaluated", {
-            "bewertung": "unbewertet", "korrekt": False,
-            "feedback": result.get("feedback", ""), "hinweis": result.get("hinweis", ""),
-            "adaption": "retry", "adaption_begruendung": "", "level": profile["level"],
-        })
-        return {"bewertung": "unbewertet", "korrekt": False,
-                "feedback": result.get("feedback", ""), "hinweis": result.get("hinweis", ""),
-                "adaption": "retry", "adaption_begruendung": "", "finished": False,
-                "progress": _progress(profile)}
+        return _bewertung_gescheitert(sid, profile, task, text, confidence, result)
+    profile.pop("unbewertet", None)
     if confidence is not None:
         profile.setdefault("confidence", []).append(confidence)
         profile.setdefault("kalibrierung", []).append({"confidence": confidence,
@@ -676,7 +672,7 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         "selbsteinschaetzung": selbsteinschaetzung,
     })
     if action == "retry":
-        profile["antworten_aktuell"] = vorher + [{"antwort": req.answer, "bewertung": result["bewertung"],
+        profile["antworten_aktuell"] = vorher + [{"antwort": text, "bewertung": result["bewertung"],
                                                   "hinweis": result.get("hinweis", "")}]
     else:
         profile["antworten_aktuell"] = []
@@ -701,6 +697,85 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         "finished": finished,
         "progress": _progress(profile),
     }
+
+
+def _bewertung_gescheitert(sid: str, profile: dict, task: dict, text: str, confidence: int | None,
+                           result: dict) -> dict:
+    """T-11: Technischer Fehler bei der Bewertung, ohne Schleife.
+
+    Die Antwort bleibt gespeichert und lässt sich mit «Nochmals bewerten
+    lassen» erneut einreichen. Scheitert die Bewertung derselben Antwort ein
+    zweites Mal, bietet der Tutor eine Wahl an. Zählt weder als richtig noch
+    als falsch.
+    """
+    alt = profile.get("unbewertet") or {}
+    anzahl = alt.get("anzahl", 0) + 1 if alt.get("antwort") == text else 1
+    profile["unbewertet"] = {"antwort": text, "confidence": confidence, "anzahl": anzahl}
+    profile["wartet_auf"] = "bewertung_wiederholen" if anzahl == 1 else "wahl_unbewertet"
+    meldung = tutor.bewertungsfehler_text(anzahl)
+    wahl = tutor.wahl_nach_bewertungsfehler(task, anzahl)
+    profile["letztes_feedback"] = {"bewertung": "unbewertet", "feedback": meldung, "hinweis": "",
+                                   "adaption": "retry", "adaption_begruendung": "", "finished": False}
+    store.log_event(sid, "answer_evaluated", {
+        "bewertung": "unbewertet", "korrekt": False, "feedback": meldung, "hinweis": "",
+        "adaption": "retry", "adaption_begruendung": "", "level": profile["level"],
+        "fehler_anzahl": anzahl,
+    })
+    store.update_session(sid, profile=profile)
+    return {"bewertung": "unbewertet", "korrekt": False, "feedback": meldung, "hinweis": "",
+            "adaption": "retry", "adaption_begruendung": "", "finished": False, "wahl": wahl,
+            "fehler_anzahl": anzahl, "progress": _progress(profile)}
+
+
+def _schritt_ohne_wertung(profile: dict, bewertung: str) -> bool:
+    """Schliesst den aktuellen Schritt ab, ohne ihn als richtig oder falsch zu zählen.
+
+    Gilt für «Ohne Bewertung weiter» und «Musterlösung ansehen» (T-11) sowie
+    für die Wahl nach einer teilweise richtigen Antwort (D-07, Entscheid E1).
+    Gibt zurück, ob die Sequenz damit fertig ist.
+    """
+    profile["step"] += 1
+    profile["attempts_current"] = 0
+    profile["versuche_aktuell"] = []
+    profile["antworten_aktuell"] = []
+    profile.pop("unbewertet", None)
+    finished = profile["step"] >= tutor.total_steps()
+    profile["wartet_auf"] = "weiter"
+    profile["letztes_feedback"] = {"bewertung": bewertung, "feedback": "", "hinweis": "",
+                                   "adaption": "next", "adaption_begruendung": "", "finished": finished}
+    return finished
+
+
+class WahlRequest(BaseModel):
+    wahl: str
+
+
+@app.post("/api/session/{sid}/wahl")
+def choose(sid: str, request: Request, req: WahlRequest):
+    """Wahl der lernenden Person in einem offenen Wartezustand.
+
+    T-11: nach einer gescheiterten Bewertung (nochmals_bewerten, musterloesung,
+    ohne_bewertung). Jede Wahl landet als Event im Lernverlauf.
+    """
+    s = _owned(request, sid, aktion=True)
+    lesson = load_lesson(s["lesson_id"])
+    profile = s["profile"]
+    task = profile.get("current_task") or {}
+    wartet = profile.get("wartet_auf")
+    erlaubt = [w["id"] for w in tutor.offene_wahl(profile)]
+    if req.wahl not in erlaubt:
+        raise HTTPException(409, "Diese Auswahl ist gerade nicht möglich.")
+    if wartet in ("bewertung_wiederholen", "wahl_unbewertet"):
+        offen = profile.get("unbewertet") or {}
+        store.log_event(sid, "wahl_nach_bewertungsfehler", {"wahl": req.wahl, "fehler_anzahl": offen.get("anzahl")})
+        if req.wahl == "nochmals_bewerten":
+            return _antwort_bewerten(sid, lesson, profile, task, offen.get("antwort", ""), offen.get("confidence"))
+        loesung = task.get("erwartete_antwort") if req.wahl == "musterloesung" else None
+        profile["ohne_bewertung"] = profile.get("ohne_bewertung", 0) + 1
+        finished = _schritt_ohne_wertung(profile, "unbewertet")
+        store.update_session(sid, profile=profile)
+        return {"weiter": True, "loesung": loesung, "finished": finished, "progress": _progress(profile)}
+    raise HTTPException(409, "Gerade ist keine Auswahl offen.")
 
 
 @app.post("/api/session/{sid}/chat")
@@ -835,6 +910,7 @@ def _state(s: dict) -> dict:
         "current_task": tutor.fuer_lernende(p.get("current_task")),
         "wartet_auf": wartet,
         "letztes_feedback": p.get("letztes_feedback"),
+        "wahl": tutor.offene_wahl(p),
         "questions": p.get("assessment_questions", []) if wartet == "einstufung" else [],
         "total_steps": tutor.total_steps(),
     }

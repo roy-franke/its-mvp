@@ -672,6 +672,45 @@ def t10_einstufung(pw):
               "object" not in t2 and "nicht angezeigt" in t2, t2)
 
 
+@scenario("t11")
+def t11_bewertungsschleife(pw):
+    """T-11 AK1-3: Nochmals bewerten ohne Neueingabe, Wahl nach dem zweiten Fehler, auch nach Pause."""
+    with server(ITS_MOCK_FAIL="ANTWORT_BEWERTEN") as base:
+        browser = launch(pw)
+        page = browser.new_context().new_page()
+        start_lernsequenz(page, base, name="Schleife")
+        zur_aufgabe(page)
+        beantworte(page, GUT, 6)
+        knopf = page.locator(".wahlbox button[data-wahl='nochmals_bewerten']")
+        expect(knopf).to_be_visible(timeout=10000)
+        check("T-11 AK1 Button «Nochmals bewerten lassen»", knopf.inner_text() == "Nochmals bewerten lassen")
+        reqs = []
+        page.on("request", lambda r: reqs.append(r.post_data or "") if "/wahl" in r.url else None)
+        knopf.click()
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("T-11 AK1 erneut eingereicht ohne neu zu tippen", reqs and "nochmals_bewerten" in reqs[0], str(reqs))
+        labels = page.locator(".wahlbox button").all_inner_texts()
+        check("T-11 AK2 drei Möglichkeiten nach dem zweiten Fehler",
+              labels == ["Nochmals versuchen", "Musterlösung ansehen und weiter", "Ohne Bewertung weiter"], str(labels))
+        meldungen = [m for m in page.locator(".msg.tutor.mid").all_inner_texts() if "⚠️" in m]
+        check("T-11 keine identische Meldung hintereinander", len(set(meldungen)) == len(meldungen), str(meldungen))
+        page.click("#btn-pause")
+        expect(page.locator("#home-banner")).to_be_visible(timeout=10000)
+        p2 = browser.new_context().new_page()
+        anmelden(p2, base, "Schleife")
+        p2.click("#seq-list button[data-act='resume']")
+        expect(p2.locator(".wahlbox button")).to_have_count(3, timeout=10000)
+        check("T-11 AK3 Wahl nach dem Fortsetzen wieder da", True)
+        anzahl = p2.locator(".msg.tutor").count()
+        p2.click(".wahlbox button[data-wahl='ohne_bewertung']")
+        p2.wait_for_selector("#waiting", state="detached", timeout=30000)
+        expect(p2.locator(".msg.tutor")).not_to_have_count(anzahl, timeout=10000)
+        check("T-11 AK2 «Ohne Bewertung weiter» führt zum nächsten Schritt",
+              p2.locator(".msg.tutor").count() > anzahl and "0 falsch" in p2.inner_text("#prog-badges"),
+              p2.inner_text("#prog-badges"))
+        browser.close()
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

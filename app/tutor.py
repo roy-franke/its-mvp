@@ -1016,7 +1016,7 @@ FALLBACK_TEXTE = {
         "bewertung": "unbewertet",
         "feedback": "Deine Antwort konnte wegen eines technischen Problems gerade nicht "
                     "beurteilt werden. Sie zählt nicht als Fehler.",
-        "hinweis": "Schick die Antwort einfach nochmals ab.",
+        "hinweis": "",
     },
     "frage": {
         "antwort": "Das kann ich wegen eines technischen Problems gerade nicht "
@@ -1050,6 +1050,49 @@ FALLBACK_TEXTE = {
                   "Wenn es wieder nicht klappt, sag deiner Lehrperson Bescheid.",
     },
 }
+
+
+# ---------------------------------------------------------------- Wahlmöglichkeiten
+#
+# T-11, T-12, D-07: Statt automatisch weiterzugehen oder in einer Schleife zu
+# landen, bietet der Tutor eine Wahl an. Welche Möglichkeiten offen sind,
+# ergibt sich aus profile["wartet_auf"]; die Oberfläche zeigt sie als Buttons,
+# auch nach dem Pausieren und Fortsetzen.
+
+BEWERTUNGSFEHLER_TEXTE = {
+    1: "Deine Antwort konnte wegen eines technischen Problems gerade nicht beurteilt werden. Sie "
+       "zählt nicht als Fehler und bleibt gespeichert. Du musst sie nicht neu eintippen.",
+    2: "Die Bewertung hat auch beim zweiten Mal nicht geklappt. Deine Antwort zählt nicht als Fehler. "
+       "Wie möchtest du weitermachen?",
+    3: "Es klappt gerade leider immer noch nicht. Deine Antwort zählt nicht als Fehler. "
+       "Wie möchtest du weitermachen?",
+}
+
+
+def bewertungsfehler_text(anzahl: int) -> str:
+    """Dieselbe Meldung erscheint nie mehr als zweimal hintereinander (T-11)."""
+    if anzahl <= 2:
+        return BEWERTUNGSFEHLER_TEXTE[max(anzahl, 1)]
+    return BEWERTUNGSFEHLER_TEXTE[2] if anzahl % 2 == 0 else BEWERTUNGSFEHLER_TEXTE[3]
+
+
+def wahl_nach_bewertungsfehler(task: dict | None, anzahl: int) -> list[dict]:
+    if anzahl <= 1:
+        return [{"id": "nochmals_bewerten", "label": "Nochmals bewerten lassen", "haupt": True}]
+    wahl = [{"id": "nochmals_bewerten", "label": "Nochmals versuchen", "haupt": True}]
+    if (task or {}).get("erwartete_antwort"):
+        wahl.append({"id": "musterloesung", "label": "Musterlösung ansehen und weiter"})
+    wahl.append({"id": "ohne_bewertung", "label": "Ohne Bewertung weiter"})
+    return wahl
+
+
+def offene_wahl(profile: dict) -> list[dict]:
+    """Die Möglichkeiten, die im aktuellen Wartezustand zur Wahl stehen."""
+    wartet = profile.get("wartet_auf")
+    task = profile.get("current_task") or {}
+    if wartet in ("bewertung_wiederholen", "wahl_unbewertet"):
+        return wahl_nach_bewertungsfehler(task, (profile.get("unbewertet") or {}).get("anzahl", 1))
+    return []
 
 
 def material_abschnitte(material: str, min_len: int = 250, max_len: int = 1200) -> list[str]:

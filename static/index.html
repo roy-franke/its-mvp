@@ -88,6 +88,10 @@
   .msg .quelle { display: block; margin-top: 8px; font-size: .75rem; color: #64748b; }
   .msg.tutor.extern .who { opacity: 1; color: #0e7490; font-weight: 600; }
   .offer { align-self: flex-start; margin: -4px 0 4px; }
+  .wahlbox { align-self: stretch; border: 1px dashed #93c5fd; background: #f8fbff; border-radius: 12px;
+             padding: 10px 12px; }
+  .msg.user.wahl { background: #e0e7ff; color: #1e3a8a; font-size: .88rem; padding: 6px 12px; }
+  .msg.tutor.witz { background: #fdf4ff; border-color: #f0abfc; }
 
   /* Übersicht der eigenen Lernsequenzen (T-05) */
   .seq { display: flex; align-items: center; gap: 12px; padding: 12px 0;
@@ -652,6 +656,11 @@ async function resumeSession(sid) {
   } else if (st.wartet_auf === "antwort" && st.letztes_feedback) {
     renderFeedback(st.letztes_feedback);       // Nachbesserung nach Hinweis
   }
+  if ((st.wahl || []).length) {
+    // Offene Wahl (T-11, T-12, D-07): nach dem Fortsetzen wieder anbieten
+    setWaitMode();
+    renderWahl(st.wahl);
+  }
 }
 
 // ---------- Einstufung
@@ -801,34 +810,112 @@ async function submitAnswer(text, confidence) {
   try {
     const d = await api(`/session/${sessionId}/answer`,
       { answer: text, confidence });
-    renderProgress(d.progress);
-    if (d.bewertung === "unbewertet") {
-      // Technischer Fehler bei der Bewertung: zählt nicht, einfach nochmals senden
-      addMsg("tutor mid", "⚠️ " + (d.feedback || "") + (d.hinweis ? "\n💡 " + d.hinweis : ""), "Tutor");
-      $("chat-input").value = text;
-      setAnswerMode(true);
-      return;
-    }
-    renderFeedback(d);
-    if (d.niveau_frage) addLevelQuestion(d.niveau_frage);
-    if (d.adaption === "retry") {
-      // Aufgabe nochmals einblenden: Der zweite Versuch beantwortet die Aufgabe,
-      // nicht den Hinweis (Beobachtung aus dem Testlauf, D-04/D-05).
-      if (currentTask && currentTask.frage)
-        addMsg("tutor question", "↩️ Ergänze deine Antwort zur Aufgabe: " + currentTask.frage, "Tutor");
-      setAnswerMode(true);
-      $("chat-input").focus();
-    } else {
-      setContinueMode(d.adaption, d.finished);
-      // Der Weg führt sicher weiter – den nächsten Schritt schon anstossen,
-      // während der Lernende das Feedback liest.
-      prefetchNext($("btn-continue").dataset.adaptation || undefined);
-    }
+    handleAnswer(d);
   } catch (e) {
     addError(e);
     $("chat-input").value = $("chat-input").value || text;   // Antwort nicht verlieren
   }
   finally { setChatBusy(false); }
+}
+
+function handleAnswer(d) {
+  renderProgress(d.progress);
+  if (d.bewertung === "unbewertet") {
+    // T-11: Die Antwort bleibt auf dem Server gespeichert. Statt erneut
+    // abschicken: «Nochmals bewerten lassen», nach dem zweiten Fehler eine Wahl.
+    addMsg("tutor mid", "⚠️ " + (d.feedback || ""), "Tutor");
+    setWaitMode();
+    renderWahl(d.wahl);
+    return;
+  }
+  renderFeedback(d);
+  if (d.niveau_frage) addLevelQuestion(d.niveau_frage);
+  if (d.wahl && d.wahl.length) {
+    setWaitMode();
+    renderWahl(d.wahl);
+  } else if (d.adaption === "retry") {
+    // Aufgabe nochmals einblenden: Der zweite Versuch beantwortet die Aufgabe,
+    // nicht den Hinweis (Beobachtung aus dem Testlauf, D-04/D-05).
+    if (currentTask && currentTask.frage)
+      addMsg("tutor question", "↩️ Ergänze deine Antwort zur Aufgabe: " + currentTask.frage, "Tutor");
+    setAnswerMode(true);
+    $("chat-input").focus();
+  } else {
+    setContinueMode(d.adaption, d.finished);
+    // Der Weg führt sicher weiter – den nächsten Schritt schon anstossen,
+    // während der Lernende das Feedback liest.
+    prefetchNext($("btn-continue").dataset.adaptation || undefined);
+  }
+}
+
+// ---------- Wahlmöglichkeiten (T-11, T-12, D-07)
+//
+// In einem offenen Wartezustand bietet der Tutor Buttons an. Der Server kennt
+// die erlaubten Möglichkeiten (auch nach dem Fortsetzen) und protokolliert
+// jede Wahl. Während einer laufenden Anfrage sind die Buttons deaktiviert (T-02).
+function setWaitMode() {
+  answerEnabled = false;
+  for (const id of ["btn-answer", "btn-theory", "btn-deeper", "btn-continue"])
+    $(id).classList.add("hidden");
+  $("btn-answer").disabled = true;
+}
+
+function renderWahl(wahl) {
+  document.querySelectorAll("#chat .wahlbox").forEach(b => b.remove());
+  if (!wahl || !wahl.length) return;
+  const box = document.createElement("div");
+  box.className = "wahlbox";
+  box.innerHTML = '<div class="btnrow" style="margin-top:0">' + wahl.map(w =>
+    `<button class="small action ${w.haupt ? "" : "secondary"}" data-wahl="${esc(w.id)}">${esc(w.label)}</button>`
+  ).join("") + "</div>";
+  box.onclick = async e => {
+    const b = e.target.closest("button[data-wahl]");
+    if (!b || busy) return;
+    await waehle(b.dataset.wahl, b.textContent);
+  };
+  $("chat").insertBefore(box, $("waiting"));
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+async function waehle(id, label) {
+  setChatBusy(true);
+  let weiter = false;
+  try {
+    const d = await api(`/session/${sessionId}/wahl`, { wahl: id });
+    document.querySelectorAll("#chat .wahlbox").forEach(b => b.remove());
+    addMsg("user wahl", label, "Du (Auswahl)");
+    if (d.bewertung) { handleAnswer(d); return; }
+    if (d.witz) { addMsg("tutor witz", "😄 " + d.witz, "Tutor"); renderWahl(d.wahl); return; }
+    if (d.task || d.done) {
+      if (d.done) { renderDone(d); return; }
+      renderProgress(d.progress);
+      renderTask(d.task, undefined, true);
+      return;
+    }
+    if (d.ergaenzen) {
+      $("chat-input").value = d.antwort || "";
+      setAnswerMode(true);
+      confidenceAsked = true;          // Sicherheit wurde für diese Aufgabe schon erfasst
+      $("chat-input").focus();
+      return;
+    }
+    if (d.progress) renderProgress(d.progress);
+    if (d.loesung) {
+      addMsg("tutor good", "📘 Musterlösung: " + d.loesung +
+        ((d.elemente || []).length ? "\n\nDazu gehören:\n" + d.elemente.map(x => "- " + x).join("\n") : ""), "Tutor");
+      setContinueMode("next", d.finished);
+      prefetchNext();
+      return;
+    }
+    if (d.weiter) weiter = true;
+  } catch (e) { addError(e); }
+  finally { setChatBusy(false); }
+  if (weiter) {
+    // «Ohne Bewertung weiter» bzw. «Weiter zur nächsten Aufgabe»: direkt weiter
+    setChatBusy(true);
+    try { await nextTask(); } catch (e) { addError(e); setRetryMode(); }
+    finally { setChatBusy(false); }
+  }
 }
 
 // ---------- Verständnisfragen und Theorie auf Abruf (jederzeit)

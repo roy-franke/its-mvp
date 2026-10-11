@@ -67,6 +67,7 @@
   .event.fallback_used { border-color:#dc2626; background:#fef2f2; }
   .event.regel_verstoss, .event.vorabruf_verworfen { border-color:#d97706; background:#fffbeb; }
   .fb { color:#dc2626; font-weight:600; }
+  .event.wahl, .event.witz { border-color:#2563eb; background:#f8fbff; }
   .pill.fehlerart { background:#fee2e2; color:#991b1b; border-color:#fecaca; }
   ul.elemente { margin:4px 0 2px; padding-left:18px; font-size:.85rem; }
   .muted { color:var(--muted); }
@@ -338,6 +339,12 @@ function renderEvent(ev) {
     else if (ev.type === "niveau_frage") body = `🎚️ Frage nach anspruchsvolleren Aufgaben (Konzept «${esc(p.konzept)}»)`;
     else if (ev.type === "niveau_entscheid") body = `🎚️ Entscheid der lernenden Person: ${esc({hoeher_ja: "Ja, gerne", hoeher_nein: "Lieber so bleiben", festhalten: "Niveau festgehalten", automatisch: "wieder automatisch"}[p.aktion] || p.aktion)}`;
     else if (ev.type === "theorie_eingeschoben") body = `📖 Theorie eingeschoben: Konzept «${esc(p.konzept)}» war noch nicht erklärt`;
+    else if (WAHL_EVENT[ev.type]) { cls += " wahl"; body = `👆 ${WAHL_EVENT[ev.type]}: <strong>${esc(WAHL_LABEL[p.wahl] || p.wahl)}</strong>`
+      + (p.fehler_anzahl ? ` <span class="muted">(nach ${p.fehler_anzahl} gescheiterten Bewertungen)</span>` : "")
+      + (p.art ? ` <span class="muted">(${p.art === "theorie" ? "Theorie" : "Aufgabe"} konnte nicht erzeugt werden)</span>` : "")
+      + (p.ergaenzungen != null ? ` <span class="muted">(bisher ${p.ergaenzungen} ${p.ergaenzungen === 1 ? "Ergänzung" : "Ergänzungen"})</span>` : "")
+      + (p.konzept ? ` <span class="muted">Konzept «${esc(p.konzept)}»</span>` : ""); }
+    else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
     else body = esc(JSON.stringify(p));
     return `<div class="event ${cls}"><span class="t">${time}</span><br>${body}</div>`;
@@ -351,6 +358,15 @@ const SCHRITT = {
   ABSCHLUSS: "Abschluss", LERNZIELE_VORSCHLAGEN: "Lernziele vorschlagen",
   MATERIAL_PRUEFEN: "Material prüfen", WITZ: "Witz zum Thema",
 };
+
+// T-11, T-12, D-07: Wahl der lernenden Person
+const WAHL_EVENT = { wahl_nach_bewertungsfehler: "Wahl nach gescheiterter Bewertung",
+                     wahl_nach_fallback: "Wahl nach Fallback", wahl_nach_teilweise: "Wahl nach teilweise richtiger Antwort" };
+const WAHL_LABEL = { nochmals_bewerten: "Nochmals bewerten lassen", musterloesung: "Musterlösung ansehen und weiter",
+                     ohne_bewertung: "Ohne Bewertung weiter", nochmals: "Nochmals versuchen",
+                     abschnitt: "Abschnitt aus dem Material", naechstes_thema: "Zum nächsten Thema",
+                     direkt_aufgabe: "Direkt zur Aufgabe", witz: "Witz zum Thema",
+                     ergaenzen: "Antwort ergänzen", loesung: "Lösung ansehen", weiter: "Weiter zur nächsten Aufgabe" };
 
 // T-09: Art des Fehlers und Metadaten der Ollama-Antwort
 const FEHLERART = { leere_antwort: "leere Antwort", json_unlesbar: "unlesbares JSON",
