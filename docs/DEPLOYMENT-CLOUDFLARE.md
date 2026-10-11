@@ -270,6 +270,22 @@ Set static   X-Logout-Url   https://tutor.casaai.me/cdn-cgi/access/logout
 Ohne Header-Anmeldung hat dieser Header keine Wirkung; dann gilt das normale
 Abmelden mit Cookies (T-22).
 
+### Fehlersuche: Welche Header kommen an? (T-24)
+
+Funktioniert die Header-Anmeldung nicht wie erwartet, lassen sich die
+ankommenden Header ohne Code-Änderung ins Log schreiben:
+
+```ini
+ITS_LOG_LEVELS=its.auth=DEBUG
+```
+
+Nach einem Neustart erscheint pro Anfrage eine Liste «Request headers:» mit
+einem Header pro Zeile, sortiert. Werte von Cookie, Authorization und allen
+Headern, deren Name jwt, token oder secret enthält, sind gekürzt (erste 8
+Zeichen und Länge). Für eine gezielte Fehlersuche lässt sich das mit
+`ITS_LOG_HEADERS_UNMASKED=true` abschalten; danach wieder entfernen. Bei
+ausgeschalteter Header-Anmeldung wird nichts geloggt.
+
 ## Hinweis Datenschutz
 
 Für Tests und Demos mit fiktiven Namen ist dieses Setup unbedenklich.

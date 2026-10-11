@@ -35,7 +35,33 @@ import time
 
 from . import auth, didaktik, einstellungen, llm, store, tutor
 
-logging.basicConfig(level=logging.INFO)
+def _log_stufen_einrichten() -> str:
+    """T-24: Log-Stufen ohne Code-Änderung.
+
+    ITS_LOG_LEVEL setzt die Stufe für alle Module (Standard INFO),
+    ITS_LOG_LEVELS einzelne Module, z.B. «its.auth=DEBUG,its.llm=WARNING».
+    Gibt eine Beschreibung der aktiven Stufen zurück (für den Start).
+    """
+    def stufe(text: str) -> int | None:
+        wert = getattr(logging, (text or "").strip().upper(), None)
+        return wert if isinstance(wert, int) else None
+    basis = stufe(os.getenv("ITS_LOG_LEVEL", "INFO")) or logging.INFO
+    logging.basicConfig(level=basis)
+    logging.getLogger().setLevel(basis)
+    teile = [f"alle {logging.getLevelName(basis)}"]
+    for eintrag in (os.getenv("ITS_LOG_LEVELS") or "").split(","):
+        if "=" not in eintrag:
+            continue
+        modul, wert = (x.strip() for x in eintrag.split("=", 1))
+        if modul and stufe(wert) is not None:
+            logging.getLogger(modul).setLevel(stufe(wert))
+            teile.append(f"{modul}={logging.getLevelName(stufe(wert))}")
+        else:
+            teile.append(f"{eintrag.strip()} (ungültig, ignoriert)")
+    return ", ".join(teile)
+
+
+_LOG_STUFEN = _log_stufen_einrichten()
 log = logging.getLogger("its")
 
 BASE = Path(__file__).resolve().parent.parent
@@ -50,6 +76,8 @@ log.info("Zugangsschutz Lehrpersonen: %s | Klassencode: %s | Header-Anmeldung: %
          "aktiv" if auth.auth_enabled() else "AUS (TEACHER_PASSWORD leer)",
          "aktiv" if auth.class_code() else "aus",
          f"aktiv ({auth.user_header()}, {auth.roles_header()})" if auth.trust_headers() else "aus")
+
+log.info("Log-Stufen: %s", _LOG_STUFEN)
 
 # Rollenprüfung zentral als Abhängigkeit der Router (T-04): Jede Route unter
 # /api/teacher und /teacher ist damit geschützt, ohne dass sie einzeln daran

@@ -157,9 +157,44 @@ def has_teacher_cookie(request: Request) -> bool:
     return bool(token) and hmac.compare_digest(token, make_token())
 
 
+# ---------------------------------------------------------------- T-24 Debug-Logging
+
+_VERTRAULICH = ("cookie", "authorization", "proxy-authorization")
+_VERTRAULICH_TEIL = ("jwt", "token", "secret")
+
+
+def _maskieren(name: str, wert: str) -> str:
+    """Entscheid E5: vertrauliche Werte gekürzt (erste 8 Zeichen und Länge)."""
+    if (os.getenv("ITS_LOG_HEADERS_UNMASKED") or "").strip().lower() in ("1", "true", "yes", "ja"):
+        return wert
+    n = name.lower()
+    if n in _VERTRAULICH or any(t in n for t in _VERTRAULICH_TEIL):
+        return f"{wert[:8]}… (Länge {len(wert)})"
+    return wert
+
+
+def _header_loggen(request: Request) -> None:
+    """Alle Header einer Anfrage mit Stufe DEBUG, einmal pro Anfrage.
+
+    Die Liste wird nur gebaut, wenn DEBUG für its.auth eingeschaltet ist
+    (ITS_LOG_LEVELS=its.auth=DEBUG), damit im Normalbetrieb kein Aufwand entsteht.
+    """
+    if not log.isEnabledFor(logging.DEBUG):
+        return
+    try:
+        if getattr(request.state, "its_header_geloggt", False):
+            return
+        request.state.its_header_geloggt = True
+    except AttributeError:
+        pass
+    zeilen = [f"- {k}: {_maskieren(k, v)}" for k, v in sorted(request.headers.items())]
+    log.debug("Request headers (%s %s):\n%s", request.method, request.url.path, "\n".join(zeilen))
+
+
 def _header_identity(request: Request) -> tuple[str, set[str]] | None:
     if not trust_headers():
         return None
+    _header_loggen(request)
     name = (request.headers.get(user_header()) or "").strip()
     if not name:
         return None

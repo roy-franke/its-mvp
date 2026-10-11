@@ -158,6 +158,9 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_LOGOUT_HEADER` | Header mit der Abmeldeadresse des Proxys bei Header-Anmeldung (Standard `X-Logout-Url`, T-23) |
 | `ITS_LOGOUT_URL` | Feste Rückfalladresse zum Abmelden bei Header-Anmeldung, z.B. `/cdn-cgi/access/logout` (Standard leer; ohne Adresse kein Abmelde-Button) |
 | `ITS_DOMAIN` | Domain für den HTTPS-Betrieb mit Docker/Caddy |
+| `ITS_LOG_LEVEL` | Log-Stufe für alle Module: `DEBUG`, `INFO` (Standard), `WARNING`, `ERROR` (T-24) |
+| `ITS_LOG_LEVELS` | Stufen einzelner Module, kommagetrennt, z.B. `its.auth=DEBUG` schreibt bei Header-Anmeldung alle ankommenden Header ins Log (T-24) |
+| `ITS_LOG_HEADERS_UNMASKED` | `true` zeigt Cookie, Authorization und Header mit jwt/token/secret im Namen ungekürzt (Standard `false`, Entscheid E5) |
 
 ## Tests
 
