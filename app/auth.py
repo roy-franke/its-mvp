@@ -187,8 +187,15 @@ def is_teacher(request: Request) -> bool:
 
 
 def require_teacher(request: Request):
-    """FastAPI-Dependency für /api/teacher/…: 401 ohne Lehrpersonen-Login."""
+    """FastAPI-Dependency für /api/teacher/…: 401 ohne Login, 403 für angemeldete Lernende.
+
+    T-20: Eine angemeldete lernende Person ist bekannt, darf aber nicht; das
+    ist 403. Ohne jede Anmeldung bleibt es bei 401 (die Oberfläche leitet dann
+    auf den Login weiter).
+    """
     if not is_teacher(request):
+        if identity(request).rolle == LERNEND:
+            raise HTTPException(403, "Nur für Lehrpersonen")
         raise HTTPException(401, "Login als Lehrperson erforderlich")
 
 

@@ -297,7 +297,7 @@ def lesson_update(lesson_id: str, req: LessonCreateRequest):
     mit dem neuen Material; Version und Änderungsdatum werden nachgeführt."""
     lesson = load_lesson(lesson_id)
     if lesson.get("archiviert"):
-        raise HTTPException(409, "Die Lektion ist gelöscht und kann nicht mehr bearbeitet werden.")
+        raise HTTPException(409, "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten.")
     lesson.update(_validate_lesson(req))
     lesson["id"] = lesson_id
     lesson["version"] = int(lesson.get("version", 1)) + 1
@@ -312,7 +312,7 @@ def lesson_update(lesson_id: str, req: LessonCreateRequest):
 
 @teacher_api.delete("/lessons/{lesson_id}")
 def lesson_delete(lesson_id: str):
-    """Lektion «löschen»: Sie wird archiviert, nicht physisch entfernt.
+    """Lektion archivieren (T-20, früher «löschen»): Die Datei bleibt erhalten.
 
     Sie verschwindet aus der Auswahl der Lernenden; Lernverläufe dazu bleiben
     vollständig lesbar, weil die Datei erhalten bleibt.
@@ -345,6 +345,18 @@ def lesson_duplicate(lesson_id: str):
     _save_lesson(kopie)
     log.info("Lektion dupliziert: %s -> %s", lesson_id, neu_id)
     return {"id": neu_id, "titel": titel}
+
+
+@teacher_api.post("/lessons/{lesson_id}/wiederherstellen")
+def lesson_restore(lesson_id: str):
+    """T-20: Archivierte Lektion wieder in die Auswahl der Lernenden aufnehmen."""
+    lesson = load_lesson(lesson_id)
+    lesson.pop("archiviert", None)
+    lesson.pop("archiviert_am", None)
+    lesson["geaendert_am"] = time.time()
+    _save_lesson(lesson)
+    log.info("Lektion wiederhergestellt: %s", lesson_id)
+    return {"ok": True, "id": lesson_id}
 
 
 @teacher_api.post("/lessons/extract")
@@ -1289,6 +1301,60 @@ def teacher_sessions(testlaeufe: bool = False):
             "updated_at": s["updated_at"],
         })
     return out
+
+
+class ArchivRequest(BaseModel):
+    ids: list[str]
+
+
+@teacher_api.post("/sessions/archivieren")
+def teacher_archive(req: ArchivRequest):
+    """T-20: Eine oder mehrere Lernsequenzen archivieren (z.B. alle Testläufe einer Lektion)."""
+    archiviert = []
+    for sid in dict.fromkeys(req.ids):
+        s = store.get_session(sid)
+        if s is None:
+            continue
+        if s["status"] != "archiviert":
+            store.set_vorabruf(sid, None)
+            store.set_status(sid, "archiviert", "Von der Lehrperson archiviert")
+            archiviert.append(sid)
+    return {"archiviert": archiviert, "anzahl": len(archiviert)}
+
+
+def _status_vor_archivierung(sid: str, s: dict) -> str:
+    for ev in reversed(store.get_events(sid)):
+        if ev["type"] == "status_geaendert" and ev["payload"].get("nach") == "archiviert":
+            von = ev["payload"].get("von")
+            if von in ("abgeschlossen", "abgebrochen", "pausiert"):
+                return von
+            break
+    # «aktiv» wird als «pausiert» wiederhergestellt: gerade lernt niemand darin
+    return "abgeschlossen" if s["phase"] == "finished" else "pausiert"
+
+
+@teacher_api.post("/sessions/{sid}/wiederherstellen")
+def teacher_restore(sid: str, bestehende_archivieren: bool = False):
+    """T-20: Archivierte Sequenz wiederherstellen.
+
+    Regel aus T-05: pro Person und Lektion höchstens eine nicht archivierte
+    Sequenz. Gibt es schon eine, antwortet der Server mit 409, und die
+    Oberfläche fragt nach; mit bestehende_archivieren=true wird sie archiviert.
+    """
+    s = _session(sid)
+    if s["status"] != "archiviert":
+        raise HTTPException(409, "Diese Lernsequenz ist nicht archiviert.")
+    offen = store.open_session_for(s["user_key"], s["lesson_id"])
+    if offen and offen["id"] != sid:
+        if not bestehende_archivieren:
+            raise HTTPException(409, detail={
+                "code": "offene_sequenz", "session_id": offen["id"], "status": offen["status"],
+                "message": f"{s['name']} hat zu dieser Lektion bereits eine nicht archivierte Lernsequenz "
+                           f"(Status: {offen['status']})."})
+        store.set_status(offen["id"], "archiviert", "Archiviert, weil eine ältere Sequenz wiederhergestellt wurde")
+    ziel = _status_vor_archivierung(sid, s)
+    store.set_status(sid, ziel, "Von der Lehrperson wiederhergestellt")
+    return {"ok": True, "status": ziel}
 
 
 @teacher_api.get("/sessions/{sid}")

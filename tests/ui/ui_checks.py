@@ -376,7 +376,7 @@ def t06_pausieren_abbrechen(pw):
 
 @scenario("t07")
 def t07_lektionen(pw):
-    """T-07 AK1/AK2: Lektion ansehen, vorausgefüllt bearbeiten, löschen."""
+    """T-07 AK1/AK2: Lektion ansehen, vorausgefüllt bearbeiten, archivieren."""
     with server() as base:
         material = ("### Quelle: skript.pdf\n\n" + "Die Tierhalterhaftung nach Art. 56 OR. " * 5 +
                     "\n\n---\n\n### Quelle: notizen.docx\n\n" + "Eigene Notizen zur Haftung. " * 5 +
@@ -411,12 +411,12 @@ def t07_lektionen(pw):
         check("T-07 AK1 Änderung gespeichert, Material unverändert",
               d["titel"] == "UI Lektion geändert" and d["material"] == material, d["titel"])
         page.goto(base + "/teacher/lessons")
-        page.locator(f"tr[data-id='{lid}'] button[data-act='delete']").click()
+        page.locator(f"tr[data-id='{lid}'] button[data-act='archive']").click()
         expect(page.locator("#modal")).to_be_visible()
         page.click("#modal-ok")
         expect(page.locator(f"tr[data-id='{lid}']")).to_have_count(0, timeout=10000)
         ids = [l["id"] for l in httpx.get(base + "/api/lessons").json()]
-        check("T-07 AK2 gelöschte Lektion nicht mehr in der Auswahl", lid not in ids)
+        check("T-07 AK2 archivierte Lektion nicht mehr in der Auswahl", lid not in ids)
 
 
 def beantworte(page, text: str, sicherheit: int | None = 7):
@@ -975,6 +975,55 @@ def t19_material_pruefen(pw):
               and page.locator("#result").count() == 1, meldung)
         check("T-19 Kennzeichnung «experimentell» bei der Prüfung", page.locator("#exp-check").is_visible())
         check("T-19 AK2 Formularzustand unverändert", [page.input_value(f) for f in felder] == vorher)
+
+
+@scenario("t20")
+def t20_archivieren(pw):
+    """T-20 AK1/AK4: Sequenzen einzeln und gemeinsam archivieren und wiederherstellen; Lektionen."""
+    with server() as base:
+        for name in ("Archiv Eins", "Archiv Zwei", "Archiv Drei"):
+            c = httpx.Client(base_url=base)
+            c.post("/api/learner/login", json={"name": name})
+            c.post("/api/session/start", json={"lesson_id": "haftungsrecht"})
+        page = launch(pw).new_page()
+        fehler = []
+        page.on("pageerror", lambda e: fehler.append(str(e)))
+        page.goto(base + "/teacher")
+        expect(page.locator(".seq-item")).to_have_count(3, timeout=10000)
+        boxen = page.locator(".seq-wahl")
+        boxen.nth(0).check()
+        boxen.nth(1).check()
+        page.click("#btn-archivieren-mehrere")
+        expect(page.locator("#modal")).to_be_visible()
+        check("T-20 Bestätigung mit eindeutigen Buttons", page.inner_text("#modal-ok") == "Ja, Sequenzen archivieren"
+              and page.inner_text("#modal-cancel") == "Nein, zurück")
+        page.click("#modal-ok")
+        expect(page.locator(".seq-item")).to_have_count(1, timeout=10000)
+        check("T-20 AK1 zwei Sequenzen gemeinsam archiviert und ausgeblendet", True)
+        page.select_option("#f-status", "archiviert")
+        expect(page.locator(".seq-item")).to_have_count(2)
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#btn-detail-wiederherstellen")).to_be_visible(timeout=10000)
+        page.click("#btn-detail-wiederherstellen")
+        expect(page.locator(".seq-item")).to_have_count(1, timeout=10000)
+        check("T-20 AK1 Wiederherstellen einer Sequenz", True)
+        page.select_option("#f-status", "")
+        expect(page.locator(".seq-item")).to_have_count(2, timeout=10000)
+        page.locator(".seq-item").first.click()
+        page.click("#btn-detail-archivieren")
+        page.click("#modal-ok")
+        expect(page.locator(".seq-item")).to_have_count(1, timeout=10000)
+        check("T-20 AK1 Einzelne Sequenz archivieren", True)
+        page.goto(base + "/teacher/lessons")
+        check("T-20 AK4 kein «Löschen» in der Lektionsverwaltung", "Löschen" not in page.content())
+        page.locator("tr[data-id='haftungsrecht'] button[data-act='archive']").click()
+        page.click("#modal-ok")
+        page.check("#show-archived")
+        page.locator("tr[data-id='haftungsrecht'] button[data-act='restore']").click()
+        expect(page.locator("#banner")).to_contain_text("wiederhergestellt", timeout=10000)
+        ids = [l["id"] for l in httpx.get(base + "/api/lessons").json()]
+        check("T-20 AK4 archivierte Lektion wiederhergestellt", "haftungsrecht" in ids)
+        check("T-20 ohne Skriptfehler", not fehler, "; ".join(fehler))
 
 
 def run(names):

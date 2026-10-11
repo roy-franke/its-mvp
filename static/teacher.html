@@ -75,6 +75,21 @@
   button.small { background:none; border:1px solid var(--border); border-radius:6px;
                  padding:4px 12px; cursor:pointer; font-size:.8rem; }
   #btn-sidebar { display:none; }
+  button.small.danger { color:#dc2626; border-color:#fca5a5; }
+  button.small:disabled { opacity:.5; cursor:not-allowed; }
+  .auswahl { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+  .seq-zeile { display:flex; align-items:flex-start; gap:4px; }
+  .seq-zeile input { margin-top:9px; flex:none; }
+  .banner-t { border-left:4px solid #16a34a; background:#f0fdf4; padding:8px 12px; border-radius:0 8px 8px 0;
+              font-size:.85rem; margin-bottom:12px; }
+  /* Bestätigungsdialog (T-15/T-20) */
+  .modal { position:fixed; inset:0; background:rgba(15,23,42,.45); display:flex; align-items:center;
+           justify-content:center; padding:16px; z-index:20; }
+  .modal-box { background:#fff; border-radius:12px; padding:22px; max-width:460px; width:100%; }
+  .modal-box .knoepfe { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+  .modal-box button { padding:8px 14px; font-size:.9rem; border-radius:8px; cursor:pointer; font:inherit; }
+  .modal-box button.haupt { background:var(--accent); color:#fff; border:0; }
+  .modal-box button.danger { background:#fff; color:#dc2626; border:1px solid #fca5a5; }
   pre { white-space:pre-wrap; margin:4px 0 0; font:inherit; }
   /* T-13: formatierte Tutor-Texte */
   .event .fmt p { margin:2px 0 4px; }
@@ -119,6 +134,13 @@
       </select>
       <label class="cb"><input type="checkbox" id="show-tests"> Testläufe anzeigen</label>
     </div>
+    <p class="muted" style="font-size:.75rem;margin:-4px 0 8px">Archivierte Sequenzen sind ausgeblendet;
+      der Status «archiviert» zeigt sie.</p>
+    <!-- T-20: mehrere Sequenzen auswählen und gemeinsam archivieren -->
+    <div class="auswahl" id="auswahl-leiste">
+      <button class="small" id="btn-alle">Alle sichtbaren auswählen</button>
+      <button class="small danger" id="btn-archivieren-mehrere" disabled>Ausgewählte archivieren</button>
+    </div>
     <div id="liste"></div>
     <p class="muted" id="empty" style="display:none;font-size:.85rem">Keine Lernsequenzen für diese Auswahl.</p>
     <button class="small" id="btn-refresh" style="margin-top:8px">Aktualisieren</button>
@@ -137,7 +159,11 @@
       <div class="card hidden" id="detail">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap">
           <strong id="detail-title"></strong>
-          <button class="small" id="btn-detail-refresh">Aktualisieren</button>
+          <span>
+            <button class="small danger hidden" id="btn-detail-archivieren">Archivieren</button>
+            <button class="small hidden" id="btn-detail-wiederherstellen">Wiederherstellen</button>
+            <button class="small" id="btn-detail-refresh">Aktualisieren</button>
+          </span>
         </div>
         <div class="kopf" id="detail-kopf"></div>
         <div class="timeline" id="detail-events" style="margin-top:12px"></div>
@@ -168,6 +194,16 @@
   </main>
 </div>
 
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <p id="modal-text"></p>
+    <div class="knoepfe">
+      <button class="haupt" id="modal-cancel">Nein, zurück</button>
+      <button class="danger" id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const LABEL = { basic:"Grundlagen", intermediate:"Fortgeschritten", advanced:"Vertieft" };
@@ -191,6 +227,70 @@ function kalib(k) {
 // ---------- Seitenleiste (N-02): alle Sequenzen einmal laden, Filter wirken sofort
 let alle = [];
 let aktiv = decodeURIComponent(location.hash.slice(1)) || null;
+const ausgewaehlt = new Set();     // T-20: zum gemeinsamen Archivieren ausgewählte Sequenzen
+
+// ---------- Bestätigungsdialog: sichere Wahl als Hauptbutton (T-15)
+function bestaetigen(text, ok) {
+  return new Promise(resolve => {
+    $("modal-text").textContent = text;
+    $("modal-ok").textContent = ok;
+    $("modal").classList.remove("hidden");
+    const fertig = v => { $("modal").classList.add("hidden"); resolve(v); };
+    $("modal-ok").onclick = () => fertig(true);
+    $("modal-cancel").onclick = () => fertig(false);
+    $("modal-cancel").focus();
+  });
+}
+
+async function post(pfad) {
+  const r = await fetch("/api/teacher" + pfad, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: arguments[1] ? JSON.stringify(arguments[1]) : undefined });
+  if (r.status === 401) { location.href = "/teacher/login"; throw new Error("Login"); }
+  const d = await r.json();
+  if (!r.ok) { const e = new Error((d.detail && d.detail.message) || d.detail || "Fehler"); e.status = r.status; e.detail = d.detail; throw e; }
+  return d;
+}
+
+// ---------- T-20: Archivieren und Wiederherstellen
+$("btn-alle").onclick = () => {
+  for (const s of gefiltert()) if (s.status !== "archiviert") ausgewaehlt.add(s.session_id);
+  renderListe();
+};
+$("btn-archivieren-mehrere").onclick = async () => {
+  const ids = [...ausgewaehlt];
+  if (!ids.length) return;
+  if (!await bestaetigen(`${ids.length} ${ids.length === 1 ? "Lernsequenz" : "Lernsequenzen"} archivieren? ` +
+      "Sie verschwinden aus den Auswertungen und lassen sich jederzeit wiederherstellen.",
+      ids.length === 1 ? "Ja, Sequenz archivieren" : "Ja, Sequenzen archivieren")) return;
+  await post("/sessions/archivieren", { ids });
+  ausgewaehlt.clear();
+  await loadSessions();
+  if (aktiv && ids.includes(aktiv)) loadDetail(aktiv);
+};
+$("btn-detail-archivieren").onclick = async () => {
+  if (!aktiv || !await bestaetigen("Diese Lernsequenz archivieren? Sie verschwindet aus den Auswertungen " +
+      "und lässt sich jederzeit wiederherstellen.", "Ja, Sequenz archivieren")) return;
+  await post("/sessions/archivieren", { ids: [aktiv] });
+  await loadSessions();
+  loadDetail(aktiv);
+};
+$("btn-detail-wiederherstellen").onclick = async () => {
+  if (!aktiv) return;
+  try {
+    await post(`/sessions/${encodeURIComponent(aktiv)}/wiederherstellen`);
+  } catch (e) {
+    if (e.status !== 409 || !e.detail || e.detail.code !== "offene_sequenz") { alertText(e.message); return; }
+    // Regel aus T-05: höchstens eine offene Sequenz pro Person und Lektion
+    if (!await bestaetigen(e.detail.message + " Die bestehende archivieren und diese wiederherstellen?",
+        "Ja, bestehende archivieren")) return;
+    await post(`/sessions/${encodeURIComponent(aktiv)}/wiederherstellen?bestehende_archivieren=true`);
+  }
+  await loadSessions();
+  loadDetail(aktiv);
+};
+function alertText(t) {
+  $("detail-kopf").insertAdjacentHTML("afterend", `<div class="banner-t" style="border-color:#dc2626;background:#fef2f2">${esc(t)}</div>`);
+}
 
 async function loadSessions() {
   // Testläufe immer mitladen und im Browser filtern, damit der Filter ohne
@@ -212,8 +312,10 @@ function gefiltert() {
   const name = $("f-name").value.trim().toLowerCase();
   const lektion = $("f-lektion").value, status = $("f-status").value;
   const tests = $("show-tests").checked;
+  // T-20: archivierte Sequenzen nur über den Statusfilter «archiviert»
   return alle.filter(s => (tests || !s.testlauf) && (!lektion || s.lesson_id === lektion)
-    && (!status || s.status === status) && (!name || s.name.toLowerCase().includes(name)));
+    && (status ? s.status === status : s.status !== "archiviert")
+    && (!name || s.name.toLowerCase().includes(name)));
 }
 
 function renderListe() {
@@ -228,14 +330,25 @@ function renderListe() {
   $("liste").innerHTML = [...personen.values()]
     .sort((a, b) => a.name.localeCompare(b.name, "de"))
     .map(p => `<div class="person"><div class="person-name">${esc(p.name)}</div>` +
-      p.seqs.map(s => `
+      p.seqs.map(s => `<div class="seq-zeile">
+        <input type="checkbox" class="seq-wahl" data-sid="${esc(s.session_id)}" aria-label="Sequenz auswählen"
+          ${ausgewaehlt.has(s.session_id) ? "checked" : ""} ${s.status === "archiviert" ? "disabled" : ""}>
         <button class="seq-item${s.session_id === aktiv ? " active" : ""}" data-sid="${esc(s.session_id)}">
           ${esc(s.lesson_titel || s.lesson_id)}${s.testlauf ? ' <span class="pill test">Testlauf</span>' : ""}
           <div class="meta"><span class="pill st-${esc(s.status)}">${esc(STATUS[s.status] || s.status)}</span>
             Schritt ${s.step}/${s.total_steps} · ${LABEL[s.level] || s.level} · ${Math.round(s.correct_rate * 100)} %</div>
-        </button>`).join("") + "</div>").join("");
+        </button></div>`).join("") + "</div>").join("");
+  $("btn-archivieren-mehrere").disabled = ausgewaehlt.size === 0;
+  $("btn-archivieren-mehrere").textContent = ausgewaehlt.size
+    ? `${ausgewaehlt.size} ${ausgewaehlt.size === 1 ? "Sequenz" : "Sequenzen"} archivieren` : "Ausgewählte archivieren";
 }
 
+$("liste").onchange = e => {
+  const cb = e.target.closest(".seq-wahl");
+  if (!cb) return;
+  if (cb.checked) ausgewaehlt.add(cb.dataset.sid); else ausgewaehlt.delete(cb.dataset.sid);
+  renderListe();
+};
 $("liste").onclick = e => {
   const b = e.target.closest(".seq-item");
   if (!b) return;
@@ -278,6 +391,8 @@ async function loadDetail(sid) {
   const s = d.session, p = s.profile || {};
   $("detail").dataset.sid = sid;
   $("detail-title").textContent = `Lernverlauf von ${s.name} · ${s.lesson_titel || s.lesson_id}`;
+  $("btn-detail-archivieren").classList.toggle("hidden", s.status === "archiviert");
+  $("btn-detail-wiederherstellen").classList.toggle("hidden", s.status !== "archiviert");
   const total = (alle.find(x => x.session_id === sid) || {}).total_steps;
   $("detail-kopf").innerHTML =
     `<span class="pill st-${esc(s.status)}">${esc(STATUS[s.status] || s.status)}</span>` +

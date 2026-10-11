@@ -63,7 +63,7 @@
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
       <strong>Alle Lektionen</strong>
       <label class="muted" style="font-size:.85rem">
-        <input type="checkbox" id="show-archived" onchange="load()"> Gelöschte anzeigen</label>
+        <input type="checkbox" id="show-archived" onchange="load()"> Archivierte anzeigen</label>
     </div>
     <table>
       <thead><tr>
@@ -139,7 +139,7 @@ async function load() {
   $("empty").classList.toggle("hidden", list.length > 0);
   $("rows").innerHTML = list.map(l => `
     <tr data-id="${esc(l.id)}">
-      <td><strong>${esc(l.titel)}</strong>${l.archiviert ? '<span class="pill">gelöscht</span>' : ""}
+      <td><strong>${esc(l.titel)}</strong>${l.archiviert ? '<span class="pill">archiviert</span>' : ""}
           <br><span class="muted" style="font-size:.78rem">Version ${l.version}</span></td>
       <td class="hide-sm">${l.lernziele}</td>
       <td class="hide-sm">${l.quellen}</td>
@@ -149,8 +149,9 @@ async function load() {
       <td><div class="actions">
         <button class="secondary" data-act="view">Ansehen</button>
         <button class="secondary" data-act="duplicate">Duplizieren</button>
-        ${l.archiviert ? "" : `<button class="secondary" data-act="edit">Bearbeiten</button>
-        <button class="danger" data-act="delete">Löschen</button>`}
+        ${l.archiviert ? `<button class="secondary" data-act="restore">Wiederherstellen</button>`
+          : `<button class="secondary" data-act="edit">Bearbeiten</button>
+        <button class="danger" data-act="archive">Archivieren</button>`}
       </div></td>
     </tr>`).join("");
 }
@@ -161,7 +162,15 @@ $("rows").onclick = async e => {
   const id = btn.closest("tr").dataset.id;
   if (btn.dataset.act === "edit") location.href = `/teacher/lessons/${encodeURIComponent(id)}/edit`;
   if (btn.dataset.act === "view") showDetail(id);
-  if (btn.dataset.act === "delete") confirmDelete(id);
+  if (btn.dataset.act === "archive") confirmArchive(id);
+  if (btn.dataset.act === "restore") {
+    btn.disabled = true;
+    const titel = btn.closest("tr").querySelector("strong").textContent;
+    await api("/lessons/" + encodeURIComponent(id) + "/wiederherstellen", "POST");
+    $("banner").textContent = `Lektion «${titel}» wurde wiederhergestellt und ist wieder in der Auswahl.`;
+    $("banner").classList.remove("hidden");
+    load();
+  }
   if (btn.dataset.act === "duplicate") {
     // T-17: Kopie anlegen und direkt im Editor öffnen
     btn.disabled = true;
@@ -180,7 +189,7 @@ async function showDetail(id) {
   const l = await api("/lessons/" + encodeURIComponent(id));
   $("d-titel").textContent = l.titel;
   $("d-meta").textContent = `Version ${l.version} · geändert ${zeit(l.geaendert_am)} · ` +
-    `${l.sequenzen} Sequenzen, davon ${l.laufend} laufend` + (l.archiviert ? " · gelöscht" : "");
+    `${l.sequenzen} Sequenzen, davon ${l.laufend} laufend` + (l.archiviert ? " · archiviert" : "");
   $("d-ziele").innerHTML = (l.lernziele || []).map(z => `<li>${esc(z)}</li>`).join("");
   $("d-quellen").innerHTML = (l.quellen || []).map(q =>
     `<li>${esc(q.name)} <span class="muted">(${(q.chars || 0).toLocaleString("de-CH")} Zeichen)</span></li>`).join("")
@@ -194,16 +203,17 @@ async function showDetail(id) {
   $("detail").scrollIntoView({ behavior: "smooth" });
 }
 
-function confirmDelete(id) {
+function confirmArchive(id) {
   const titel = document.querySelector(`tr[data-id="${CSS.escape(id)}"] strong`).textContent;
-  $("modal-text").textContent = `Lektion «${titel}» löschen? Sie verschwindet aus der Auswahl ` +
-    "der Lernenden. Bestehende Lernverläufe bleiben vollständig lesbar.";
+  $("modal-text").textContent = `Lektion «${titel}» archivieren? Sie verschwindet aus der Auswahl ` +
+    "der Lernenden. Bestehende Lernverläufe bleiben vollständig lesbar, und du kannst die Lektion " +
+    "jederzeit wiederherstellen.";
   $("modal").classList.remove("hidden");
   $("modal-cancel").onclick = () => $("modal").classList.add("hidden");
   $("modal-ok").onclick = async () => {
     $("modal").classList.add("hidden");
     await api("/lessons/" + encodeURIComponent(id), "DELETE");
-    $("banner").textContent = `Lektion «${titel}» wurde gelöscht (archiviert).`;
+    $("banner").textContent = `Lektion «${titel}» wurde archiviert.`;
     $("banner").classList.remove("hidden");
     load();
   };

@@ -75,8 +75,9 @@ def test_llm_test_nur_fuer_lehrpersonen(client, passwort):
 def test_lernende_duerfen_keine_lehrpersonen_endpunkte(client, passwort):
     client.post("/api/learner/login", json={"name": "Mia"})
     assert client.get("/api/me").json()["rolle"] == "lernend"
-    assert client.get("/api/teacher/sessions").status_code == 401
-    assert client.post("/api/teacher/lessons", json={}).status_code == 401
+    # T-20: angemeldet, aber nicht berechtigt: 403
+    assert client.get("/api/teacher/sessions").status_code == 403
+    assert client.post("/api/teacher/lessons", json={}).status_code == 403
 
 
 # ---------------------------------------------------------------- AK 3 Testlauf
@@ -108,8 +109,8 @@ def test_header_anmeldung_lernend(client, header_an):
     me = client.get("/api/me", headers=h).json()
     assert me["name"] == "mia.muster" and me["name_fixiert"] is True
     assert me["rolle"] == "lernend" and me["code_required"] is False
-    # Header entscheidet auch ohne Passwort: keine Lehrpersonen-Endpunkte
-    assert client.get("/api/teacher/sessions", headers=h).status_code == 401
+    # Header entscheidet auch ohne Passwort: keine Lehrpersonen-Endpunkte (403 seit T-20)
+    assert client.get("/api/teacher/sessions", headers=h).status_code == 403
     assert client.get("/teacher", headers=h, follow_redirects=False).status_code == 307
     # Ein anderer Name im Formular wird ignoriert
     d = client.post("/api/session/start", headers=h, json={"name": "Jemand anders"}).json()
