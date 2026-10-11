@@ -102,7 +102,8 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `GET /api/teacher/lessons` | Lektionen für die Verwaltung (`?archivierte=true` inkl. gelöschter) |
 | `GET /api/teacher/lessons/{id}` | Lektion vollständig mit gültigen Einstellungen |
 | `PUT /api/teacher/lessons/{id}` | Lektion ändern (Version und Änderungsdatum werden nachgeführt) |
-| `DELETE /api/teacher/lessons/{id}` | Lektion löschen, d.h. archivieren |
+| `DELETE /api/teacher/lessons/{id}` | Lektion archivieren |
+| `POST /api/teacher/lessons/{id}/duplizieren` | Kopie «<Titel> (Kopie)» mit allen Inhalten, ohne Sequenzen, Version 1 (T-17) |
 | `POST /api/teacher/lessons/extract` | Text aus PDF/Word/Text-Datei extrahieren |
 | `POST /api/teacher/lessons/suggest-goals` | KI-Vorschlag für Titel und Lernziele |
 | `POST /api/teacher/lessons/check-material` | Material mit den Lernzielen abgleichen (Erklärung, Beispiel, Begründung) |

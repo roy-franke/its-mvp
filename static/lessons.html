@@ -148,6 +148,7 @@ async function load() {
       <td>${l.sequenzen}${l.laufend ? ` <span class="muted">(${l.laufend} laufend)</span>` : ""}</td>
       <td><div class="actions">
         <button class="secondary" data-act="view">Ansehen</button>
+        <button class="secondary" data-act="duplicate">Duplizieren</button>
         ${l.archiviert ? "" : `<button class="secondary" data-act="edit">Bearbeiten</button>
         <button class="danger" data-act="delete">Löschen</button>`}
       </div></td>
@@ -161,6 +162,18 @@ $("rows").onclick = async e => {
   if (btn.dataset.act === "edit") location.href = `/teacher/lessons/${encodeURIComponent(id)}/edit`;
   if (btn.dataset.act === "view") showDetail(id);
   if (btn.dataset.act === "delete") confirmDelete(id);
+  if (btn.dataset.act === "duplicate") {
+    // T-17: Kopie anlegen und direkt im Editor öffnen
+    btn.disabled = true;
+    try {
+      const d = await api("/lessons/" + encodeURIComponent(id) + "/duplizieren", "POST");
+      location.href = `/teacher/lessons/${encodeURIComponent(d.id)}/edit?dupliziert=1`;
+    } catch (err) {
+      $("banner").textContent = "Duplizieren hat nicht geklappt: " + err.message;
+      $("banner").classList.remove("hidden");
+      btn.disabled = false;
+    }
+  }
 };
 
 async function showDetail(id) {

@@ -912,6 +912,22 @@ def d11_kopie(pw):
         check("D-11 AK4 Event im Lernverlauf der Lehrperson", True)
 
 
+@scenario("t17")
+def t17_duplizieren(pw):
+    """T-17 AK3: Button «Duplizieren», Weiterleitung in den Editor, Titel der Kopie."""
+    with server() as base:
+        page = launch(pw).new_page()
+        page.goto(base + "/teacher/lessons")
+        page.locator("tr[data-id='haftungsrecht'] button[data-act='duplicate']").click()
+        page.wait_for_url("**/edit?dupliziert=1", timeout=10000)
+        titel = page.locator("#titel")
+        expect(titel).to_have_value("Haftpflichtrecht – Grundlagen (ABU/BM) (Kopie)", timeout=10000)
+        check("T-17 AK3 Kopie öffnet sich im Editor mit Titel «(Kopie)»", "/teacher/lessons/" in page.url)
+        check("T-17 Hinweis auf die Kopie", "Kopie angelegt" in page.inner_text("#edit-notice"))
+        ids = [l["id"] for l in httpx.get(base + "/api/lessons").json()]
+        check("T-17 AK2 Kopie sofort in der Lektionsauswahl", any(i.endswith("-kopie") for i in ids), str(ids))
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

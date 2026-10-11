@@ -22,3 +22,24 @@ _lessons_tmp = Path(tempfile.mkdtemp(prefix="its_lessons_"))
 _default = Path(__file__).resolve().parent.parent / "app" / "lessons" / "haftungsrecht.json"
 shutil.copy(_default, _lessons_tmp / _default.name)
 os.environ["ITS_LESSONS_DIR"] = str(_lessons_tmp)
+
+
+import json  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _neue_lektionen_archivieren():
+    """Von einem Test angelegte Lektionen danach archivieren.
+
+    Sonst ändert sich die Standardlektion (die erste in alphabetischer
+    Reihenfolge) für die folgenden Tests, etwa durch «duplikat-…».
+    """
+    vorher = {p.name for p in _lessons_tmp.glob("*.json")}
+    yield
+    for p in _lessons_tmp.glob("*.json"):
+        if p.name not in vorher:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            data["archiviert"] = True
+            p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")

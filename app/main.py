@@ -324,6 +324,28 @@ def lesson_delete(lesson_id: str):
     return {"ok": True, "id": lesson_id}
 
 
+# Felder, die beim Duplizieren nicht übernommen werden (T-17)
+_NICHT_DUPLIZIEREN = ("id", "version", "erstellt_am", "geaendert_am", "archiviert", "archiviert_am", "_datei")
+
+
+@teacher_api.post("/lessons/{lesson_id}/duplizieren")
+def lesson_duplicate(lesson_id: str):
+    """T-17: Kopie mit neuer ID und allen Inhalten, ohne Sequenzen und Versionsgeschichte.
+
+    Auch archivierte Lektionen lassen sich duplizieren; die Kopie ist aktiv.
+    """
+    original = load_lesson(lesson_id)
+    titel = f"{original.get('titel', lesson_id)} (Kopie)"
+    neu_id = _unique_slug(titel)
+    jetzt = time.time()
+    kopie = {k: json.loads(json.dumps(v)) for k, v in original.items() if k not in _NICHT_DUPLIZIEREN}
+    kopie.update({"id": neu_id, "titel": titel, "version": 1, "erstellt_am": jetzt, "geaendert_am": jetzt,
+                  "dupliziert_von": lesson_id})
+    _save_lesson(kopie)
+    log.info("Lektion dupliziert: %s -> %s", lesson_id, neu_id)
+    return {"id": neu_id, "titel": titel}
+
+
 @teacher_api.post("/lessons/extract")
 async def lesson_extract(file: UploadFile = File(...)):
     """Extrahiert Text aus einer hochgeladenen Datei (PDF, Word, Text)."""

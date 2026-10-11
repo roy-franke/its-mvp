@@ -505,6 +505,10 @@ async function loadForEdit() {
   }
   applySettings(l.einstellungen);
   renderSources();
+  if (new URLSearchParams(location.search).get("dupliziert")) {
+    $("edit-notice").textContent = `Kopie angelegt: «${l.titel}». Passe Titel und Inhalte an und speichere.`;
+    $("edit-notice").classList.remove("hidden");
+  }
   if (l.laufend) {
     $("edit-notice").textContent = `Diese Lektion hat ${l.laufend} laufende ` +
       `${l.laufend === 1 ? "Lernsequenz" : "Lernsequenzen"}. Nach dem Speichern arbeiten sie ` +
