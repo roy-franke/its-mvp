@@ -42,6 +42,8 @@
   .modal-box .actions { margin-top:14px; }
   .banner { border-left:4px solid #16a34a; background:#f0fdf4; padding:10px 14px;
             border-radius:0 8px 8px 0; font-size:.9rem; margin-bottom:16px; }
+  .groesse { font-size:.8rem; }
+  .zu-gross { color:var(--err); font-weight:600; }
   @media (max-width: 640px) { .hide-sm { display:none; } }
 </style>
 </head>
@@ -66,7 +68,7 @@
     <table>
       <thead><tr>
         <th>Titel</th><th class="hide-sm">Lernziele</th><th class="hide-sm">Quellen</th>
-        <th class="hide-sm">Geändert</th><th>Sequenzen</th><th></th>
+        <th class="hide-sm">Geändert</th><th class="hide-sm" title="Geschätzte Grösse des Systemprompts (Material, Lernziele, Regeln)">Grösse</th><th>Sequenzen</th><th></th>
       </tr></thead>
       <tbody id="rows"></tbody>
     </table>
@@ -117,6 +119,15 @@ async function api(path, method = "GET") {
 }
 
 function zeit(t) { return t ? new Date(t * 1000).toLocaleString("de-CH") : "–"; }
+// T-08: geschätzte Grösse des Systemprompts, bei Ollama mit Anteil am Kontextfenster
+function groesse(k) {
+  if (!k) return "–";
+  const t = `ca. ${k.tokens.toLocaleString("de-CH")} Tokens`;
+  if (!k.max) return `<span class="muted">${t}</span>`;
+  const p = Math.round(100 * k.tokens / k.max);
+  return `<span class="${k.warnung ? "zu-gross" : "muted"}" title="Anteil am Kontextfenster OLLAMA_NUM_CTX=${k.max}">` +
+         `${t}<br>${p} % des Kontextfensters${k.warnung ? " ⚠️" : ""}</span>`;
+}
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,
     c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
@@ -132,6 +143,7 @@ async function load() {
       <td class="hide-sm">${l.lernziele}</td>
       <td class="hide-sm">${l.quellen}</td>
       <td class="hide-sm muted">${esc(zeit(l.geaendert_am))}</td>
+      <td class="hide-sm groesse">${groesse(l.kontext)}</td>
       <td>${l.sequenzen}${l.laufend ? ` <span class="muted">(${l.laufend} laufend)</span>` : ""}</td>
       <td><div class="actions">
         <button class="secondary" data-act="view">Ansehen</button>

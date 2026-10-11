@@ -84,6 +84,7 @@ def load_lesson(lesson_id: str) -> dict:
     path = _lesson_path(lesson_id)
     if not path.exists():
         raise HTTPException(404, f"Lektion '{lesson_id}' nicht gefunden")
+    llm.lektion_setzen(lesson_id)      # T-08: Lektion in Warnungen zum Kontextfenster
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -202,6 +203,29 @@ def _validate_lesson(req: LessonCreateRequest) -> dict:
     }
 
 
+def _kontext_info(lesson: dict) -> dict:
+    """T-08: Geschätzte Grösse des Systemprompts im Verhältnis zum Kontextfenster.
+
+    Nur bei Ollama gibt es ein Maximum und damit eine Warnung. Ab 80 Prozent
+    bleibt für Aufgabe, Verlauf und Antwort kaum noch Platz.
+    """
+    vollstaendig = {"titel": "", "lernziele": [], "material": "", **lesson}
+    tokens = llm.schaetze_tokens(tutor._system_prompt(vollstaendig))
+    maximum = llm.kontextfenster()
+    info = {"tokens": tokens, "max": maximum, "anteil": None, "warnung": False, "text": ""}
+    if maximum:
+        info["anteil"] = round(tokens / maximum, 2)
+        if tokens > maximum * llm.KONTEXT_WARNGRENZE:
+            info["warnung"] = True
+            info["text"] = (f"Achtung: Das Material dieser Lektion belegt geschätzt {tokens:,} Tokens "
+                            f"und damit {round(100 * tokens / maximum)} Prozent des Kontextfensters "
+                            f"(OLLAMA_NUM_CTX={maximum:,}). Für Aufgabe, Verlauf und Antwort bleibt "
+                            "kaum Platz; das Sprachmodell sieht dann nur einen Teil des Materials. "
+                            "Kürze das Material oder teile es auf mehrere Lektionen auf. "
+                            "Gespeichert wurde die Lektion trotzdem.").replace(",", "'")
+    return info
+
+
 @teacher_api.post("/lessons")
 def lesson_create(req: LessonCreateRequest):
     """Neue Lektion anlegen (Lehrpersonen-Modul light)."""
@@ -222,7 +246,7 @@ def lesson_create(req: LessonCreateRequest):
     }
     _save_lesson(lesson)
     log.info("Lektion erstellt: %s", lesson_id)
-    return {"id": lesson_id, "titel": felder["titel"]}
+    return {"id": lesson_id, "titel": felder["titel"], "kontext": _kontext_info(lesson)}
 
 
 @teacher_api.get("/websuche")
@@ -249,6 +273,7 @@ def lessons_admin_list(archivierte: bool = False):
             "archiviert": bool(d.get("archiviert")),
             "sequenzen": sum(n.values()),
             "laufend": n.get("aktiv", 0) + n.get("pausiert", 0),
+            "kontext": _kontext_info(d),
         })
     return out
 
@@ -281,7 +306,7 @@ def lesson_update(lesson_id: str, req: LessonCreateRequest):
     laufend = n.get("aktiv", 0) + n.get("pausiert", 0)
     log.info("Lektion geändert: %s (Version %s)", lesson_id, lesson["version"])
     return {"id": lesson_id, "titel": lesson["titel"], "version": lesson["version"],
-            "laufend": laufend}
+            "laufend": laufend, "kontext": _kontext_info(lesson)}
 
 
 @teacher_api.delete("/lessons/{lesson_id}")
@@ -443,8 +468,10 @@ SCHRITTART = {"theorie": "THEORIE_SCHRITT", "aufgabe": "NAECHSTE_AUFGABE"}
 def _log_llm_meta(sid: str, schrittart: str, data: dict):
     """Protokolliert Fallbacks und Regelverstösse eines LLM-Ergebnisses (T-01)."""
     if data.get("_fallback"):
-        store.log_event(sid, "fallback_used", {
-            "schrittart": schrittart, "grund": data.get("_fehler", "unbekannt")})
+        payload = {"schrittart": schrittart, "grund": data.get("_fehler", "unbekannt")}
+        if data.get("_kontext"):
+            payload["kontext"] = data["_kontext"]      # T-08: Prompt zu lang
+        store.log_event(sid, "fallback_used", payload)
     if data.get("_verstoesse"):
         store.log_event(sid, "regel_verstoss", {
             "schrittart": schrittart, "verstoesse": data["_verstoesse"],
@@ -1149,6 +1176,7 @@ def teacher_logout():
 @app.get("/api/info")
 def info():
     return {"provider": llm.provider_name(), "model": llm.current_model(),
+            "kontextfenster": llm.kontextfenster(),
             "lessons": [p.stem for p in sorted(LESSONS_DIR.glob('*.json'))]}
 
 
@@ -1162,6 +1190,7 @@ def teacher_timings():
     return {
         "provider": llm.provider_name(),
         "modell": llm.current_model(),
+        "kontextfenster": llm.kontextfenster(),
         "zusammenfassung": llm.timing_summary(),
         "letzte": list(reversed(llm.timings()))[:20],
     }

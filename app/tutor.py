@@ -1055,10 +1055,20 @@ def _passender_abschnitt(lesson: dict, profile: dict, adaptation: str | None) ->
     return 0, abschnitte[0]
 
 
+def _meta(meta: dict) -> dict:
+    """Interne Angaben eines gescheiterten Aufrufs, die der Fallback-Schritt mitträgt."""
+    out = {"_fallback": True, "_fehler": meta.get("_fehler", "")}
+    out.update({k: v for k, v in meta.items() if k in META_FELDER})
+    return out
+
+
+# T-08/T-09: Kontextüberschreitung und Art des Fehlers gehen ins Event fallback_used
+META_FELDER = ("_kontext", "_fehlerart", "_antwort_meta")
+
+
 def _fehler_schritt(meta: dict) -> dict:
     out = dict(FALLBACK_TEXTE["technischer_fehler"])
-    out.update({"typ": "fehler", "konzept": "", "wiederholbar": True,
-                "_fallback": True, "_fehler": meta.get("_fehler", "")})
+    out.update({"typ": "fehler", "konzept": "", "wiederholbar": True, **_meta(meta)})
     return out
 
 
@@ -1069,8 +1079,7 @@ def theory_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: d
     idx, abschnitt = treffer
     t = FALLBACK_TEXTE["theorie_material"]
     schritt = {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
-               "konzept": "", "typ": "theorie", "material_abschnitt": idx,
-               "_fallback": True, "_fehler": meta.get("_fehler", "")}
+               "konzept": "", "typ": "theorie", "material_abschnitt": idx, **_meta(meta)}
     quelle = didaktik.quelle_fuer_abschnitt(lesson, abschnitt)
     if quelle:
         schritt["quelle"] = quelle
@@ -1085,8 +1094,7 @@ def task_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dic
     t = FALLBACK_TEXTE["aufgabe_material"]
     return {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
             "frage": t["frage"], "konzept": "", "typ": "aufgabe",
-            "material_abschnitt": idx,
-            "_fallback": True, "_fehler": meta.get("_fehler", "")}
+            "material_abschnitt": idx, **_meta(meta)}
 
 
 # ---------------------------------------------------------------- Adaption

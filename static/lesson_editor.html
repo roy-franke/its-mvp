@@ -82,6 +82,8 @@
   .check-result th, .check-result td { border-bottom:1px solid var(--border); padding:6px 8px;
                                        text-align:left; vertical-align:top; }
   .check-result th { color:var(--muted); font-size:.78rem; text-transform:uppercase; }
+  .kontext-warnung { border-left:4px solid #dc2626; background:#fef2f2; padding:10px 14px;
+                     border-radius:0 8px 8px 0; margin:12px 0 0; color:#7f1d1d; }
 </style>
 </head>
 <body>
@@ -384,14 +386,17 @@ $("btn-save").onclick = async () => {
     const d = await r.json();
     if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Speichern fehlgeschlagen");
+    // T-08: Warnung, wenn das Material das Kontextfenster weitgehend füllt
+    const warnung = d.kontext && d.kontext.warnung
+      ? `<p class="kontext-warnung" id="kontext-warnung">⚠️ ${esc(d.kontext.text)}</p>` : "";
     if (editId) {
       showResult("success", `✅ Änderungen an «${esc(d.titel)}» gespeichert (Version ${d.version}).` +
         (d.laufend ? ` ${d.laufend} laufende ${d.laufend === 1 ? "Lernsequenz arbeitet" : "Lernsequenzen arbeiten"}
           ab dem nächsten Schritt mit dem neuen Material.` : "") +
-        ` <a href="/teacher/lessons">Zur Lektionsliste</a>`);
+        ` <a href="/teacher/lessons">Zur Lektionsliste</a>` + warnung);
     } else {
       showResult("success", `✅ Lektion «${esc(d.titel)}» ist veröffentlicht. Lernende können sie
-        jetzt auf der <a href="/">Startseite</a> auswählen.`);
+        jetzt auf der <a href="/">Startseite</a> auswählen.` + warnung);
     }
   } catch (e) { showResult("error", e.message); }
   $("btn-save").disabled = false; $("save-spinner").classList.add("hidden");

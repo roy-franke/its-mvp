@@ -613,6 +613,48 @@ def n02_seitenleiste(pw):
         check("N-02 ohne Skriptfehler", not fehler, "; ".join(fehler))
 
 
+# ---------------------------------------------------------------- Auftrag 2
+
+def neue_lektion_im_editor(page, base, titel, material, ziele="Ziel A\nZiel B"):
+    page.goto(base + "/teacher/lessons/new")
+    page.click("#paste-box summary")
+    page.fill("#material", material)
+    page.fill("#titel", titel)
+    page.fill("#ziele", ziele)
+    page.click("#btn-save")
+    expect(page.locator("#result")).to_contain_text("veröffentlicht", timeout=15000)
+
+
+@scenario("t08")
+def t08_kontext(pw):
+    """T-08 AK2/AK4: Editor warnt bei zu grossem Material, Lernverlauf zeigt die Kontextwerte."""
+    gross = ("Die Kausalhaftung gilt ohne Verschulden, etwa für Tierhalter nach Art. 56 OR. " * 400)
+    with server(LLM_PROVIDER="ollama", OLLAMA_NUM_CTX="4096", OLLAMA_BASE_URL="http://127.0.0.1:9") as base:
+        page = launch(pw).new_page()
+        neue_lektion_im_editor(page, base, "Sehr grosse Lektion", gross)
+        warnung = page.locator("#kontext-warnung")
+        check("T-08 AK4 Editor warnt beim Speichern", warnung.is_visible() and "Kontextfensters" in warnung.inner_text(),
+              page.locator("#result").inner_text()[:200])
+        ids = [l["id"] for l in httpx.get(base + "/api/lessons").json()]
+        check("T-08 AK4 Lektion trotzdem gespeichert", "sehr-grosse-lektion" in ids, str(ids))
+        page.goto(base + "/teacher/lessons")
+        zeile = page.locator("tr[data-id='sehr-grosse-lektion'] .groesse")
+        expect(zeile).to_contain_text("Kontextfensters")
+        check("T-08 Lektionsverwaltung zeigt die Grösse", "⚠️" in zeile.inner_text())
+        # Fallback mit Kontextangaben (Ollama nicht erreichbar, Prompt zu gross)
+        c = httpx.Client(base_url=base, timeout=30)
+        c.post("/api/learner/login", json={"name": "Kontext"})
+        sid = c.post("/api/session/start", json={"lesson_id": "sehr-grosse-lektion"}).json()["session_id"]
+        c.post(f"/api/session/{sid}/assess", json={"answers": ["a", "b", "c"]})
+        c.post(f"/api/session/{sid}/next")
+        page.goto(base + f"/teacher#{sid}")
+        detail = page.locator("#detail-events")
+        expect(detail).to_contain_text("Kontext zu gross", timeout=10000)
+        text = detail.inner_text()
+        check("T-08 AK2 Lernverlauf zeigt Länge, Maximum und Überschreitung",
+              "Maximum 4096" in text and "Überschreitung" in text, text[:300])
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

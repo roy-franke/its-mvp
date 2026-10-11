@@ -64,8 +64,11 @@ def timings() -> list[dict]:
     return list(_TIMINGS)
 
 
-def record_fallback(label: str, grund: str) -> None:
-    _FALLBACKS.append({"schritt": label, "grund": grund[:300], "zeitpunkt": time.time()})
+def record_fallback(label: str, grund: str, kontext: dict | None = None) -> None:
+    eintrag = {"schritt": label, "grund": grund[:300], "zeitpunkt": time.time()}
+    if kontext:
+        eintrag["kontext"] = kontext
+    _FALLBACKS.append(eintrag)
     log.warning("FALLBACK %s: %s", label, grund)
 
 
@@ -85,10 +88,17 @@ def timing_summary() -> list[dict]:
     """Aggregiert die Messungen je Schrittart – Median und langsamster Fall."""
     by_label: dict[str, list[float]] = {}
     fehler: dict[str, int] = {}
+    prompt_max: dict[str, int] = {}          # T-08: grösste gemessene Promptlänge
+    prompt_max_geschaetzt: dict[str, int] = {}
     for e in _TIMINGS:
         by_label.setdefault(e["schritt"], []).append(e["sekunden"])
         if e.get("fehler"):
             fehler[e["schritt"]] = fehler.get(e["schritt"], 0) + 1
+        if isinstance(e.get("prompt_tokens"), int):
+            prompt_max[e["schritt"]] = max(prompt_max.get(e["schritt"], 0), e["prompt_tokens"])
+        if isinstance(e.get("prompt_tokens_geschaetzt"), int):
+            prompt_max_geschaetzt[e["schritt"]] = max(prompt_max_geschaetzt.get(e["schritt"], 0),
+                                                      e["prompt_tokens_geschaetzt"])
     fb: dict[str, int] = {}
     for f in _FALLBACKS:
         fb[f["schritt"]] = fb.get(f["schritt"], 0) + 1
@@ -102,6 +112,8 @@ def timing_summary() -> list[dict]:
             "max_sekunden": round(max(werte), 1) if werte else 0.0,
             "fehler": fehler.get(label, 0),
             "fallbacks": fb.get(label, 0),
+            "max_prompt_tokens": prompt_max.get(label),
+            "max_prompt_tokens_geschaetzt": prompt_max_geschaetzt.get(label),
         })
     return sorted(out, key=lambda r: r["median_sekunden"], reverse=True)
 
@@ -109,6 +121,66 @@ def timing_summary() -> list[dict]:
 def reset_timings() -> None:
     _TIMINGS.clear()
     _FALLBACKS.clear()
+
+
+# ---------------------------------------------------------------- Kontextfenster (T-08)
+#
+# Ollama kürzt einen Prompt, der länger als OLLAMA_NUM_CTX ist, stillschweigend
+# und warnt nur im eigenen Log («truncating input prompt»). Der ITS-Service
+# schätzt deshalb vor jedem Aufruf die Länge und schreibt eine Warnung, wenn
+# der Prompt nicht ins Kontextfenster passt. Abgebrochen oder gekürzt wird
+# nichts (Entscheid E8).
+#
+# Schätzung ohne Tokenizer: Zeichenzahl geteilt durch einen bewusst
+# vorsichtigen Faktor. Deutscher Text braucht bei Qwen- und Llama-Tokenizern
+# erfahrungsgemäss etwa 3,5 bis 4,5 Zeichen pro Token; mit 3,0 wird die Länge
+# eher über- als unterschätzt. Die Kalibrierung gegen prompt_eval_count ist in
+# der Messübersicht sichtbar (geschätzt neben gemessen) und lässt sich mit
+# tests/eval/diagnose_ollama.py nachprüfen.
+
+ZEICHEN_PRO_TOKEN = float(os.getenv("ITS_ZEICHEN_PRO_TOKEN", "3.0"))
+TOKENS_PRO_NACHRICHT = 8          # Rollen-Markierungen der Chat-Vorlage
+KONTEXT_WARNGRENZE = 0.8          # Lektionseditor: Warnung ab 80 Prozent
+
+_lektion: contextvars.ContextVar = contextvars.ContextVar("lektion", default=None)
+
+
+def lektion_setzen(lesson_id: str | None) -> None:
+    """Merkt sich die Lektion des laufenden Requests für Warnungen im Log."""
+    _lektion.set(lesson_id)
+
+
+def schaetze_tokens(text: str) -> int:
+    return int(len(text or "") / ZEICHEN_PRO_TOKEN) + 1
+
+
+def prompt_tokens_schaetzen(system: str, user: str) -> int:
+    return schaetze_tokens(system) + schaetze_tokens(user) + 2 * TOKENS_PRO_NACHRICHT
+
+
+def num_ctx() -> int:
+    return int(os.getenv("OLLAMA_NUM_CTX", "16384"))
+
+
+def kontextfenster() -> int | None:
+    """Grösse des Kontextfensters, sofern der Provider eines hat, das wir kennen.
+
+    Nur bei Ollama: Die Cloud-Provider haben sehr grosse Fenster und melden
+    eine Überschreitung als Fehler statt still zu kürzen (AK 3).
+    """
+    return num_ctx() if provider_name() == "ollama" else None
+
+
+def _kontext_ueberschritten(label: str, tokens: int, geschaetzt: bool) -> dict:
+    maximum = num_ctx()
+    info = {"prompt_tokens": tokens, "max_tokens": maximum,
+            "differenz": tokens - maximum, "geschaetzt": geschaetzt}
+    log.warning("Prompt zu lang für das Kontextfenster (%s, Lektion %s): %s%d Tokens, Maximum "
+                "OLLAMA_NUM_CTX=%d, Überschreitung %s%d Tokens.%s",
+                label, _lektion.get() or "unbekannt", "ca. " if geschaetzt else "", tokens,
+                maximum, "ca. " if geschaetzt else "", max(tokens - maximum, 0),
+                "" if geschaetzt else " (prompt_eval_count am Maximum, Ollama hat gekürzt)")
+    return info
 
 
 def _ollama_meta(data: dict) -> dict:
@@ -436,22 +508,54 @@ def chat(system: str, user: str, json_mode: bool = False) -> str:
     Scheitert der Aufruf, landet der Fehlergrund in der Zeitmessung, damit er
     im Lehrpersonen-Monitoring sichtbar wird, und die Ausnahme geht weiter.
     """
+    return _chat_mit_info(system, user, json_mode)[0]
+
+
+class LLMAufrufFehler(LLMError):
+    """Gescheiterter Aufruf, der die Angaben zum Kontextfenster mitträgt."""
+
+    def __init__(self, original: Exception, info: dict):
+        super().__init__(f"{type(original).__name__}: {original}")
+        self.original = original
+        self.info = info
+
+
+def _chat_mit_info(system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
+    """Wie chat(), liefert zusätzlich die Metadaten des Aufrufs.
+
+    info enthält `meta` (Tokenzahlen, bei Ollama auch done_reason) und
+    `kontext`, wenn der Prompt das Kontextfenster überschreitet (T-08).
+    """
     name = provider_name()
     fn = _PROVIDERS.get(name)
     if fn is None:
         raise LLMError(f"Unbekannter LLM_PROVIDER: {name}")
     log.debug("SYSTEM: %s\nUSER: %s", system, user)
     label = _label(user)
+    info: dict = {}
+    geschaetzt = prompt_tokens_schaetzen(system, user)
+    fenster = kontextfenster()
+    if fenster and geschaetzt > fenster:
+        info["kontext"] = _kontext_ueberschritten(label, geschaetzt, geschaetzt=True)
     t0 = time.perf_counter()
     try:
         text, meta = fn(system, user, json_mode=json_mode)
     except Exception as e:
         record_timing(label, time.perf_counter() - t0,
-                      {"fehler": f"{type(e).__name__}: {e}"[:200]})
-        raise
+                      {"fehler": f"{type(e).__name__}: {e}"[:200],
+                       "prompt_tokens_geschaetzt": geschaetzt})
+        raise LLMAufrufFehler(e, info) from e
+    meta = dict(meta or {})
+    meta["prompt_tokens_geschaetzt"] = geschaetzt
+    gemessen = meta.get("prompt_tokens")
+    if (fenster and "kontext" not in info and isinstance(gemessen, int)
+            and gemessen >= fenster * 0.98):
+        # Nachkontrolle: Liegt prompt_eval_count am Maximum, hat Ollama gekürzt.
+        info["kontext"] = _kontext_ueberschritten(label, gemessen, geschaetzt=False)
     record_timing(label, time.perf_counter() - t0, meta)
+    info["meta"] = meta
     log.debug("ANTWORT: %s", text)
-    return schweizer_rechtschreibung(strip_reasoning(text))
+    return schweizer_rechtschreibung(strip_reasoning(text)), info
 
 
 def schweizer_rechtschreibung(text: str) -> str:
@@ -513,15 +617,19 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     fehler: list[str] = []
     verstoesse: list[str] = []
     beste: dict | None = None
+    kontext: dict | None = None
     prompt = user
     for versuch in range(1, versuche + 1):
         try:
-            text = chat(system, prompt, json_mode=True)
+            text, info = _chat_mit_info(system, prompt, json_mode=True)
         except Exception as e:
-            grund = f"{type(e).__name__}: {e}"[:300]
+            ursache = e.original if isinstance(e, LLMAufrufFehler) else e
+            kontext = kontext or (e.info.get("kontext") if isinstance(e, LLMAufrufFehler) else None)
+            grund = f"{type(ursache).__name__}: {ursache}"[:300]
             log.error("LLM-Fehler (%s, Versuch %d): %s", label, versuch, grund)
             fehler.append(grund)
             continue
+        kontext = kontext or info.get("kontext")
         parsed = extract_json(text)
         if not isinstance(parsed, dict):
             grund = f"Antwort war kein lesbares JSON: {text[:120]!r}"
@@ -544,7 +652,13 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     out = dict(fallback)
     out["_fallback"] = True
     out["_fehler"] = " | ".join(fehler) or "unbekannt"
-    record_fallback(label, out["_fehler"])
+    if kontext:
+        # T-08: Ursache sichtbar machen, statt nur «kein lesbares JSON» zu melden
+        out["_kontext"] = kontext
+        out["_fehler"] = ("Kontext zu gross (Prompt " + ("ca. " if kontext["geschaetzt"] else "")
+                          + f"{kontext['prompt_tokens']} Tokens, Maximum {kontext['max_tokens']}). "
+                          + out["_fehler"])
+    record_fallback(label, out["_fehler"], kontext)
     return out
 
 
