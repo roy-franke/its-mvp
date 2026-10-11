@@ -3,13 +3,14 @@
 Läuft NICHT in der normalen Testsuite, sondern von Hand, nachdem ein echtes
 Modell in der .env konfiguriert ist (z.B. LLM_PROVIDER=ollama mit qwen3:30b).
 Das Skript ruft die Tutorlogik direkt auf (ohne Server), prüft die
-Akzeptanzkriterien der Pakete D-01 bis D-06 und schreibt einen lesbaren
+Akzeptanzkriterien der Pakete D-01 bis D-12 (Auftrag 2: D-07 bis D-12, T-09) und schreibt einen lesbaren
 Bericht nach tests/eval/berichte/.
 
     python tests/eval/eval_didaktik.py                  # alle Pakete
     python tests/eval/eval_didaktik.py D-01 D-05        # nur ausgewählte
     python tests/eval/eval_didaktik.py --anzahl 3       # schneller Probelauf
     python tests/eval/eval_didaktik.py --mock           # Rauchtest ohne Modell
+    python tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <id-der-version-3>
 
 Mit qwen3:30b auf a9-mega dauert ein vollständiger Lauf je nach Anzahl
 etwa 30 bis 60 Minuten. Die Anzahl Aufgaben pro Niveau lässt sich mit
@@ -47,7 +48,8 @@ def lektion(lesson_id: str) -> dict:
     return json.loads((d / f"{lesson_id}.json").read_text(encoding="utf-8"))
 
 
-HAFTUNG = "haftungsrecht"
+# Mit --haftung lässt sich die umfangreiche Lektion «Haftungsrecht Version 3» wählen (Auftrag 2)
+HAFTUNG = os.getenv("ITS_EVAL_HAFTUNG", "haftungsrecht")
 BRUCH = "bruchbegriff-verstehen-und-anwenden"
 QUANTEN = "einfuhrung-in-die-quantenphysik"
 
@@ -238,7 +240,15 @@ def sequenz(lesson_id: str, name: str, schritte: int = 12, antwort=None) -> tupl
         a = c.post(f"/api/session/{sid}/answer", json={"answer": text, "confidence": 5}).json()
         if a["adaption"] == "retry":
             a = c.post(f"/api/session/{sid}/answer", json={"answer": text}).json()
-        adaption = a["adaption"] if a["adaption"] in ("simplify", "explain") else ""
+        if a.get("adaption") == "wahl_teilweise":          # D-07: einmal ergänzen, dann weiter
+            c.post(f"/api/session/{sid}/wahl", json={"wahl": "ergaenzen"})
+            a = c.post(f"/api/session/{sid}/answer", json={"answer": text}).json()
+            if a.get("adaption") == "wahl_teilweise":
+                c.post(f"/api/session/{sid}/wahl", json={"wahl": "weiter"})
+        if a.get("bewertung") in ("unbewertet", "kopie"):
+            for w in ("ohne_bewertung", "weiter"):
+                c.post(f"/api/session/{sid}/wahl", json={"wahl": w})
+        adaption = a["adaption"] if a.get("adaption") in ("simplify", "explain") else ""
     return sid, c.get(f"/api/teacher/sessions/{sid}").json()["events"]
 
 
@@ -533,6 +543,180 @@ def eval_d06(b: Bericht, anzahl: int):
             b.text(f"\n{h}")
 
 
+# ---------------------------------------------------------------- Auftrag 2: D-07 bis D-12, T-09
+
+def _halbe_antwort(task: dict, events: list) -> str:
+    """Simulierte lernende Person, die nur einen Teil der Lösung nennt."""
+    w = (task.get("erwartete_antwort") or "weiss nicht").split()
+    return " ".join(w[: max(3, len(w) // 2)])
+
+
+@paket("D-07")
+def eval_d07(b: Bericht, anzahl: int):
+    """Nach «teilweise» entscheidet die lernende Person, kein automatisches Weitergehen."""
+    b.abschnitt("D-07 Wahl nach teilweise richtiger Antwort",
+                "Je eine Sequenz in Quantenphysik und Haftungsrecht. Die simulierte lernende Person "
+                "nennt jeweils nur die erste Hälfte der Musterlösung.")
+    teilweise, automatisch = 0, []
+    for i, lid in enumerate((QUANTEN, HAFTUNG)):
+        _, events = sequenz(lid, f"Eval D07 {i}", antwort=_halbe_antwort)
+        for e in events:
+            p = e["payload"]
+            if e["type"] == "answer_evaluated" and p.get("bewertung") == "teilweise":
+                teilweise += 1
+                if p.get("adaption") != "wahl_teilweise":
+                    automatisch.append((lid, p.get("adaption")))
+    b.ak("D-07", "AK 1 nach jedem «teilweise» eine Wahl, keine Weiterleitung", not automatisch,
+         f"{teilweise} teilweise Antworten, {len(automatisch)} ohne Wahl")
+
+
+def _theorien(events: list) -> list[tuple[int, dict]]:
+    return [(i, e["payload"]) for i, e in enumerate(events)
+            if e["type"] == "task" and e["payload"].get("typ") == "theorie"]
+
+
+@paket("D-08")
+def eval_d08(b: Bericht, anzahl: int):
+    """Keine zwei aufeinanderfolgenden Theorieschritte mit gleichem Inhalt."""
+    from app import didaktik, tutor
+    b.abschnitt("D-08 Keine doppelte Theorie",
+                "Vier vollständige Sequenzen (je zwei pro Lektion), eine davon mit halben Antworten. "
+                "Verglichen werden aufeinanderfolgende Theorieschritte (ohne Aufgabe dazwischen) und "
+                "automatische Theorien zu bereits erklärten Konzepten.")
+    doppelt, uebersprungen, gesamt = [], 0, 0
+    for i, lid in enumerate((QUANTEN, HAFTUNG, QUANTEN, HAFTUNG)):
+        _, events = sequenz(lid, f"Eval D08 {i}", antwort=_halbe_antwort if i >= 2 else None)
+        uebersprungen += sum(1 for e in events if e["type"] == "theorie_uebersprungen")
+        theorien = _theorien(events)
+        gesamt += len(theorien)
+        for (ia, a), (ib, t) in zip(theorien, theorien[1:]):
+            dazwischen = [e for e in events[ia + 1:ib] if e["type"] == "task" and e["payload"].get("typ") == "aufgabe"]
+            if dazwischen or t.get("nochmals_anders"):
+                continue
+            w = didaktik.aehnlichkeit(didaktik.theorietext(t), [didaktik.theorietext(a)])
+            if w >= didaktik.THEORIE_AEHNLICH or didaktik.gleiches_konzept(a.get("konzept"), t.get("konzept")):
+                doppelt.append((lid, a, t, w))
+    b.ak("D-08", "AK 4 keine zwei aufeinanderfolgenden Theorien mit gleichem Inhalt", not doppelt,
+         f"{len(doppelt)} Paare bei {gesamt} Theorien, {uebersprungen} Theorien übersprungen")
+    for lid, a, t, w in doppelt:
+        b.text(f"- {lid}: «{a.get('titel')}» → «{t.get('titel')}» (Ähnlichkeit {round(w * 100)} %)")
+
+
+@paket("D-09")
+def eval_d09(b: Bericht, anzahl: int):
+    """Jede Aufgabe direkt nach einer Theorie passt zu dieser Theorie."""
+    from app import didaktik, tutor
+    b.abschnitt("D-09 Aufgabe passt zur vorangehenden Theorie",
+                f"Pro Lektion {anzahl} Paare aus Theorie und unmittelbar folgender Aufgabe.")
+    zeilen = ["| Lektion | Theorie (Konzept) | Aufgabe (Konzept) | Frage | passt |", "|---|---|---|---|---|"]
+    fehler = 0
+    for lid in (QUANTEN, HAFTUNG):
+        lesson = lektion(lid)
+        konzepte: list[str] = []
+        for _ in range(anzahl):
+            p = dict(tutor.new_profile(), level="intermediate", covered=list(konzepte), erklaert=list(konzepte))
+            theorie = tutor.generate_theory(lesson, p, [])
+            if theorie.get("_fallback"):
+                continue
+            konzepte.append(theorie.get("konzept", ""))
+            history = [{"type": "task", "payload": theorie}]
+            p.update(covered=list(konzepte), erklaert=list(konzepte), last_type="theorie")
+            task = tutor.generate_task(lesson, p, history)
+            if task.get("_fallback"):
+                continue
+            v = (didaktik.aufgabe_passt_zur_theorie(task, theorie)
+                 or didaktik.begriff_nicht_erklaert(task, didaktik.theorietext(theorie), lesson))
+            fehler += bool(v)
+            zeilen.append(f"| {lid} | {theorie.get('titel')} ({theorie.get('konzept')}) | {task.get('titel')} "
+                          f"({task.get('konzept')}) | {task.get('frage')} | {'ja' if not v else 'nein: ' + v[:80]} |")
+    b.text("\n".join(zeilen))
+    b.ak("D-09", "AK 3 jede Aufgabe direkt nach einer Theorie passt dazu (pro Fall im Bericht)", fehler == 0,
+         f"{fehler} Abweichungen")
+
+
+@paket("D-10")
+def eval_d10(b: Bericht, anzahl: int):
+    """Frage nennt alle erwarteten Elemente, die Bewertung verlangt nichts darüber hinaus."""
+    from app import didaktik, tutor
+    b.abschnitt("D-10 Erwartete Elemente",
+                f"{anzahl} Aufgaben aus der Haftungsrecht-Lektion, jede mit einer halben Antwort bewertet.")
+    lesson = lektion(HAFTUNG)
+    ohne, einteilig, abweichend, zeilen = 0, 0, 0, []
+    for i in range(anzahl):
+        p = dict(tutor.new_profile(), level=tutor.LEVELS[i % 3])
+        task = tutor.generate_task(dict(lesson, einstellungen={"einsatzart": "vertiefung"}), p, [])
+        if task.get("_fallback"):
+            continue
+        el = task.get("erwartete_elemente") or []
+        ohne += not el
+        einteilig += bool(didaktik.elemente_passen_zur_frage(task))
+        r = tutor.evaluate_answer(lesson, p, task, _halbe_antwort(task, []))
+        verwendet = [e["element"] for e in r.get("elemente", [])]
+        abweichend += verwendet != el
+        zeilen.append(f"- «{task.get('frage')}» – Elemente: {'; '.join(el)} – Bewertung: {r.get('bewertung')} "
+                      f"({'gespeicherte Elemente' if verwendet == el else 'abweichend: ' + '; '.join(verwendet)})")
+    b.text("\n".join(zeilen))
+    b.ak("D-10", "AK 1 jede Aufgabe hat erwartete Elemente", ohne == 0, f"{ohne} ohne")
+    b.ak("D-10", "AK 4 kein Element, das die Frage nicht nennt (Regel und Bewertung)",
+         einteilig == 0 and abweichend == 0, f"{einteilig} einteilige Fragen mit mehreren Elementen, "
+                                             f"{abweichend} Bewertungen mit anderen Elementen")
+
+
+@paket("D-11")
+def eval_d11(b: Bericht, anzahl: int):
+    """Kopierte Theorie wird erkannt, eigene Formulierungen nicht."""
+    from app import didaktik, tutor
+    b.abschnitt("D-11 Kopierte Antworten")
+    erkannt, falsch_positiv = 0, 0
+    for lid in (QUANTEN, HAFTUNG):
+        lesson = lektion(lid)
+        theorie = tutor.generate_theory(lesson, tutor.new_profile(), [])
+        quellen = tutor.kopie_quellen(lesson, [{"type": "task", "payload": theorie}])
+        erkannt += didaktik.kopie_pruefen(theorie.get("inhalt", ""), quellen)["anteil"] >= didaktik.KOPIE_SCHWELLE
+        eigen = tutor.answer_question(lesson, tutor.new_profile(), None,
+                                      "Formuliere die Erklärung als kurze Antwort einer lernenden Person in ganz "
+                                      "eigenen Worten, ohne Sätze aus dem Text zu übernehmen.", [])
+        k = didaktik.kopie_pruefen(eigen.get("antwort", ""), quellen)
+        falsch_positiv += k["anteil"] >= didaktik.KOPIE_SCHWELLE
+        b.text(f"- {lid}: Kopie der Theorie erkannt; Umformulierung {round(k['anteil'] * 100)} % übernommen")
+    b.ak("D-11", "AK 1/3 kopierte Theorie erkannt", erkannt == 2, f"{erkannt} von 2")
+    b.ak("D-11", "AK 2 Umformulierung nicht als Kopie", falsch_positiv == 0, f"{falsch_positiv} von 2")
+
+
+@paket("D-12")
+def eval_d12(b: Bericht, anzahl: int):
+    """Urteil und Bewertungstext passen zusammen."""
+    from app import didaktik, tutor
+    b.abschnitt("D-12 Urteil und Bewertungstext", "Das D-05-Testset bei «ausgewogen».")
+    widersprueche = []
+    for key, antworten, *_ in TESTSET_D05:
+        lid, task = AUFGABEN_D05[key]
+        r = tutor.evaluate_answer(lektion(lid), tutor.new_profile(), dict(task, typ="aufgabe"), antworten[-1])
+        v = didaktik.urteil_widerspricht_text(r)
+        if v:
+            widersprueche.append(f"- {key}: «{antworten[-1]}» → {r['bewertung']}: {zitat(r.get('feedback'), 200)[2:]}")
+    b.ak("D-12", "Ergänzung: kein Widerspruch zwischen Urteil und Text", not widersprueche,
+         f"{len(widersprueche)} von {len(TESTSET_D05)}")
+    b.text("\n".join(widersprueche))
+
+
+@paket("T-09")
+def eval_t09(b: Bericht, anzahl: int):
+    """Fallbacks und leere Antworten über den ganzen bisherigen Lauf."""
+    from app import llm
+    b.abschnitt("T-09 Fallbacks und leere Antworten",
+                "Zusammenfassung aller LLM-Aufrufe dieses Evaluationslaufs (bitte als letztes Paket "
+                "ausführen). Vergleich mit der Messübersicht vom 29.9.2026.")
+    leer = sum(1 for t in llm.timings() if t.get("fehler") == "leere Antwort")
+    b.text("| Schritt | Aufrufe | Fehler | Fallbacks | grösster Prompt (geschätzt) |\n|---|---|---|---|---|")
+    for z in llm.timing_summary():
+        b.text(f"| {z['schritt']} | {z['anzahl']} | {z['fehler']} | {z['fallbacks']} | "
+               f"{z.get('max_prompt_tokens_geschaetzt') or '–'} |")
+    gesamt = sum(z["anzahl"] for z in llm.timing_summary())
+    fb = len(llm.fallbacks())
+    b.ak("T-09", "AK 4 Fallbacks (Information)", True, f"{fb} Fallbacks, {leer} leere Antworten bei {gesamt} Aufrufen")
+
+
 # ---------------------------------------------------------------- Ablauf
 
 def main():
@@ -541,7 +725,11 @@ def main():
     ap.add_argument("--anzahl", type=int, default=10, help="Aufgaben pro Lektion und Niveau (Standard 10)")
     ap.add_argument("--mock", action="store_true", help="Rauchtest mit Mock-Provider")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--haftung", help="ID der Haftungsrecht-Lektion, z.B. die Version 3 (Auftrag 2)")
     args = ap.parse_args()
+    if args.haftung:
+        global HAFTUNG
+        HAFTUNG = args.haftung
     if args.mock:
         os.environ["LLM_PROVIDER"] = "mock"
     random.seed(args.seed)
