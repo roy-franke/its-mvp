@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="/static/format.js"></script>
 <style>
   :root {
     --bg: #f4f6f8; --card: #ffffff; --text: #1c2733; --muted: #64748b;
@@ -59,6 +60,14 @@
               border-bottom-right-radius: 4px; }
   .msg.user.ask { background: #7c3aed; }
   .msg .who { font-size: .72rem; opacity: .7; display: block; margin-bottom: 3px; }
+  /* T-13: formatierte Tutor-Texte (Absätze, Zwischentitel, Listen, Fettdruck) */
+  .msg .fmt { white-space: normal; }
+  .msg .fmt p { margin: 0 0 .6em; }
+  .msg .fmt > :last-child { margin-bottom: 0; }
+  .msg .fmt h4.fmt-titel { font-size: .98rem; margin: .2em 0 .35em; }
+  .msg .fmt ul, .msg .fmt ol { margin: .2em 0 .6em; padding-left: 1.4em; }
+  .msg .fmt li { margin: .15em 0; }
+  #done-summary .fmt p { margin: 0 0 .6em; }
   .note { align-self: center; font-size: .82rem; color: var(--warn); background: #fffbeb;
           border: 1px solid #fde68a; border-radius: 999px; padding: 4px 14px; max-width: 90%; text-align: center; }
   .inputrow { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 4px; }
@@ -281,7 +290,7 @@
   <div id="view-done" class="hidden">
     <div class="card">
       <h2>🎉 Lernsequenz abgeschlossen</h2>
-      <p id="done-summary"></p>
+      <div id="done-summary"></div>
       <div class="muted">Erreichte Lernziele:</div>
       <ul id="done-goals"></ul>
       <div class="adaption" id="done-reco" style="border-color:var(--ok);background:#f0fdf4"></div>
@@ -384,7 +393,9 @@ function addMsg(cls, text, who) {
     w.className = "who"; w.textContent = who;
     div.appendChild(w);
   }
-  div.appendChild(document.createTextNode(text));
+  // T-13: Tutor-Texte formatiert (sicher maskiert), eigene Eingaben als reiner Text
+  if (/\btutor\b/.test(cls)) ITSFormat.anhaengen(div, text);
+  else div.appendChild(document.createTextNode(text));
   renderMath(div);
   $("chat").insertBefore(div, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
@@ -1062,7 +1073,8 @@ function renderProgress(p) {
 }
 
 function renderDone(d) {
-  $("done-summary").textContent = d.summary.zusammenfassung || "";
+  $("done-summary").innerHTML = "";
+  ITSFormat.anhaengen($("done-summary"), d.summary.zusammenfassung || "");
   $("done-goals").innerHTML = (d.summary.erreichte_lernziele || [])
     .map(z => `<li>${esc(z)}</li>`).join("") || "<li class='muted'>–</li>";
   $("done-reco").textContent = "💡 " + (d.summary.empfehlung || "");
@@ -1134,7 +1146,8 @@ function verlaufEintrag(e) {
     const w = document.createElement("span");
     w.className = "who"; w.textContent = who;
     div.appendChild(w);
-    div.appendChild(document.createTextNode(text));
+    if (/\btutor\b/.test(cls)) ITSFormat.anhaengen(div, text);
+    else div.appendChild(document.createTextNode(text));
   };
   if (e.art === "theorie") {
     zeile("Theorie", "📖 " + (e.titel ? e.titel + "\n\n" : "") + (e.inhalt || "") +

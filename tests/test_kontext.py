@@ -54,8 +54,10 @@ def test_ak1_warnung_mit_laenge_maximum_und_differenz(ollama, caplog):
     m = meldungen[0]
     assert "ANTWORT_BEWERTEN" in m and "Lektion haftungsrecht-v2" in m
     assert "Maximum OLLAMA_NUM_CTX=4096" in m and "Überschreitung ca." in m
-    geschaetzt = llm.prompt_tokens_schaetzen(tutor._system_prompt(GROSS), "")
-    assert f"ca. {geschaetzt // 1000}" in m   # Länge in der Grössenordnung des Prompts
+    import re
+    laenge = int(re.search(r": ca\. (\d+) Tokens", m).group(1))
+    assert laenge >= llm.schaetze_tokens(tutor._system_prompt(GROSS))   # Länge des ganzen Prompts
+    assert f"Überschreitung ca. {laenge - 4096} Tokens" in m
 
 
 def test_ak1_fallback_traegt_die_drei_werte(ollama):

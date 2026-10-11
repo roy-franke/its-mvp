@@ -741,6 +741,55 @@ def t12_fallback_wahl(pw):
               and page.locator("#btn-answer").is_visible())
 
 
+KATEX_DIR = os.getenv("ITS_KATEX_DIR")   # optional: lokal entpacktes npm-Paket katex@0.16.11
+
+
+def katex_lokal(page) -> bool:
+    """Bedient die KaTeX-Dateien vom CDN aus einem lokalen Ordner (für AK zu Formeln)."""
+    if not KATEX_DIR or not Path(KATEX_DIR, "dist", "katex.min.js").exists():
+        return False
+    page.route("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/**", lambda route: route.fulfill(
+        path=str(Path(KATEX_DIR, "dist", route.request.url.split("/dist/", 1)[1]))))
+    return True
+
+
+FORMAT_TEXT = ("### Grundlagen und Einstieg\nFür den Einstieg sind folgende Konzepte wichtig:\n\n"
+               "- Welle-Teilchen-Dualismus\n- **Superposition** mit $x^2$\n\n"
+               "1. Zuerst messen\n2. Dann auswerten\n\nSchluss <script>window.__xss = 1</script>"
+               "<img src=x onerror=\"window.__xss = 2\">")
+
+
+@scenario("t13")
+def t13_formatierung(pw):
+    """T-13 AK1-3: Titel, Absatz, Listen, Fettdruck; kein eingeschleustes HTML; Formeln mit KaTeX."""
+    with server() as base:
+        page = launch(pw).new_page()
+        mit_katex = katex_lokal(page)
+        page.goto(base + "/")
+        page.wait_for_load_state("networkidle")
+        page.evaluate("""t => { show('view-learn'); addMsg('tutor theory', t, 'Tutor – Theorie'); }""", FORMAT_TEXT)
+        msg = page.locator(".msg.tutor.theory").last
+        check("T-13 AK1 Zwischentitel als eigenes Element",
+              msg.locator("h4.fmt-titel").inner_text() == "Grundlagen und Einstieg")
+        check("T-13 AK1 Absatz nach dem Titel", msg.locator(".fmt p").first.inner_text().startswith("Für den Einstieg"))
+        check("T-13 AK1 Aufzählung als Liste", msg.locator(".fmt ul > li").count() == 2)
+        check("T-13 AK1 nummerierte Liste", msg.locator(".fmt ol > li").count() == 2)
+        check("T-13 AK1 Fettdruck", msg.locator(".fmt strong").inner_text() == "Superposition")
+        check("T-13 AK2 kein Skript ausgeführt", page.evaluate("window.__xss") is None)
+        check("T-13 AK2 kein img-Element, Text sichtbar",
+              msg.locator("img, script").count() == 0 and "<script>" in msg.inner_text())
+        if mit_katex:
+            expect(msg.locator(".katex")).to_have_count(1, timeout=5000)
+            check("T-13 AK3 Formel nach der Formatierung von KaTeX gesetzt", True)
+        else:
+            print("  HINWEIS KaTeX lokal nicht verfügbar (ITS_KATEX_DIR), AK3 nicht geprüft")
+        # Gleiche Darstellung im Lernverlauf der Lehrperson
+        page.goto(base + "/teacher")
+        html = page.evaluate("t => ITSFormat.html(t)", FORMAT_TEXT)
+        check("T-13 Lehrpersonen-Sicht nutzt dieselbe Formatierung",
+              "<h4 class=\"fmt-titel\">" in html and "&lt;script&gt;" in html and "<img" not in html)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

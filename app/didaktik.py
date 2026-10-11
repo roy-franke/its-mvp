@@ -561,6 +561,32 @@ def pruefe_felder(data: dict, felder: tuple[str, ...]) -> str | None:
     return leere_ankuendigung(text) or sie_anrede(text)
 
 
+# ---------------------------------------------------------------- T-13
+
+_VERKLEBT_SATZ = re.compile(r"([a-zäöüß]{2})([.:!?])([A-ZÄÖÜ][a-zäöü])")
+_VERKLEBT_WORT = re.compile(r"\b([A-ZÄÖÜ]?[a-zäöüß]{3,})([A-ZÄÖÜ][a-zäöüß]{2,})\b")
+
+
+def saetze_trennen(text: str) -> str:
+    """Fügt nach Satzzeichen einen Leerschlag ein, wo er offensichtlich fehlt.
+
+    «messbar.Quantenverschränkung» wird zu «messbar. Quantenverschränkung».
+    Abkürzungen wie «z.B.» bleiben unverändert (Kleinbuchstabe danach).
+    """
+    return _VERKLEBT_SATZ.sub(r"\1\2 \3", text or "")
+
+
+def verklebte_stellen(text: str, n: int = 3) -> list[str]:
+    """Beispiele für Stellen, an denen Zeilenumbrüche verloren gingen (für die Materialprüfung)."""
+    stellen = [(m.start(), m.group(0)) for m in _VERKLEBT_STELLE.finditer(text or "")]
+    stellen += [(m.start(), m.group(0)) for m in _VERKLEBT_WORT.finditer(text or "")]
+    treffer = [t for _, t in sorted(stellen)]
+    return list(dict.fromkeys(treffer))[:n] if len(treffer) >= 2 else []
+
+
+_VERKLEBT_STELLE = re.compile(r"[A-Za-zÄÖÜäöüß]*[a-zäöüß]{2}[.:!?][A-ZÄÖÜ][a-zäöüß]+")
+
+
 # ---------------------------------------------------------------- T-10
 #
 # Gültiges JSON heisst noch nicht, dass die Felder stimmen. Bei der

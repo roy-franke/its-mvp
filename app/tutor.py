@@ -131,6 +131,11 @@ def _system_prompt(lesson: dict) -> str:
         "Mathematische Ausdrücke, Formeln und Variablen schreibst du IMMER in "
         "LaTeX-Notation: inline zwischen $...$, abgesetzte Formeln zwischen "
         "$$...$$ (z.B. $\\frac{a}{b}$ oder $x^2$). "
+        # T-13 (Entscheid E7): kleine Markdown-Teilmenge, die die Oberfläche darstellt
+        "Längere Texte gliederst du mit einer kleinen Teilmenge von Markdown: Absätze durch eine "
+        "Leerzeile, Zwischentitel mit «### », Aufzählungen mit «- » und nummerierte Schritte mit "
+        "«1. », jeder Punkt auf einer eigenen Zeile, Fettdruck mit **…**. Keine Links, Bilder, "
+        "Tabellen oder HTML. In JSON-Zeichenketten schreibst du Zeilenumbrüche als \\n. "
         "Du antwortest IMMER ausschliesslich mit einem einzigen JSON-Objekt, "
         "ohne Text davor oder danach.\n\n"
         + didaktik.regeln_fuer_prompt() + "\n\n"
@@ -244,6 +249,12 @@ def check_material(lernziele: list[str], material: str) -> dict:
         eintrag["hinweis"] = str(roh.get("hinweis") or "")
         ergebnisse.append(eintrag)
     hinweise = []
+    verklebt = didaktik.verklebte_stellen(material)
+    if verklebt:
+        hinweise.append("Im Material fehlen vermutlich Zeilenumbrüche oder Leerschläge, etwa bei «"
+                        + "», «".join(verklebt) + "». Das passiert oft beim Kopieren aus Webseiten oder "
+                        "PDFs. Titel und Aufzählungspunkte kleben dann aneinander, was Lernende und "
+                        "Tutor schlechter lesen können.")
     if len(material.strip()) < MINDESTLAENGE_MATERIAL:
         hinweise.append(f"Das Material ist mit {len(material.strip())} Zeichen sehr kurz. Der Tutor "
                         "hat dann kaum eigene Erklärungen und Beispiele zur Verfügung und muss auf "
@@ -1119,6 +1130,9 @@ def material_abschnitte(material: str, min_len: int = 250, max_len: int = 1200) 
     Absätze werden an Satzgrenzen geteilt, sehr kurze zusammengefasst.
     """
     text = re.sub(r"^###\s*Quelle:.*$", "", material or "", flags=re.MULTILINE)
+    # T-13: Material ohne Zeilenumbrüche («messbar.Quantenverschränkung»): nach
+    # einem Satzzeichen direkt vor einem Grossbuchstaben fehlt ein Leerschlag.
+    text = didaktik.saetze_trennen(text)
     text = re.sub(r"^\s*---\s*$", "", text, flags=re.MULTILINE)
     absaetze = [re.sub(r"\s+", " ", a).strip() for a in re.split(r"\n\s*\n", text)]
     absaetze = [a for a in absaetze if len(a) >= 40]
