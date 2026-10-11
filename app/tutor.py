@@ -586,6 +586,12 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         "(ausser bei Multiple Choice). Schlüsselbegriffe sind nur Fachbegriffe aus dem Material, "
         "die der Lernende selbst nennen oder anwenden muss (z.B. «Tierhalterhaftung», «Nenner»), "
         "keine Personen, Alltagswörter oder Zahlen aus dem Fall. Sprich den Lernenden mit «du» an.\n"
+        # D-10: Die erwarteten Elemente entstehen mit der Aufgabe, nicht erst bei der Bewertung
+        "Lege fest, welche Teile die Antwort enthalten soll: 1 bis 4 erwartete Elemente. Die Frage "
+        "nennt jeden dieser Teile ausdrücklich als gesuchte Dimension, nicht als Lösung (zum Beispiel "
+        "«Nenne die verantwortliche Person und die Art der Haftung», nicht «Wer ist verantwortlich?», "
+        "wenn auch die Art der Haftung erwartet wird). Verlangt die Frage sprachlich genau eine Sache "
+        "(«Welche Voraussetzung ist hier am stärksten erkennbar?»), gibt es genau ein Element.\n"
         'Format: {"titel": "kurzer Titel", '
         '"inhalt": "Fallbeschreibung oder Situation (2-5 Sätze), ohne die Lösung", '
         '"frage": "eine konkrete Frage an den Lernenden", '
@@ -593,12 +599,14 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         '"optionen": ["nur bei multiple_choice, sonst leere Liste"], '
         '"erwartete_antwort": "kurze Musterlösung in 1-2 Sätzen (wird nicht angezeigt)", '
         '"schluesselbegriffe": ["1-4 Begriffe, die eine richtige Antwort enthalten muss"], '
+        '"erwartete_elemente": ["1-4 Teile der Antwort, die die Frage ausdrücklich verlangt"], '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
     texte = erklaerte_texte(history)
 
     def pruefen(d: dict) -> str | None:
         return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie, lesson)
+                or didaktik.elemente_passen_zur_frage(d)
                 or (didaktik.aufgabe_passt_zur_theorie(d, theorie) if direkt_nach_theorie else None)
                 or (didaktik.begriff_nicht_erklaert(d, texte, lesson) if direkt_nach_theorie else None)
                 or (unerklaert(d, erklaert, texte) if einfuehrung else None))
@@ -611,6 +619,10 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         return task_fallback(lesson, profile, adaptation, data)
     if not isinstance(data.get("optionen"), list) or data.get("aufgabentyp") != "multiple_choice":
         data["optionen"] = []
+    data["erwartete_elemente"] = didaktik.elemente_bereinigen(data.get("erwartete_elemente"))
+    if not data["erwartete_elemente"] and data.get("erwartete_antwort"):
+        # D-10 AK 1: Jede Aufgabe hat gespeicherte Elemente, notfalls die Musterlösung als eines
+        data["erwartete_elemente"] = [str(data["erwartete_antwort"]).strip()]
     data["typ"] = "aufgabe"
     return data
 
@@ -645,7 +657,7 @@ def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
 
 # Felder, die nur der Server und die Lehrperson sehen (nie die Lernenden):
 # Die Musterlösung würde die Aufgabe verraten.
-INTERNE_FELDER = ("erwartete_antwort", "schluesselbegriffe", "quelle_verworfen")
+INTERNE_FELDER = ("erwartete_antwort", "schluesselbegriffe", "quelle_verworfen", "erwartete_elemente")
 
 
 def fuer_lernende(task: dict | None) -> dict | None:
@@ -689,6 +701,7 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         kontext += (f"Musterlösung (nur für dich, nie verraten): {task['erwartete_antwort']}\n")
     if task.get("schluesselbegriffe"):
         kontext += "Schlüsselbegriffe der Lösung: " + ", ".join(task["schluesselbegriffe"]) + "\n"
+    festgelegt = didaktik.elemente_bereinigen(task.get("erwartete_elemente"))
     if vorher:
         for i, v in enumerate(vorher, 1):
             kontext += (f"Versuch {i} des Lernenden: {v.get('antwort', '')}\n"
@@ -703,9 +716,11 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "AUFGABE: ANTWORT_BEWERTEN\n"
         + kontext +
         "Gehe in zwei Schritten vor:\n"
-        "1. Bestimme 2-4 zentrale Elemente einer vollständigen Antwort. Leite sie aus der "
-        "Frage und der Musterlösung ab: nur was die Frage tatsächlich verlangt. Fragt sie "
-        "nicht nach einer Begründung oder einem Gesetzesartikel, sind diese kein Element.\n"
+        + (ELEMENTE_FESTGELEGT.format(n=len(festgelegt), liste="\n".join(
+            f"   {i}) {e}" for i, e in enumerate(festgelegt, 1))) if festgelegt else
+           "1. Bestimme 2-4 zentrale Elemente einer vollständigen Antwort. Leite sie aus der "
+           "Frage und der Musterlösung ab: nur was die Frage tatsächlich verlangt. Fragt sie "
+           "nicht nach einer Begründung oder einem Gesetzesartikel, sind diese kein Element.\n") +
         "2. Prüfe für jedes Element den Status:\n"
         "   korrekt = sachlich richtig vorhanden (gemäss der Bewertungsstrenge);\n"
         "   ungenau = sachlich zutreffend, aber zu allgemein, nur umschrieben oder ohne den "
@@ -735,7 +750,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         '"feedback": "2-4 Sätze direkt an den Lernenden", '
         '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
         fallback=dict(FALLBACK_TEXTE["bewertung"]),
-        check=lambda d: didaktik.pruefe_felder(d, ("feedback", "hinweis")),
+        check=lambda d: (didaktik.pruefe_felder(d, ("feedback", "hinweis"))
+                         or didaktik.elemente_anzahl_passt(d, festgelegt)),
         temperature=BEWERTUNG_TEMPERATUR,
     )
     if data.get("_fallback"):
@@ -751,12 +767,26 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         for e in (data.get("elemente") or []) if isinstance(e, dict)
     ]
     data["elemente"] = [e for e in elemente if e["status"] in didaktik.ELEMENT_STATUS]
+    if festgelegt and len(data["elemente"]) == len(festgelegt):
+        # D-10: Die Bewertung verwendet genau die bei der Aufgabe gespeicherten Elemente
+        for e, name in zip(data["elemente"], festgelegt):
+            e["element"] = name
+        data["elemente_quelle"] = "aufgabe"
     urteil = didaktik.urteil_aus_elementen(data["elemente"], bool(data.get("sachlicher_widerspruch")))
     if urteil and urteil != data["bewertung"]:
         data["bewertung_modell"] = data["bewertung"]
         data["bewertung"] = urteil
     data["korrekt"] = data["bewertung"] == "korrekt"
     return data
+
+
+ELEMENTE_FESTGELEGT = (
+    "1. Die erwarteten Elemente sind bei der Aufgabe festgelegt ({n}). Prüfe GENAU diese, in dieser "
+    "Reihenfolge, und keine weiteren:\n{liste}\n"
+    "   Bemängle nichts, was nicht zu diesen Elementen gehört, und verlange nichts, was die Frage "
+    "nicht verlangt hat. Darüber hinausgehende Hinweise sind erlaubt, aber nur als freiwillige "
+    "Ergänzung und deutlich so formuliert («Freiwillig könntest du noch …»). Gib in elemente genau "
+    "diese {n} Elemente zurück.\n")
 
 
 NIVEAU_EINORDNUNG = (

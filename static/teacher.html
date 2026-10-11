@@ -316,7 +316,8 @@ function renderEvent(ev) {
     else if (ev.type === "task" && p.typ === "fehler") body = `⚠️ Schritt konnte nicht erzeugt werden (Lernende sehen «Nochmals versuchen»)`;
     else if (ev.type === "task" && p.typ === "theorie") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}${p.nochmals_anders ? '<span class="pill">Nochmals anders erklärt</span> ' : ""}📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<div class="muted">${fmt(p.inhalt)}</div>${p.beispiel ? `<div class="muted">${fmt("💡 " + p.beispiel)}</div>` : ""}${p.quelle ? `<br><span class="muted">Quelle: ${esc(p.quelle)}</span>` : ""}${p.quelle_verworfen ? `<br><span class="fb">Quelle verworfen (nicht in der Lektion): ${esc(p.quelle_verworfen)}</span>` : ""}`;
     else if (ev.type === "task") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}📝 Aufgabe: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)}${p.aufgabentyp ? ", " + esc(p.aufgabentyp) : ""})<div class="muted">${fmt(p.inhalt)}</div>${fmt("❓ " + (p.frage || ""))}`
-      + (p.erwartete_antwort ? `<br><span class="muted">Erwartet: ${esc(p.erwartete_antwort)}${(p.schluesselbegriffe || []).length ? " · Schlüsselbegriffe: " + p.schluesselbegriffe.map(esc).join(", ") : ""}</span>` : "");
+      + (p.erwartete_antwort ? `<br><span class="muted">Erwartet: ${esc(p.erwartete_antwort)}${(p.schluesselbegriffe || []).length ? " · Schlüsselbegriffe: " + p.schluesselbegriffe.map(esc).join(", ") : ""}</span>` : "")
+      + ((p.erwartete_elemente || []).length ? `<br><span class="muted">Erwartete Elemente (D-10): ${p.erwartete_elemente.map((e, i) => `${i + 1}) ${esc(e)}`).join(" · ")}</span>` : "");
     else if (ev.type === "answer_submitted") body = `💬 Antwort${p.confidence ? ` <span class="muted">(Sicherheit: ${p.confidence}/10)</span>` : ""}: <pre>${esc(p.answer)}</pre>`;
     else if (ev.type === "answer_evaluated") {
       const bew = p.bewertung || (p.korrekt ? "korrekt" : "falsch");

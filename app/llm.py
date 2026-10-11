@@ -396,6 +396,8 @@ def _mock_text(system: str, user: str) -> str:
             "optionen": [],
             "erwartete_antwort": "Anna muss zahlen, weil sie fahrlässig einen Schaden verursacht hat und alle vier Voraussetzungen erfüllt sind.",
             "schluesselbegriffe": ["fahrlässig", "Widerrechtlichkeit"],
+            "erwartete_elemente": ["Entscheid, ob Anna zahlen muss",
+                                   "Begründung mit den Voraussetzungen der Verschuldenshaftung"],
             "konzept": "Verschuldenshaftung",
         }, ensure_ascii=False)
     if "ANTWORT_BEWERTEN" in user:

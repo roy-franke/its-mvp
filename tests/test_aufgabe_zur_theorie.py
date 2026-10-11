@@ -18,7 +18,8 @@ FAMILIENHAUPT = {"typ": "theorie", "titel": "Haftung des Familienhaupts", "konze
 def _aufgabe(konzept, **mehr):
     return {"titel": "Fall", "inhalt": "Ein Baum stürzt auf ein Auto.", "frage": "Wer muss bezahlen, und warum?",
             "aufgabentyp": "anwenden", "optionen": [], "erwartete_antwort": "Die verantwortliche Person haftet.",
-            "schluesselbegriffe": [], "konzept": konzept, **mehr}
+            "schluesselbegriffe": [], "erwartete_elemente": ["verantwortliche Person", "Begründung"],
+            "konzept": konzept, **mehr}
 
 
 def test_ak1_abweichendes_konzept_loest_verstoss_und_korrektur_aus(monkeypatch):

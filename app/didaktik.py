@@ -643,7 +643,9 @@ def begriff_nicht_erklaert(task: dict, erklaerte_texte: str, lesson: dict | None
         return None
     bekannt = staemme(erklaerte_texte)
     fach = fachvokabular(lesson)
-    for begriff in list(task.get("schluesselbegriffe") or []) + list(task.get("erwartete_elemente") or []):
+    # Die Schlüsselbegriffe sind die Fachbegriffe, die die Antwort (und damit die
+    # erwarteten Elemente) verlangt; die Elemente selbst sind Beschreibungen.
+    for begriff in list(task.get("schluesselbegriffe") or []):
         if not isinstance(begriff, str) or re.search(r"\d", begriff):
             continue
         teile = [x for x in staemme(begriff) if len(x) >= 6]
@@ -654,6 +656,62 @@ def begriff_nicht_erklaert(task: dict, erklaerte_texte: str, lesson: dict | None
             return (f"Die Aufgabe verlangt den Fachbegriff «{begriff}», der in keiner bisher gezeigten "
                     "Theorie vorkommt. Stelle die Aufgabe so, dass sie sich mit der vorangehenden "
                     "Theorie beantworten lässt.")
+    return None
+
+
+# ---------------------------------------------------------------- D-10
+
+def elemente_bereinigen(roh) -> list[str]:
+    if not isinstance(roh, list):
+        return []
+    return [str(e).strip() for e in roh if isinstance(e, str) and str(e).strip()][:4]
+
+
+_MEHRTEILIG = re.compile(r"\b(und|sowie|sind|alle|beiden?|jeweils|mehrere|warum|weshalb|wieso|begründe|"
+                         r"erkläre|beschreibe|nenne\s+\w+\s+und)\b|,", re.IGNORECASE)
+_EINE_SACHE = re.compile(
+    r"^\W*(welche[rsmn]?\b[^?]*?\b(ist|war|wäre|liegt|greift|gilt|trifft|fehlt|besteht|eignet sich)\b"
+    r"|wer\b[^?]*?\b(ist|war|haftet|muss|trägt|zahlt|hat|wird)\b"
+    r"|was\s+ist\s+(der|die|das)\b)", re.IGNORECASE)
+
+
+def frage_verlangt_eine_sache(frage: str) -> bool:
+    """Klare Fälle einer Frage, die sprachlich genau eine Sache verlangt (D-10).
+
+    «Welche der vier Voraussetzungen ist hier am stärksten erkennbar?» oder
+    «Wer ist für den beschädigten Wagen verantwortlich?». Sobald die Frage
+    weitere Teile nennt («und», «warum», «begründe», mehrere Sätze), gilt sie
+    nicht mehr als einteilig.
+    """
+    f = (frage or "").strip()
+    if not f or f.count("?") > 1 or len(re.findall(r"[.!?]\s+\S", f)) > 0:
+        return False
+    if _MEHRTEILIG.search(f):
+        return False
+    return bool(_EINE_SACHE.match(f))
+
+
+def elemente_passen_zur_frage(task: dict) -> str | None:
+    """D-10: Erwartete Elemente sind festgelegt, und eine einteilige Frage hat genau eines."""
+    elemente = elemente_bereinigen(task.get("erwartete_elemente"))
+    if not elemente:
+        return ("Lege im Feld erwartete_elemente 1 bis 4 Teile fest, die die Antwort enthalten soll, "
+                "und nenne jeden davon in der Frage.")
+    if len(elemente) > 1 and frage_verlangt_eine_sache(task.get("frage", "")):
+        return (f"Die Frage verlangt sprachlich genau eine Sache, es sind aber {len(elemente)} erwartete "
+                "Elemente festgelegt (" + "; ".join(elemente) + "). Formuliere die Frage so, dass sie jeden "
+                "Teil ausdrücklich nennt (zum Beispiel «Nenne … und …»), oder lege genau ein Element fest.")
+    return None
+
+
+def elemente_anzahl_passt(bewertung: dict, festgelegt: list[str]) -> str | None:
+    """D-10: Die Bewertung prüft genau die bei der Aufgabe festgelegten Elemente."""
+    if not festgelegt:
+        return None
+    n = len([e for e in bewertung.get("elemente") or [] if isinstance(e, dict)])
+    if n != len(festgelegt):
+        return (f"Prüfe genau die {len(festgelegt)} festgelegten Elemente (du hast {n} zurückgegeben): "
+                + "; ".join(festgelegt) + ".")
     return None
 
 
