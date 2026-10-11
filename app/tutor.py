@@ -756,7 +756,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
         fallback=dict(FALLBACK_TEXTE["bewertung"]),
         check=lambda d: (didaktik.pruefe_felder(d, ("feedback", "hinweis"))
-                         or didaktik.elemente_anzahl_passt(d, festgelegt)),
+                         or didaktik.elemente_anzahl_passt(d, festgelegt)
+                         or didaktik.urteil_widerspricht_text(d)),
         temperature=BEWERTUNG_TEMPERATUR,
     )
     if data.get("_fallback"):
@@ -962,11 +963,13 @@ SICHER_TIEF = 3      # bis hier als «unsicher»
 
 
 def selbsteinschaetzung_rueckmeldung(confidence: int | None, bewertung: str) -> str | None:
-    """Ein Satz zur Selbsteinschätzung, nur bei deutlicher Abweichung (N-04).
+    """Ein Satz zur Selbsteinschätzung, nur bei deutlicher Abweichung (N-04, D-12).
 
-    Deterministisch, damit die Rückmeldung nicht zur Routine wird: Sie kommt
-    nur, wenn jemand sehr sicher war und falsch lag oder unsicher war und
-    richtig lag. Teilweise richtige Antworten lösen keine Rückmeldung aus.
+    Deterministisch, damit die Rückmeldung nicht zur Routine wird. Sie bezieht
+    sich auf genau den Versuch, für den die Sicherheit angegeben wurde (den
+    ersten zu einer Aufgabe), und verwendet dessen Urteil. D-12: Drei Fälle,
+    richtig, teilweise richtig und falsch; früher sagte die Rückmeldung bei
+    «teilweise» nichts und bei «falsch» pauschal «stimmt nicht».
     """
     if confidence is None:
         return None
@@ -974,6 +977,12 @@ def selbsteinschaetzung_rueckmeldung(confidence: int | None, bewertung: str) -> 
         return (f"Du warst dir sehr sicher ({confidence} von 10), die Antwort stimmt aber nicht. "
                 "Schau dir die Erklärung nochmals genau an: Gerade bei dem, was sich sicher anfühlt, "
                 "lohnt sich ein zweiter Blick.")
+    if bewertung == "teilweise" and confidence >= SICHER_HOCH:
+        return (f"Du warst dir sehr sicher ({confidence} von 10), und der Kern stimmte auch. "
+                "Es fehlte aber noch etwas.")
+    if bewertung == "teilweise" and confidence <= SICHER_TIEF:
+        return (f"Du warst unsicher ({confidence} von 10), dabei stimmte der Kern schon. "
+                "Es fehlte nur noch etwas.")
     if bewertung == "korrekt" and confidence <= SICHER_TIEF:
         return (f"Du warst unsicher ({confidence} von 10), dabei war deine Antwort richtig. "
                 "Du kannst mehr, als du dir zutraust.")

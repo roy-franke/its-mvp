@@ -18,7 +18,8 @@ from app.main import app
     (4, "korrekt", None),
     (9, "korrekt", None),
     (1, "falsch", None),
-    (10, "teilweise", None),      # teilweise löst nie etwas aus
+    (10, "teilweise", "sehr sicher"),   # D-12: eigene Rückmeldung für «teilweise»
+    (5, "teilweise", None),
     (None, "falsch", None),
 ])
 def test_rueckmeldung_nur_bei_deutlicher_abweichung(sicherheit, bewertung, erwartet):

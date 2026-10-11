@@ -146,6 +146,46 @@ REGELN: dict[str, dict] = {
                  "Allgemeinwissen verwenden darfst.",
         "pruefbar": False,
     },
+    # ------------------------------------------------------------ Auftrag 2 (Oktober 2026)
+    # Diese Regeln stehen bewusst nicht im Systemprompt (der bliebe sonst nicht
+    # unverändert, D-10); die Anweisungen dazu gehen im Benutzerteil mit, die
+    # Prüfung läuft deterministisch nach der Generierung.
+    "D08_KEINE_DOPPELTE_THEORIE": {
+        "paket": "D-08", "bereich": "erklaerung", "im_prompt": False,
+        "titel": "Keine doppelte Theorie",
+        "regel": "Ein Konzept, zu dem in der Sequenz schon Theorie gezeigt wurde, löst keine automatische "
+                 "Theorie mehr aus; eine neue Theorie wiederholt nicht die vorangehende.",
+        "pruefbar": True,
+    },
+    "D09_AUFGABE_ZUR_THEORIE": {
+        "paket": "D-09", "bereich": "aufgabe", "im_prompt": False,
+        "titel": "Aufgabe passt zur vorangehenden Theorie",
+        "regel": "Eine Aufgabe direkt nach einer Theorie behandelt genau deren Konzept, nicht das Oberthema "
+                 "oder ein anderes Thema, und verlangt nur Fachbegriffe aus gezeigten Theorien.",
+        "pruefbar": True,
+    },
+    "D10_ELEMENTE_IN_DER_FRAGE": {
+        "paket": "D-10", "bereich": "aufgabe", "im_prompt": False,
+        "titel": "Frage nennt alle erwarteten Elemente",
+        "regel": "Die Aufgabe legt 1 bis 4 erwartete Elemente fest, die Frage nennt jedes davon; eine Frage, "
+                 "die sprachlich eine Sache verlangt, hat genau ein Element. Bewertet wird nur danach.",
+        "pruefbar": True,
+    },
+    "D11_KEINE_KOPIE": {
+        "paket": "D-11", "bereich": "bewertung", "im_prompt": False,
+        "titel": "Kopierte Antworten werden nicht bewertet",
+        "regel": "Besteht eine Antwort zu mindestens 60 Prozent aus Wort-Vierergruppen angezeigter Texte "
+                 "oder des Materials, wird sie nicht bewertet; bei teilweiser Übernahme zählt nur die "
+                 "Eigenleistung.",
+        "pruefbar": True,
+    },
+    "D12_URTEIL_UND_TEXT": {
+        "paket": "D-12", "bereich": "bewertung", "im_prompt": False,
+        "titel": "Urteil und Bewertungstext passen zusammen",
+        "regel": "Lautet das Urteil «falsch», sagt der Text nicht «(grundsätzlich) richtig»; lautet es "
+                 "«korrekt», sagt er nicht «stimmt nicht».",
+        "pruefbar": True,
+    },
 }
 
 
@@ -160,7 +200,7 @@ def regeln_fuer_prompt() -> str:
                "bewertung": "Bewertung von Antworten", "niveau": "Niveau"}
     zeilen = ["DIDAKTISCHE REGELN (verbindlich):"]
     for key, titel in gruppen.items():
-        regeln = [r for r in REGELN.values() if r["bereich"] == key]
+        regeln = [r for r in REGELN.values() if r["bereich"] == key and r.get("im_prompt", True)]
         if regeln:
             zeilen.append(f"{titel}:")
             zeilen += [f"- {r['regel']}" for r in regeln]
@@ -762,6 +802,43 @@ def kopie_pruefen(antwort: str, quellen: list[tuple[str, str]]) -> dict:
     if start is not None:
         passagen.append(" ".join(w[start:ende + _N]))
     return {"anteil": round(anteil, 2), "quelle": beste, "passagen": passagen, "woerter": len(w)}
+
+
+# ---------------------------------------------------------------- D-12
+#
+# Das Urteil leitet der Code aus den Elementen ab (D-05). Weicht es vom Urteil
+# des Modells ab, wurde das Feedback für ein anderes Urteil geschrieben: Der
+# Screenshot zeigte «Noch nicht ganz» (falsch) mit dem Text «grundsätzlich
+# richtig». Klare Widersprüche zwischen Urteil und Text sind deshalb ein
+# Regelverstoss, die Bewertung wird mit Korrekturhinweis wiederholt.
+
+_POSITIV = re.compile(
+    r"\b(grundsätzlich|im kern|im grunde|weitgehend|im wesentlichen|völlig|absolut|vollkommen|ganz)\s+"
+    r"(richtig|korrekt|zutreffend)\b"
+    r"|^\W*(richtig|korrekt|genau|super|sehr gut|gut gemacht|perfekt)\b(?!\s+ist)"
+    r"|\bdeine antwort (ist|war) (richtig|korrekt|zutreffend)\b", re.IGNORECASE)
+_NEGATIV = re.compile(
+    r"\b(ist|wäre|war) (leider )?(falsch|nicht richtig|nicht korrekt)\b|\bstimmt (leider )?nicht\b"
+    r"|^\W*(falsch|leider nicht|noch nicht ganz|nicht ganz)\b", re.IGNORECASE)
+
+
+def urteil_widerspricht_text(bewertung: dict) -> str | None:
+    urteil = urteil_aus_elementen(bewertung.get("elemente"), bool(bewertung.get("sachlicher_widerspruch"))) \
+        or bewertung.get("bewertung")
+    text = str(bewertung.get("feedback") or "")
+    if urteil == "falsch":
+        m = _POSITIV.search(text)
+        if m and not re.search(r"\b(nicht|kein|un)\w*\s+(\w+\s+)?" + re.escape(m.group(0).strip()), text,
+                               re.IGNORECASE):
+            return (f"Das Urteil «falsch» passt nicht zum Feedback («{m.group(0).strip()}»). Ist die Antwort "
+                    "im Kern richtig, bewerte die Elemente entsprechend (korrekt oder ungenau); sonst "
+                    "formuliere das Feedback passend zum Urteil «falsch».")
+    if urteil == "korrekt":
+        m = _NEGATIV.search(text)
+        if m:
+            return (f"Das Urteil «korrekt» passt nicht zum Feedback («{m.group(0).strip()}»). Bewerte die "
+                    "Elemente so, wie das Feedback die Antwort beurteilt, oder passe das Feedback an.")
+    return None
 
 
 def theorietext(t: dict | None) -> str:

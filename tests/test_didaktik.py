@@ -177,7 +177,8 @@ def test_regelverstoss_wird_protokolliert(monkeypatch):
 def test_regelkatalog_vollstaendig(regel):
     r = didaktik.REGELN[regel]
     assert {"paket", "bereich", "titel", "regel", "pruefbar"} <= set(r)
-    assert r["regel"] in didaktik.regeln_fuer_prompt()
+    # Regeln aus Auftrag 2 stehen bewusst nicht im Systemprompt (dieser bleibt unverändert)
+    assert (r["regel"] in didaktik.regeln_fuer_prompt()) == r.get("im_prompt", True)
 
 
 # ---------------------------------------------------------------- Befunde aus der Evaluation mit qwen3:30b
