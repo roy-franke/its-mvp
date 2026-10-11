@@ -5,8 +5,8 @@ zusammen. Es dient als Kontext für eine neue Claude-Session (z.B. auf einem
 anderen Rechner), damit dort ohne Unterbruch weitergearbeitet werden kann.
 Lies zusätzlich das `README.md` im Projektstamm.
 
-Stand: 27. September 2026 (nachgeführt nach den Anpassungen aus dem ersten Testdurchlauf,
-Phasen 1 bis 3 des Auftrags «Anpassungen ITS-Prototyp»)
+Stand: 11. Oktober 2026 (nachgeführt nach dem Auftrag «Anpassungen ITS-Prototyp nach dem
+zweiten Testdurchlauf», Pakete T-08 bis T-24 und D-07 bis D-12)
 
 ## 1. Projektkontext
 
@@ -64,7 +64,7 @@ Technisch: FastAPI (Python), SQLite (Sessions + Event-Log, vollständige
 Protokollierung, Migrationen beim Start in `store._migrate`), Vanilla-JS-Frontend
 (5 statische Seiten), KaTeX für Formeldarstellung (LaTeX-Anweisung im
 Systemprompt), Diagnose-Endpoint `/api/llm-test` (nur Lehrpersonen), rund 270
-pytest-Tests. Mock-Provider bewertet heuristisch nach Antwortlänge (>=40 Zeichen
+pytest-Tests (seit Oktober 2026 rund 500). Mock-Provider bewertet heuristisch nach Antwortlänge (>=40 Zeichen
 korrekt, 15-39 teilweise, sonst falsch), damit die Adaption ohne LLM
 demonstrierbar ist; `ITS_MOCK_DELAY` und `ITS_MOCK_FAIL` simulieren langsame
 oder scheiternde Aufrufe für Oberflächentests.
@@ -88,6 +88,31 @@ global mit `ITS_WEB_SEARCH` abschaltbar und standardmässig aus (N-03, Modul
 `app/websuche.py`), Rückmeldung zur Selbsteinschätzung und Kalibrierung
 (N-04), eigener Lernverlauf für Lernende über eine Whitelist aus dem Event-Log
 (N-05, `tutor.verlauf_fuer_lernende`). Bewertung läuft mit Temperatur 0.
+
+Auftrag 2 (11.10.2026, Feedback vom 29.9.2026): Promptlänge wird vor jedem
+Ollama-Aufruf gegen `OLLAMA_NUM_CTX` geschätzt und bei Überschreitung im Log,
+im Fallback-Event und im Editor gemeldet (T-08). Leere Modellantworten sind ein
+eigener Fehlerfall mit done_reason und Tokenzahlen; der zweite Versuch läuft
+ohne format=json (T-09). Alle LLM-Antworten werden auf Felder und Typen geprüft,
+Einstufungsfragen als Objekte werden gerettet (T-10). Statt Schleifen und
+Lückenbüssern bietet der Tutor Wahlmöglichkeiten über den neuen Endpunkt
+`/wahl` an: nach gescheiterter Bewertung (T-11), nach einem Fallback inklusive
+«Witz zum Thema» (T-12) und nach teilweise richtiger Antwort (D-07, Entscheid
+E1: zählt weder als Fehler noch als richtig). Tutor-Texte werden mit einer
+kleinen Markdown-Teilmenge dargestellt (`static/format.js`, T-13). Beim
+Fortsetzen erscheint der ganze Dialog (T-14). Didaktik: keine doppelte Theorie
+dank Kernbegriff-Vergleich und Ähnlichkeitsprüfung (D-08), Aufgabe passt zur
+vorangehenden Theorie (D-09), erwartete Elemente entstehen mit der Aufgabe und
+die Bewertung prüft nur diese (D-10), kopierte Antworten werden nicht bewertet
+(D-11), Urteil und Bewertungstext müssen zusammenpassen (D-12). Lehrpersonen:
+Lektion duplizieren (T-17), Titel als Pflichtfeld und Lernziel-Vorschlag als
+experimentell (T-18), klare Meldung der Materialprüfung (T-19), Archivieren und
+Wiederherstellen von Sequenzen und Lektionen (T-20). Betrieb: Abmelden auf allen
+Seiten über `/logout` (T-22), Abmelden beim Proxy über `X-Logout-Url` bzw.
+`ITS_LOGOUT_URL` (T-23), Header-Debug-Logging mit `ITS_LOG_LEVELS=its.auth=DEBUG`
+(T-24). Details und gefundene Ursachen in den Statusnotizen
+`claude/status-t08-…` bis `claude/status-t24-…`, `claude/status-d07-…` bis
+`claude/status-d12-…` und `claude/status-auftrag-2.md`.
 
 Prüfwerkzeuge neben pytest: `tests/ui/ui_checks.py` (Playwright gegen eine
 eigens gestartete Instanz) und `tests/eval/eval_didaktik.py` (Evaluation der
@@ -161,6 +186,12 @@ danach lohnt sich der Versuch mit einem kleineren Modell.
 - Frontend-Änderungen brauchen einen Hard-Refresh (Cmd+Shift+R).
 - KaTeX lädt vom CDN; für Betrieb ohne Internet lokal bundeln.
 - Roys OpenAI-Key wurde einmal im Chat geteilt und sollte rotiert werden (platform.openai.com).
+- Material, das ohne Zeilenumbrüche eingefügt wurde («EinstiegFür»), klebt in der Anzeige zusammen. «Material prüfen» meldet das seit T-13; das Material der Quantenphysik-Lektion ist gegliedert.
+- Sehr grosses Material (ganzes OR) sprengt das Kontextfenster: Ollama kürzt still. Seit T-08 warnen Log, Lernverlauf und Editor; die Lösung ist kürzeres Material oder später RAG.
+- Qwen3 schreibt trotz `OLLAMA_THINK=false` manchmal «<think>»; Ollama legt die Antwort dann ins Feld thinking. Das ITS liest sie seit T-09 von dort; `tests/eval/diagnose_ollama.py` zeigt, wie oft das passiert.
+- Ohne `TEACHER_PASSWORD` gilt jede Anfrage als Lehrperson. Nach «Abmelden» verhindert ein Merker-Cookie das sofortige Zurückleiten (T-22); «Anmelden» auf der Login-Seite geht dann ohne Passwort.
+- Angemeldete Lernende erhalten auf Lehrpersonen-Endpunkten seit T-20 den Status 403 (ohne Anmeldung weiterhin 401).
+- Neue Wartezustände in `profile.wartet_auf`: `bewertung_wiederholen`, `wahl_unbewertet`, `wahl_fallback`, `wahl_teilweise` (alte Sessions mit `nochmals` funktionieren weiter).
 
 ## 6. Austausch mit Swiss Learning Analytics (LLMTutor)
 
@@ -186,9 +217,10 @@ genau ein Tunnel und ein cloudflared-Dienst; weitere Anwendungen kommen als
 zusätzliche Routen mit eigenem Port dazu, nicht als zweiter Tunnel.
 Noch offen: gleiches Tunnel-Muster später für RIB-AI-01 im Pilot.
 2. **Anpassungen aus dem ersten Testdurchlauf – Phasen 1 bis 4 UMGESETZT (27./28.9.2026)**: T-01 bis T-07, D-01 bis D-06 und N-01 bis N-05. Evaluation mit qwen3:30b gelaufen (Berichte unter `tests/eval/berichte/`, Befunde in den Statusnotizen D-01 und D-05). Offen: Klassentest mit echtem Modell, Material der Quantenphysik-Lektion überarbeiten (D-06), für die Internetrecherche einen SearXNG-Dienst aufsetzen. Kandidat für später: Bewertungselemente schon bei der Aufgabengenerierung festlegen statt bei jeder Bewertung neu (siehe D-05).
-3. **Prompt-Tuning** mit Roys Praxisbeobachtungen auf Basis der Evaluationsberichte (Vergleich Ollama vs. Cloud als Evaluationsergebnis).
-4. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
-5. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.
+3. **Anpassungen aus dem zweiten Testdurchlauf – UMGESETZT (11.10.2026)**: T-08 bis T-24, D-07 bis D-12, 495 pytest-Tests und 152 Playwright-Prüfungen grün. Offen: Evaluation und Diagnose gegen qwen3:30b auf a9-mega (`python tests/eval/diagnose_ollama.py`, danach `python tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <ID der Version 3>`), Kalibrierung der Tokenschätzung, Klassentest. Ausblick laut Auftrag: lektionsspezifische Witze im Editor, Wahl auch nach falscher Antwort, automatisches Kürzen oder RAG für grosses Material.
+4. **Prompt-Tuning** mit Roys Praxisbeobachtungen auf Basis der Evaluationsberichte (Vergleich Ollama vs. Cloud als Evaluationsergebnis).
+5. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
+6. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.
 
 ## 8. Arbeitsweise in der Zusammenarbeit
 
