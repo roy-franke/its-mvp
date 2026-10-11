@@ -1024,6 +1024,11 @@ def t20_archivieren(pw):
         ids = [l["id"] for l in httpx.get(base + "/api/lessons").json()]
         check("T-20 AK4 archivierte Lektion wiederhergestellt", "haftungsrecht" in ids)
         check("T-20 ohne Skriptfehler", not fehler, "; ".join(fehler))
+        page.goto(base + "/teacher")
+        label = page.locator("label.cb", has=page.locator("#show-tests"))
+        check("T-21 AK1 Beschriftung und Tooltip sichtbar",
+              label.inner_text().strip() == "Testläufe von Lehrpersonen anzeigen"
+              and "zählen nicht in den Auswertungen" in (label.get_attribute("title") or ""))
 
 
 def run(names):

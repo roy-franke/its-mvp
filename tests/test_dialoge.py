@@ -34,3 +34,10 @@ def test_t16_niveau_dropdown_ohne_festhalten():
     for label in ("Automatisch (empfohlen)", ">Grundlagen<", ">Fortgeschritten<", ">Vertieft<"):
         assert label in auswahl
     assert "bis du wieder «Automatisch» wählst" in text
+
+
+def test_t21_checkbox_testlaeufe_von_lehrpersonen():
+    text = Path("static/teacher.html").read_text(encoding="utf-8")
+    assert "Testläufe von Lehrpersonen anzeigen" in text
+    assert ('title="Lernsequenzen, die eine angemeldete Lehrperson selbst durchgespielt hat. '
+            'Sie zählen nicht in den Auswertungen."') in text
