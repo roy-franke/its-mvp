@@ -561,6 +561,97 @@ def pruefe_felder(data: dict, felder: tuple[str, ...]) -> str | None:
     return leere_ankuendigung(text) or sie_anrede(text)
 
 
+# ---------------------------------------------------------------- T-10
+#
+# Gültiges JSON heisst noch nicht, dass die Felder stimmen. Bei der
+# Einstufung lieferte das Modell eine Liste von Objekten statt Texten, und
+# das Frontend zeigte «[object Object]». Jeder Aufruf von chat_json prüft
+# deshalb die erwarteten Felder und Typen. Eine falsche Struktur löst den
+# Korrekturversuch aus; ist auch der letzte Versuch falsch, greift der
+# Fallback (siehe llm.chat_json).
+
+STRUKTUR_PRAEFIX = "Falsche Struktur:"
+
+# Schema: Feld -> (Typ, Pflicht). Typen: "text", "liste_text", "liste_objekt", "bool", "liste".
+STRUKTUR: dict[str, dict[str, tuple[str, bool]]] = {
+    "EINSTUFUNG_BEWERTEN": {"level": ("text", True), "begruendung": ("text", False)},
+    "THEORIE_SCHRITT": {"titel": ("text", False), "inhalt": ("text", True), "beispiel": ("text", False),
+                        "konzept": ("text", False), "quelle": ("text", False)},
+    "NAECHSTE_AUFGABE": {"titel": ("text", False), "inhalt": ("text", False), "frage": ("text", True),
+                         "konzept": ("text", False), "erwartete_antwort": ("text", False),
+                         "schluesselbegriffe": ("liste_text", False), "optionen": ("liste", False),
+                         "erwartete_elemente": ("liste_text", False)},
+    "ANTWORT_BEWERTEN": {"elemente": ("liste_objekt", False), "bewertung": ("text", False),
+                         "feedback": ("text", True), "hinweis": ("text", False)},
+    "FRAGE_BEANTWORTEN": {"antwort": ("text", True), "konzept": ("text", False)},
+    "ABSCHLUSS": {"zusammenfassung": ("text", True), "erreichte_lernziele": ("liste_text", False),
+                  "empfehlung": ("text", False)},
+    "LERNZIELE_VORSCHLAGEN": {"lernziele": ("liste_text", True)},
+    "MATERIAL_PRUEFEN": {"ziele": ("liste_objekt", True), "gesamt": ("text", False)},
+    "WITZ": {"witz": ("text", True)},
+}
+
+_TYPNAME = {"text": "ein Text", "liste_text": "eine Liste von Texten",
+            "liste_objekt": "eine Liste von Objekten", "liste": "eine Liste", "bool": "true oder false"}
+
+
+def _typ_ok(wert, typ: str) -> bool:
+    if typ == "text":
+        return isinstance(wert, str)
+    if typ == "bool":
+        return isinstance(wert, bool)
+    if not isinstance(wert, list):
+        return False
+    if typ == "liste_text":
+        return all(isinstance(x, str) for x in wert)
+    if typ == "liste_objekt":
+        return all(isinstance(x, dict) for x in wert)
+    return True
+
+
+def struktur_pruefen(data: dict, schritt: str) -> str | None:
+    """Prüft Felder und Typen einer Modellantwort (T-10). Gibt den Fehler zurück oder None."""
+    schema = STRUKTUR.get(schritt)
+    if not schema:
+        return None
+    probleme = []
+    for feld, (typ, pflicht) in schema.items():
+        wert = data.get(feld)
+        if wert is None or wert == "" or wert == []:
+            if pflicht:
+                probleme.append(f"Das Feld «{feld}» fehlt oder ist leer.")
+            continue
+        if not _typ_ok(wert, typ):
+            probleme.append(f"Das Feld «{feld}» muss {_TYPNAME[typ]} sein.")
+    if probleme:
+        return f"{STRUKTUR_PRAEFIX} " + " ".join(probleme) + " Halte dich genau an das verlangte Format."
+    return None
+
+
+def ist_strukturfehler(verstoss: str | None) -> bool:
+    return bool(verstoss) and verstoss.startswith(STRUKTUR_PRAEFIX)
+
+
+FRAGE_FELDER = ("frage", "question", "text", "Frage", "Question", "inhalt", "titel")
+
+
+def frage_als_text(eintrag) -> str:
+    """Einstufungsfrage als Text, auch wenn das Modell Objekte liefert (T-10)."""
+    if isinstance(eintrag, str):
+        return eintrag.strip()
+    if isinstance(eintrag, dict):
+        for f in FRAGE_FELDER:
+            if isinstance(eintrag.get(f), str) and eintrag[f].strip():
+                return eintrag[f].strip()
+    return ""
+
+
+def fragen_normalisieren(roh) -> list[str]:
+    if not isinstance(roh, list):
+        return []
+    return [t for t in (frage_als_text(x) for x in roh) if len(t) >= 8]
+
+
 # ---------------------------------------------------------------- N-01
 
 _QUELLE_KOPF = re.compile(r"^###\s*Quelle:\s*(.+?)\s*$", re.MULTILINE)

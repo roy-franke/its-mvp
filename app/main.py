@@ -426,10 +426,13 @@ def start_session(req: StartRequest, request: Request, response: Response):
     profile = tutor.new_profile()
     testlauf = ident.is_teacher
     sid = store.create_session(name, lesson_id, profile, testlauf=testlauf, user_key=user_key)
-    questions = tutor.generate_assessment(lesson)
+    einstufung = tutor.generate_assessment_detail(lesson)
+    questions = einstufung["questions"]
     store.log_event(sid, "session_started", {"name": name, "lesson": lesson["titel"],
                                              "testlauf": testlauf})
-    store.log_event(sid, "assessment_questions", {"questions": questions})
+    _log_llm_meta(sid, "EINSTUFUNGSFRAGEN", einstufung)      # T-10: Fallback sichtbar
+    store.log_event(sid, "assessment_questions", {"questions": questions,
+                                                  "quelle": einstufung["quelle"]})
     profile["assessment_questions"] = questions
     store.update_session(sid, profile=profile)
     return {

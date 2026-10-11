@@ -655,6 +655,23 @@ def t08_kontext(pw):
               "Maximum 4096" in text and "Überschreitung" in text, text[:300])
 
 
+@scenario("t10")
+def t10_einstufung(pw):
+    """T-10: Die Einstufung zeigt nie «[object Object]»."""
+    with server() as base:
+        page = launch(pw).new_page()
+        page.goto(base + "/")
+        page.evaluate("""() => { show('view-assess');
+            questions = [{Frage: 'Was weisst du über Haftung?', Schwierigkeit: 'leicht'}, {x: 1}, 'Normale Frage?'];
+            qIndex = 0; renderAssess(); }""")
+        t1 = page.inner_text("#assess-question")
+        page.evaluate("() => { qIndex = 1; renderAssess(); }")
+        t2 = page.inner_text("#assess-question")
+        check("T-10 Objekt mit Fragefeld wird als Text gezeigt", t1 == "Was weisst du über Haftung?", t1)
+        check("T-10 unbrauchbares Objekt: verständliche Meldung statt [object Object]",
+              "object" not in t2 and "nicht angezeigt" in t2, t2)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

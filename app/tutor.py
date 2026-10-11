@@ -265,18 +265,65 @@ EINSTUFUNG_EINFUEHRUNG = (
 
 def generate_assessment(lesson: dict) -> list[str]:
     """Erzeugt 3 Einstiegsfragen zur Wissenseinstufung."""
+    return generate_assessment_detail(lesson)["questions"]
+
+
+def fragen_aus_lernzielen(lesson: dict) -> list[str]:
+    """Letzter Rückfall (T-10): einfache Fragen aus den Lernzielen der Lektion."""
+    ziele = [z.strip().rstrip(".") for z in lesson.get("lernziele", []) if z.strip()]
+    vorlagen = ["Was weisst du schon zu diesem Lernziel: «{z}»? Beschreib es in eigenen Worten.",
+                "Wo begegnet dir im Alltag oder im Beruf etwas zu «{z}»?",
+                "Was möchtest du zu «{z}» besonders gut verstehen?"]
+    fragen = [vorlagen[i % 3].format(z=z) for i, z in enumerate(ziele[:3])]
+    allgemein = ["Was weisst du bereits zu diesem Thema? Beschreibe es in eigenen Worten.",
+                 "Nenne ein Beispiel aus dem Alltag, das zu diesem Thema passt.",
+                 "Welche Fachbegriffe zu diesem Thema kennst du schon?"]
+    return (fragen + allgemein)[:3]
+
+
+def generate_assessment_detail(lesson: dict) -> dict:
+    """Einstufungsfragen mit Herkunft (T-10).
+
+    Liefert das Modell Objekte statt Texten, wird der Fragetext aus den
+    üblichen Feldern übernommen; leere Einträge fallen weg. Fehlen danach
+    Fragen, werden sie aus `einstufungsfragen_fallback` der Lektion ergänzt,
+    sonst aus den Lernzielen. Die Rückgabe trägt dann `_fallback` und einen
+    Grund, damit ein Event fallback_used entsteht.
+    """
     einfuehrung = einstellungen.settings(lesson)["einsatzart"] == "einfuehrung"
+
+    def pruefen(d: dict) -> str | None:
+        n = len(didaktik.fragen_normalisieren(d.get("questions")))
+        if n < 3:
+            return (f"{didaktik.STRUKTUR_PRAEFIX} Das Feld «questions» muss eine Liste mit genau 3 "
+                    f"Fragen als Text sein (lesbar waren {n}). Keine Objekte, nur Texte.")
+        return None
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: EINSTUFUNGSFRAGEN\n"
         "Erstelle genau 3 kurze, offene Einstiegsfragen, um das Vorwissen zur "
         "Lektion einzuschätzen: eine leichte, eine mittlere, eine anspruchsvolle. "
         + (EINSTUFUNG_EINFUEHRUNG if einfuehrung else "") +
-        'Format: {"questions": ["...", "...", "..."]}',
-        fallback={"questions": lesson.get("einstufungsfragen_fallback", [])},
+        'Jede Frage ist ein einfacher Text, kein Objekt. Format: {"questions": ["...", "...", "..."]}',
+        fallback={"questions": []}, check=pruefen,
     )
-    qs = data.get("questions") or lesson.get("einstufungsfragen_fallback", [])
-    return qs[:3]
+    fragen = didaktik.fragen_normalisieren(data.get("questions")
+                                           or (data.get("_roh") or {}).get("questions"))[:3]
+    if len(fragen) >= 3 and not data.get("_fallback"):
+        return {"questions": fragen, "quelle": "modell", **{k: v for k, v in data.items()
+                                                             if k.startswith("_")}}
+    meta = {k: v for k, v in data.items() if k in ("_fehler", "_fehlerart", "_kontext", "_antwort_meta")}
+    grund = data.get("_fehler") or f"nur {len(fragen)} lesbare Fragen"
+    ersatz = didaktik.fragen_normalisieren(lesson.get("einstufungsfragen_fallback"))
+    quelle = "lektion"
+    if len(fragen) + len(ersatz) < 3:
+        ersatz += fragen_aus_lernzielen(lesson)
+        quelle = "lernziele"
+    fragen = (fragen + [f for f in ersatz if f not in fragen])[:3]
+    meta["_fehler"] = (f"{grund} | Einstufungsfragen ergänzt aus "
+                       + ("den Fallback-Fragen der Lektion" if quelle == "lektion" else "den Lernzielen"))
+    meta.setdefault("_fehlerart", data.get("_fehlerart") or "struktur")
+    return {"questions": fragen, "quelle": quelle, "_fallback": True, **meta}
 
 
 def evaluate_assessment(lesson: dict, questions: list[str], answers: list[str]) -> dict:

@@ -303,7 +303,7 @@ function renderEvent(ev) {
     const p = ev.payload;
     let cls = ev.type, body = "";
     if (ev.type === "session_started") body = `Session gestartet – Lektion: ${esc(p.lesson)}`;
-    else if (ev.type === "assessment_questions") body = `Einstufungsfragen: ${p.questions.map(esc).join(" | ")}`;
+    else if (ev.type === "assessment_questions") body = `Einstufungsfragen${p.quelle && p.quelle !== "modell" ? ` <span class="fb">(ergänzt aus ${p.quelle === "lektion" ? "den Fallback-Fragen der Lektion" : "den Lernzielen"})</span>` : ""}: ${(p.questions || []).map(q => esc(typeof q === "string" ? q : (q && (q.frage || q.question || q.text)) || JSON.stringify(q))).join(" | ")}`;
     else if (ev.type === "assessment_evaluated") body = `Einstufung: <strong>${LABEL[p.level] || p.level}</strong> – ${esc(p.begruendung)}<br><span class="muted">Antworten: ${p.answers.map(esc).join(" | ")}</span>`;
     else if (ev.type === "task" && p.typ === "fehler") body = `⚠️ Schritt konnte nicht erzeugt werden (Lernende sehen «Nochmals versuchen»)`;
     else if (ev.type === "task" && p.typ === "theorie") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<br><span class="muted">${esc((p.inhalt || "").slice(0, 200))}…</span>${p.beispiel ? `<br><span class="muted">💡 ${esc(p.beispiel)}</span>` : ""}${p.quelle ? `<br><span class="muted">Quelle: ${esc(p.quelle)}</span>` : ""}${p.quelle_verworfen ? `<br><span class="fb">Quelle verworfen (nicht in der Lektion): ${esc(p.quelle_verworfen)}</span>` : ""}`;
@@ -349,7 +349,7 @@ const SCHRITT = {
   THEORIE_SCHRITT: "Theorie", NAECHSTE_AUFGABE: "Nächste Aufgabe",
   ANTWORT_BEWERTEN: "Antwort bewerten", FRAGE_BEANTWORTEN: "Verständnisfrage",
   ABSCHLUSS: "Abschluss", LERNZIELE_VORSCHLAGEN: "Lernziele vorschlagen",
-  MATERIAL_PRUEFEN: "Material prüfen",
+  MATERIAL_PRUEFEN: "Material prüfen", WITZ: "Witz zum Thema",
 };
 
 // T-09: Art des Fehlers und Metadaten der Ollama-Antwort

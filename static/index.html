@@ -655,9 +655,17 @@ async function resumeSession(sid) {
 }
 
 // ---------- Einstufung
+// T-10: Nie ein Objekt als Text ausgeben («[object Object]»)
+function frageText(q) {
+  if (typeof q === "string" && q.trim()) return q;
+  if (q && typeof q === "object")
+    for (const f of ["frage", "question", "text", "Frage", "Question"])
+      if (typeof q[f] === "string" && q[f].trim()) return q[f];
+  return "Diese Frage konnte gerade nicht angezeigt werden. Beschreibe einfach, was du zum Thema schon weisst.";
+}
 function renderAssess() {
   $("assess-count").textContent = `(Frage ${qIndex + 1} von ${questions.length})`;
-  $("assess-question").textContent = questions[qIndex];
+  $("assess-question").textContent = frageText(questions[qIndex]);
   renderMath($("assess-question"));
   $("assess-answer").value = "";
   $("assess-answer").focus();

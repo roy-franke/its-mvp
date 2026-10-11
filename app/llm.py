@@ -21,6 +21,8 @@ from collections import deque
 
 import httpx
 
+from . import didaktik
+
 log = logging.getLogger("its.llm")
 
 # Grosse lokale Modelle brauchen beim ersten Aufruf Zeit zum Laden.
@@ -649,6 +651,7 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     kontext: dict | None = None
     fehlerart: str | None = None
     antwort_meta: dict | None = None
+    roh: dict | None = None
     prompt = user
     json_mode = True
     for versuch in range(1, versuche + 1):
@@ -685,14 +688,24 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
             fehler.append(grund)
             fehlerart = "json_unlesbar"
             continue
-        verstoss = check(parsed) if check else None
+        # T-10: Zuerst Felder und Typen, dann die didaktischen Regeln
+        verstoss = didaktik.struktur_pruefen(parsed, label) or (check(parsed) if check else None)
         if verstoss:
-            log.info("Regelverstoss (%s, Versuch %d): %s", label, versuch, verstoss)
             verstoesse.append(verstoss)
-            beste = parsed
+            if didaktik.ist_strukturfehler(verstoss):
+                # Eine falsche Struktur wird nie verwendet: lieber der Fallback
+                log.warning("Strukturfehler (%s, Versuch %d): %s", label, versuch, verstoss)
+                fehler.append(verstoss)
+                fehlerart = "struktur"
+                roh = parsed           # für Aufrufer, die Teile retten können (Einstufung)
+            else:
+                log.info("Regelverstoss (%s, Versuch %d): %s", label, versuch, verstoss)
+                beste = parsed
             if versuch < versuche:
                 prompt = user + KORREKTUR_HINWEIS.format(verstoss=verstoss)
                 continue
+            if beste is not parsed:
+                break
             return _mit_meta(parsed, versuch, fehler, verstoesse, offen=True)
         return _mit_meta(parsed, versuch, fehler, verstoesse)
     if beste is not None:
@@ -701,6 +714,8 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     out["_fallback"] = True
     out["_fehler"] = " | ".join(fehler) or "unbekannt"
     out["_fehlerart"] = fehlerart or "unbekannt"
+    if roh is not None:
+        out["_roh"] = roh
     if antwort_meta:
         out["_antwort_meta"] = antwort_meta
     if kontext:
