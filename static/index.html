@@ -855,7 +855,7 @@ function zeigeTutorAntwort(d) {
   } else if (d.ausserhalb_material) {
     addMsg("tutor extern", d.antwort ?? d.text, "Tutor · Ergänzung ausserhalb des Lektionsmaterials");
   } else {
-    addMsg("tutor", d.antwort ?? d.text, "Tutor");
+    addMsg("tutor", d.antwort ?? d.text, d.nochmals_anders ? "Tutor · Nochmals anders erklärt" : "Tutor");
   }
 }
 

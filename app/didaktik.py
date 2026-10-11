@@ -561,6 +561,50 @@ def pruefe_felder(data: dict, felder: tuple[str, ...]) -> str | None:
     return leere_ankuendigung(text) or sie_anrede(text)
 
 
+# ---------------------------------------------------------------- D-08
+#
+# Konzeptnamen schreibt das Modell nicht immer gleich («Kausalhaftung»,
+# «Kausalhaftung ohne Verschulden», «Kausal-Haftung»). Verglichen wird deshalb
+# nach Vereinheitlichung und über den Kernbegriff: das längste Inhaltswort.
+# Damit gilt «Kausalhaftung» als erklärt, wenn eine Theorie zu «Kausalhaftung
+# ohne Verschulden» gezeigt wurde, aber «Tierhalterhaftung» nicht als
+# «Haftung».
+
+# Kalibriert mit den beiden Fällen aus dem Feedback vom 29.9.2026
+# (tests/daten/doppelte_theorie.json): Kausalhaftung 0.61, Unschärferelation
+# 0.51, verschiedene Konzepte 0.0.
+THEORIE_AEHNLICH = 0.45
+
+
+def konzept_normalisieren(name: str | None) -> str:
+    n = (name or "").lower().replace("ß", "ss")
+    n = re.sub(r"[^a-zäöü0-9 ]+", " ", n)
+    return re.sub(r"\s+", " ", n).strip()
+
+
+def kernbegriff(name: str | None) -> str:
+    """Stamm des längsten Inhaltsworts eines Konzeptnamens."""
+    kandidaten = [w for w in woerter(konzept_normalisieren(name).replace("-", " ")) if len(w) >= 5]
+    return stamm(max(kandidaten, key=len)) if kandidaten else ""
+
+
+def gleiches_konzept(a: str | None, b: str | None) -> bool:
+    if not (a or "").strip() or not (b or "").strip():
+        return False
+    na, nb = konzept_normalisieren(a), konzept_normalisieren(b)
+    if na == nb or na.replace(" ", "") == nb.replace(" ", ""):
+        return True
+    ka, kb = kernbegriff(a), kernbegriff(b)
+    if not ka or not kb:
+        return False
+    return ka == kb or (gleicher_stamm(ka, kb) and abs(len(ka) - len(kb)) <= 3)
+
+
+def theorietext(t: dict | None) -> str:
+    t = t or {}
+    return " ".join(str(t.get(k) or "") for k in ("inhalt", "beispiel")).strip()
+
+
 # ---------------------------------------------------------------- T-13
 
 _VERKLEBT_SATZ = re.compile(r"([a-zäöüß]{2})([.:!?])([A-ZÄÖÜ][a-zäöü])")

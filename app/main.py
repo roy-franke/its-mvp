@@ -494,16 +494,31 @@ def _generate_step(lesson: dict, profile: dict, history: list[dict],
                    adaptation: str | None) -> tuple[str, dict]:
     step_type = tutor.decide_step_type(profile, adaptation, _einsatzart(lesson))
     if step_type == "theorie":
-        return step_type, tutor.generate_theory(lesson, profile, history, adaptation)
+        theorie = tutor.generate_theory(lesson, profile, history, adaptation)
+        if (adaptation in (None, "naechstes_thema") and not theorie.get("_fallback")
+                and theorie.get("_verstoss_offen")):
+            # D-08: Auch nach der Korrektur wiederholt die Theorie ein schon
+            # erklärtes Konzept oder die vorangehende Theorie. Dann direkt eine Aufgabe.
+            grund = tutor.doppelte_theorie(theorie, profile.get("erklaert") or [],
+                                           didaktik.theorietext(tutor.letzte_theorie(history)))
+            if grund:
+                aufgabe = tutor.generate_task(lesson, dict(profile, last_type="theorie"), history, adaptation)
+                aufgabe["_theorie_uebersprungen"] = {"grund": grund, "konzept": theorie.get("konzept", ""),
+                                                     "titel": theorie.get("titel", "")}
+                return "aufgabe", aufgabe
+        return step_type, theorie
     task = tutor.generate_task(lesson, profile, history, adaptation)
     if (_einsatzart(lesson) == "einfuehrung" and not task.get("_fallback")
-            and tutor.unerklaert(task, profile.get("erklaert") or [], tutor.erklaerte_texte(history))):
+            and tutor.unerklaertes_konzept(task, profile.get("erklaert") or [], tutor.erklaerte_texte(history))):
         # D-02: Braucht die Aufgabe auch nach der Neugenerierung ein noch nicht
-        # erklärtes Konzept, kommt zuerst ein Theorieschritt dazu.
+        # erklärtes Konzept, kommt zuerst ein Theorieschritt dazu. D-08: Nur das
+        # Konzept zählt; fehlt bloss ein Begriff, bleibt es bei der Aufgabe (der
+        # Verstoss ist protokolliert). Früher löste ein fehlender Begriff eine
+        # zweite Theorie zum eben erklärten Konzept aus.
         verstoesse = task.get("_verstoesse", [])
         profil_fuer_theorie = dict(profile, current_task={"konzept": task.get("konzept", "")})
         theorie = tutor.generate_theory(lesson, profil_fuer_theorie, history, "konzept")
-        theorie["_eingeschoben"] = {"grund": "Konzept noch nicht erklärt",
+        theorie["_eingeschoben"] = {"grund": f"Konzept «{task.get('konzept', '')}» war noch nicht erklärt",
                                     "konzept": task.get("konzept", ""), "verstoesse": verstoesse}
         return "theorie", theorie
     return "aufgabe", task
@@ -571,6 +586,13 @@ def next_step(sid: str, request: Request, adaptation: str | None = None,
     return _commit_step(sid, profile, step_type, task)
 
 
+def _als_erklaert_merken(profile: dict, konzept: str | None) -> None:
+    """D-08: Ein Konzept nur einmal in der Liste, auch bei anderer Schreibweise."""
+    erklaert = profile.setdefault("erklaert", [])
+    if konzept and not any(didaktik.gleiches_konzept(konzept, e) for e in erklaert):
+        erklaert.append(konzept)
+
+
 def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
     """Übernimmt einen erzeugten Schritt in Profil und Lernverlauf."""
     _log_llm_meta(sid, SCHRITTART[step_type], task)
@@ -592,11 +614,12 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
             store.log_event(sid, "regel_verstoss", {"schrittart": "NAECHSTE_AUFGABE",
                                                     "verstoesse": e["verstoesse"], "behoben": False})
         store.log_event(sid, "theorie_eingeschoben", {"grund": e["grund"], "konzept": e["konzept"]})
+    if task.get("_theorie_uebersprungen"):
+        store.log_event(sid, "theorie_uebersprungen", task["_theorie_uebersprungen"])   # D-08
     if step_type == "theorie":
         profile["theory_steps"] = profile.get("theory_steps", 0) + 1
         profile["aufgaben_seit_theorie"] = 0
-        if task.get("konzept") and task["konzept"] not in profile.setdefault("erklaert", []):
-            profile["erklaert"].append(task["konzept"])
+        _als_erklaert_merken(profile, task.get("konzept"))
     else:
         profile["aufgaben_seit_theorie"] = profile.get("aufgaben_seit_theorie", 0) + 1
     if "material_abschnitt" in task:
@@ -887,6 +910,11 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
     if art == "allgemeinwissen" and not result.get("_fallback") and einstellungen.internet_erlaubt(lesson):
         result["angebot"] = "internet"       # nächste Stufe anbieten
     _log_llm_meta(sid, "FRAGE_BEANTWORTEN", result)
+    if art in ("theorie", "genauer", "allgemeinwissen", "internet") and not result.get("_fallback"):
+        # D-08: Auch angeforderte Theorie gilt als Erklärung des Konzepts
+        profile = store.get_session(sid)["profile"]
+        _als_erklaert_merken(profile, (task or {}).get("konzept") or result.get("konzept"))
+        store.update_session(sid, profile=profile)
     antwort = result.get("antwort", "")
     niveau = None
     if art == "frage":
@@ -923,7 +951,7 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
     })
     return {"antwort": antwort, "ausserhalb_material": ausserhalb,
             "internet": bool(result.get("internet")), "links": result.get("links") or [],
-            "hinweis": result.get("hinweis"),
+            "hinweis": result.get("hinweis"), "nochmals_anders": bool(result.get("nochmals_anders")),
             "angebot": result.get("angebot"), "stufe": stufe, "progress": niveau}
 
 

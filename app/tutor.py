@@ -79,7 +79,13 @@ def decide_step_type(profile: dict, adaptation: str | None,
 
 
 def konzept_erklaert(konzept: str | None, erklaert: list[str]) -> bool:
-    """Wurde das Konzept (oder ein Konzept mit gleichem Wortstamm) schon erklärt?"""
+    """Wurde das Konzept (oder ein Konzept mit gleichem Wortstamm) schon erklärt?
+
+    D-08: Zuerst über den vereinheitlichten Namen und den Kernbegriff, sodass
+    «Kausalhaftung ohne Verschulden» auch «Kausalhaftung» erklärt.
+    """
+    if any(didaktik.gleiches_konzept(konzept, e) for e in erklaert):
+        return True
     teile = {s for s in didaktik.staemme(konzept or "") if len(s) >= 5}
     if not teile:
         return True          # ohne erkennbares Konzept nicht blockieren
@@ -422,6 +428,12 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
             "Führe das nächste sinnvolle Konzept aus dem Material ein, das noch "
             "nicht behandelt wurde.\n"
         )
+    erklaert = profile.get("erklaert") or []
+    neues_konzept = adaptation in (None, "naechstes_thema")
+    if neues_konzept and erklaert:
+        # D-08: ausdrücklich, damit nicht dasselbe Konzept unter anderem Titel kommt
+        instruction += ("In dieser Sequenz bereits erklärt (NICHT nochmals erklären, auch nicht unter "
+                        "anderem Titel): " + ", ".join(erklaert) + ".\n")
     quellen = didaktik.quellen_der_lektion(lesson)
     if quellen:
         # N-01: Die Quellenliste ist konstant, steht aber im Benutzerteil, damit
@@ -440,15 +452,36 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         '"konzept": "behandeltes Konzept in 1-3 Worten"'
         + (', "quelle": "Name der verwendeten Quelle"' if quellen else "") + "}"
     )
-    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={},
-                         check=lambda d: (didaktik.pruefe_felder(d, ("inhalt", "beispiel"))
-                                          or didaktik.thema_verfehlt(
-                                              f"{d.get('inhalt', '')} {d.get('beispiel', '')}", lesson)))
+    vorher_text = didaktik.theorietext(vorher)
+
+    def pruefen(d: dict) -> str | None:
+        return (didaktik.pruefe_felder(d, ("inhalt", "beispiel"))
+                or didaktik.thema_verfehlt(f"{d.get('inhalt', '')} {d.get('beispiel', '')}", lesson)
+                or (doppelte_theorie(d, erklaert, vorher_text) if neues_konzept else None)
+                or (didaktik.zu_aehnlich(didaktik.theorietext(d), [vorher_text], didaktik.THEORIE_AEHNLICH)
+                    if adaptation == "simplify" and vorher_text else None))
+    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={}, check=pruefen)
     if data.get("_fallback"):
         return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"
+    if adaptation == "simplify" and vorher:
+        data["nochmals_anders"] = True     # D-08: erlaubte Ausnahme, gekennzeichnet
     _quelle_setzen(data, lesson)
     return data
+
+
+def doppelte_theorie(theorie: dict, erklaert: list[str], vorher_text: str) -> str | None:
+    """D-08: Wiederholt eine automatische Theorie ein schon erklärtes Konzept oder
+    im Wesentlichen den unmittelbar vorangehenden Theorietext?"""
+    konzept = theorie.get("konzept") or ""
+    for e in erklaert:
+        if didaktik.gleiches_konzept(konzept, e) or didaktik.gleiches_konzept(theorie.get("titel"), e):
+            return (f"Das Konzept «{e}» wurde in dieser Sequenz bereits erklärt. Führe ein anderes, "
+                    "noch nicht erklärtes Konzept aus dem Material ein.")
+    if vorher_text and didaktik.aehnlichkeit(didaktik.theorietext(theorie), [vorher_text]) >= didaktik.THEORIE_AEHNLICH:
+        return ("Die Erklärung wiederholt im Wesentlichen die vorangehende Theorie. Führe ein anderes, "
+                "noch nicht erklärtes Konzept ein.")
+    return None
 
 
 def _quelle_setzen(data: dict, lesson: dict) -> None:
@@ -571,9 +604,9 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
     return data
 
 
-def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
-    """D-02: Verlangt die Aufgabe ein Konzept oder einen Begriff, der in dieser
-    Sequenz noch nicht erklärt wurde?"""
+def unerklaertes_konzept(task: dict, erklaert: list[str], texte: str) -> str | None:
+    """D-02/D-08: Verlangt die Aufgabe ein Konzept, das in dieser Sequenz noch nicht
+    erklärt wurde? Nur das löst eine eingeschobene Theorie aus."""
     bekannte = didaktik.staemme(texte)
     konzept_teile = [t for t in didaktik.staemme(task.get("konzept") or "") if len(t) >= 5]
     im_text = bool(konzept_teile) and all(
@@ -581,6 +614,16 @@ def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
     if not konzept_erklaert(task.get("konzept"), erklaert) and not im_text:
         return (f"Das Konzept «{task.get('konzept')}» wurde in dieser Sequenz noch nicht erklärt. "
                 "Stelle die Aufgabe zu einem bereits erklärten Konzept.")
+    return None
+
+
+def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
+    """D-02: Verlangt die Aufgabe ein Konzept oder einen Begriff, der in dieser
+    Sequenz noch nicht erklärt wurde?"""
+    verstoss = unerklaertes_konzept(task, erklaert, texte)
+    if verstoss:
+        return verstoss
+    bekannte = didaktik.staemme(texte)
     for begriff in task.get("schluesselbegriffe") or []:
         teile = [t for t in didaktik.staemme(str(begriff)) if len(t) >= 5]
         if teile and not all(any(didaktik.gleicher_stamm(t, b) for b in bekannte) for t in teile):
@@ -836,6 +879,8 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
     data["ausserhalb_material"] = bool(data.get("ausserhalb_material")) or art == "allgemeinwissen"
     data["stufe"] = stufe if art in ("theorie", "genauer") else None
     data["angebot"] = None
+    # D-08: Erneute Erklärung zum selben Konzept ist erlaubt, aber gekennzeichnet
+    data["nochmals_anders"] = art in ("theorie", "genauer") and bool(bisherige) and not data.get("_fallback")
     return data
 
 

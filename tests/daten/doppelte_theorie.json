@@ -1,0 +1,27 @@
+{
+  "_quelle": "Screenshots aus dem Feedback vom 29.9.2026 (Auftrag 2, D-08), abgeschrieben",
+  "haftung": [
+    {"titel": "Kausalhaftung ohne Verschulden", "konzept": "Kausalhaftung",
+     "inhalt": "Kausalhaftung tritt auf, wenn jemand für Schäden haftet, ohne dass ein Verschulden vorliegt. Sie basiert auf der Verantwortung für Gefahrenquellen wie Tiere, Produkte oder Werke. Der Schädiger muss nicht absichtlich oder fahrlässig handeln, sondern ist für die Folgen einer Gefahr verantwortlich, die er eingeführt hat. Dies gilt, wenn die Gefahr durch die Kontrolle des Schädigers verhindert werden könnte.",
+     "beispiel": "Ein Hundebesitzer haftet für Schäden, die sein Hund verursacht, auch wenn er keine Fahrlässigkeit zeigte."},
+    {"titel": "Kausalhaftung: Verantwortung ohne Verschulden", "konzept": "Kausalhaftung",
+     "inhalt": "Kausalhaftung tritt ein, wenn jemand für Schäden verantwortlich ist, ohne dass er dabei selbst verschuldet hat. Sie basiert darauf, dass eine Person eine Gefahr in die Gesellschaft gebracht hat und dafür haftet, auch wenn sie keine Absicht oder Fahrlässigkeit hatte. Die Haftung entsteht, weil die verantwortliche Person die Kontrolle über die Gefahr hatte und sie in den Raum brachte. Dies gilt beispielsweise bei Eigentümern von Tieren oder Maschinen.",
+     "beispiel": "Ein Hundebesitzer haftet für Schäden, die sein Hund verursacht, auch wenn er keine Fahrlässigkeit zeigte."}
+  ],
+  "quanten": [
+    {"titel": "Unschärferelation verstehen", "konzept": "Unschärferelation",
+     "inhalt": "Die Heisenbergsche Unschärferelation besagt, dass bestimmte Paare von Eigenschaften eines Teilchens, wie Ort und Impuls, nicht gleichzeitig beliebig genau gemessen werden können. Je genauer du den Ort eines Teilchens kennst, desto ungenauer wird seine Geschwindigkeit (Impuls) und umgekehrt. Dies ist kein Messfehler, sondern eine grundlegende Eigenschaft der Quantenwelt. Die Teilchen existieren nicht in präzisen Zuständen, sondern in Wahrscheinlichkeitsverteilungen, die sich gegenseitig beeinflussen.",
+     "beispiel": "Ein Techniker misst mit einem Laser die Position eines Werkstücks – je präziser die Ortsmessung, desto unsicherer wird die Geschwindigkeit des Werkstücks bei der Bearbeitung."},
+    {"titel": "Heisenbergsche Unschärferelation", "konzept": "Heisenbergsche Unschärferelation",
+     "inhalt": "Die Heisenbergsche Unschärferelation besagt, dass es unmöglich ist, den Ort und den Impuls eines Teilchens gleichzeitig mit beliebiger Genauigkeit zu messen. Je genauer man einen der beiden Werte bestimmt, desto ungenauer wird der andere. Dies ist kein Messfehler, sondern eine grundlegende Eigenschaft der Quantenwelt. Das Prinzip zeigt, dass die Natur auf mikroskopischer Ebene nicht deterministisch, sondern probabilistisch ist. Es hat tiefgreifende Auswirkungen auf die Art und Weise, wie wir Quantenphänomene verstehen und beschreiben.",
+     "beispiel": "In der Quantencomputing-Entwicklung beeinflusst die Unschärferelation, wie Qubits präzise gemessen und manipuliert werden können."}
+  ],
+  "verschieden": [
+    {"titel": "Superposition", "konzept": "Superposition",
+     "inhalt": "Ein Quantenobjekt kann sich in einer Überlagerung mehrerer Zustände befinden. Erst die Messung legt fest, welcher Zustand beobachtet wird. Vorher beschreibt die Wellenfunktion alle Möglichkeiten gleichzeitig mit ihren Wahrscheinlichkeiten.",
+     "beispiel": "Eine Münze, die sich noch dreht, ist weder Kopf noch Zahl."},
+    {"titel": "Quantenverschränkung", "konzept": "Quantenverschränkung",
+     "inhalt": "Verschränkte Teilchen bleiben über grosse Distanzen miteinander verbunden. Misst man eine Eigenschaft des einen Teilchens, kennt man sofort die entsprechende Eigenschaft des anderen, ohne dass ein Signal übertragen wird.",
+     "beispiel": "Zwei Handschuhe in getrennten Paketen: Öffnest du eines und findest den linken, weisst du sofort, dass im anderen der rechte liegt."}
+  ]
+}
