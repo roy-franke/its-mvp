@@ -200,7 +200,13 @@ def _ollama_meta(data: dict) -> dict:
         "prompt_sekunden": sek("prompt_eval_duration"),
         "antwort_sekunden": sek("eval_duration"),
         "laden_sekunden": sek("load_duration"),
+        "gesamt_sekunden": sek("total_duration"),
+        # T-09: «stop» = regulär beendet, «length» = an OLLAMA_NUM_PREDICT abgeschnitten
+        "done_reason": data.get("done_reason"),
     }
+    denken = (data.get("message") or {}).get("thinking")
+    if denken:
+        meta["thinking_zeichen"] = len(denken)
     tokens, dauer = data.get("eval_count"), meta["antwort_sekunden"]
     if tokens and dauer:
         meta["tokens_pro_sekunde"] = round(tokens / dauer, 1)
@@ -331,7 +337,17 @@ def _chat_ollama(system: str, user: str, json_mode: bool = False) -> tuple[str, 
         r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
     r.raise_for_status()
     data = r.json()
-    return data["message"]["content"], _ollama_meta(data)
+    meta = _ollama_meta(data)
+    inhalt = data["message"].get("content") or ""
+    denken = data["message"].get("thinking") or ""
+    if not inhalt.strip() and "{" in denken:
+        # T-09: Qwen3 beginnt trotz think=false gelegentlich mit «<think>». Ollama
+        # schiebt dann die ganze Ausgabe ins Feld thinking, und content bleibt
+        # leer. Steht dort ein JSON-Objekt, wird es verwendet.
+        log.warning("Leerer content, Antwort stand im Feld thinking (%d Zeichen)", len(denken))
+        meta["aus_thinking"] = True
+        inhalt = denken
+    return inhalt, meta
 
 
 def _mock_quelle(user: str) -> dict:
@@ -473,9 +489,16 @@ def _chat_mock(system: str, user: str, json_mode: bool = False) -> tuple[str, di
     delay = float(os.getenv("ITS_MOCK_DELAY", "0") or 0)
     if delay > 0:
         time.sleep(delay)
+    # Varianten (T-09): «X:leer» liefert immer eine leere Antwort, «X:leer_json»
+    # nur mit format=json, so dass der veränderte zweite Versuch gelingt.
     fail = {x.strip() for x in os.getenv("ITS_MOCK_FAIL", "").split(",") if x.strip()}
-    if _label(user) in fail:
-        raise LLMError(f"Mock-Fehler für {_label(user)} (ITS_MOCK_FAIL)")
+    label = _label(user)
+    if label in fail:
+        raise LLMError(f"Mock-Fehler für {label} (ITS_MOCK_FAIL)")
+    leer_meta = {"done_reason": "length", "prompt_tokens": 1200, "antwort_tokens": 1024,
+                 "gesamt_sekunden": 9.5}
+    if f"{label}:leer" in fail or (f"{label}:leer_json" in fail and json_mode):
+        return "\n\n   \n", leer_meta
     return _mock_text(system, user), {}
 
 
@@ -608,6 +631,12 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     greift der Fallback. Das Ergebnis trägt dann `_fallback` und `_fehler`,
     damit der Aufrufer ein Event fallback_used protokollieren kann.
 
+    T-09: Eine leere Antwort ist ein eigener Fehlerfall. Der nächste Versuch
+    ist dann nicht identisch: Er verzichtet auf format=json (das JSON wird
+    danach mit extract_json repariert) und bittet ausdrücklich um eine direkte
+    Antwort ohne Vorüberlegungen. Die Metadaten der Antwort (done_reason,
+    Tokenzahlen, Dauer) landen im Log und im Fallback.
+
     `check` ist eine optionale Prüffunktion (dict -> str | None). Meldet sie
     einen Regelverstoss, wird einmal mit einem Korrekturhinweis neu generiert.
     Verstösst auch der zweite Versuch, wird er trotzdem verwendet und der
@@ -618,24 +647,43 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     verstoesse: list[str] = []
     beste: dict | None = None
     kontext: dict | None = None
+    fehlerart: str | None = None
+    antwort_meta: dict | None = None
     prompt = user
+    json_mode = True
     for versuch in range(1, versuche + 1):
         try:
-            text, info = _chat_mit_info(system, prompt, json_mode=True)
+            text, info = _chat_mit_info(system, prompt, json_mode=json_mode)
         except Exception as e:
             ursache = e.original if isinstance(e, LLMAufrufFehler) else e
             kontext = kontext or (e.info.get("kontext") if isinstance(e, LLMAufrufFehler) else None)
             grund = f"{type(ursache).__name__}: {ursache}"[:300]
             log.error("LLM-Fehler (%s, Versuch %d): %s", label, versuch, grund)
             fehler.append(grund)
+            fehlerart = "technisch"
             continue
         kontext = kontext or info.get("kontext")
+        meta = info.get("meta") or {}
+        if not text.strip():
+            antwort_meta = _meta_kurz(meta)
+            grund = "leere Antwort" + (f" ({_meta_text(antwort_meta)})" if antwort_meta else "")
+            log.warning("%s (%s, Versuch %d)", grund, label, versuch)
+            _mark_last_error(label, "leere Antwort")
+            fehler.append(grund)
+            fehlerart = "leere_antwort"
+            # Zweiter Versuch mit veränderter Anfrage statt identisch zu wiederholen
+            json_mode = False
+            prompt = user + LEER_HINWEIS
+            continue
         parsed = extract_json(text)
         if not isinstance(parsed, dict):
+            antwort_meta = _meta_kurz(meta)
             grund = f"Antwort war kein lesbares JSON: {text[:120]!r}"
-            log.warning("%s (%s, Versuch %d)", grund, label, versuch)
+            log.warning("%s (%s, Versuch %d%s)", grund, label, versuch,
+                        f", {_meta_text(antwort_meta)}" if antwort_meta else "")
             _mark_last_error(label, "JSON nicht lesbar")
             fehler.append(grund)
+            fehlerart = "json_unlesbar"
             continue
         verstoss = check(parsed) if check else None
         if verstoss:
@@ -652,6 +700,9 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     out = dict(fallback)
     out["_fallback"] = True
     out["_fehler"] = " | ".join(fehler) or "unbekannt"
+    out["_fehlerart"] = fehlerart or "unbekannt"
+    if antwort_meta:
+        out["_antwort_meta"] = antwort_meta
     if kontext:
         # T-08: Ursache sichtbar machen, statt nur «kein lesbares JSON» zu melden
         out["_kontext"] = kontext
@@ -660,6 +711,35 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
                           + out["_fehler"])
     record_fallback(label, out["_fehler"], kontext)
     return out
+
+
+# T-09: zweiter Versuch nach einer leeren Antwort. «/no_think» ist der
+# Schalter von Qwen3, um den Denkmodus im Prompt abzuschalten; andere Modelle
+# lesen es als harmlosen Text.
+LEER_HINWEIS = ("\n\nWICHTIG: Deine letzte Antwort war leer. Antworte jetzt direkt und ohne "
+                "Vorüberlegungen mit genau einem JSON-Objekt im verlangten Format. /no_think")
+
+_META_FELDER = ("done_reason", "prompt_tokens", "antwort_tokens", "gesamt_sekunden",
+                "thinking_zeichen", "aus_thinking")
+
+
+def _meta_kurz(meta: dict) -> dict:
+    return {k: meta[k] for k in _META_FELDER if meta.get(k) is not None}
+
+
+def _meta_text(m: dict) -> str:
+    teile = []
+    if m.get("done_reason"):
+        teile.append(f"done_reason={m['done_reason']}")
+    if m.get("prompt_tokens") is not None:
+        teile.append(f"Prompt {m['prompt_tokens']} Tokens")
+    if m.get("antwort_tokens") is not None:
+        teile.append(f"Antwort {m['antwort_tokens']} Tokens")
+    if m.get("gesamt_sekunden") is not None:
+        teile.append(f"{m['gesamt_sekunden']} s")
+    if m.get("thinking_zeichen"):
+        teile.append(f"{m['thinking_zeichen']} Zeichen im Feld thinking")
+    return ", ".join(teile)
 
 
 def _mit_meta(data: dict, versuch: int, fehler: list, verstoesse: list,

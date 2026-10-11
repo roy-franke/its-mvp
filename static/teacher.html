@@ -67,6 +67,7 @@
   .event.fallback_used { border-color:#dc2626; background:#fef2f2; }
   .event.regel_verstoss, .event.vorabruf_verworfen { border-color:#d97706; background:#fffbeb; }
   .fb { color:#dc2626; font-weight:600; }
+  .pill.fehlerart { background:#fee2e2; color:#991b1b; border-color:#fecaca; }
   ul.elemente { margin:4px 0 2px; padding-left:18px; font-size:.85rem; }
   .muted { color:var(--muted); }
   button.small { background:none; border:1px solid var(--border); border-radius:6px;
@@ -325,7 +326,10 @@ function renderEvent(ev) {
     else if (ev.type === "chat_reply") body = `💬 Tutor${p.internet ? ' <span class="pill test">Internet</span>' : p.ausserhalb_material ? ' <span class="pill test">ausserhalb Material</span>' : ""}: ${esc(p.antwort)}${(p.links || []).length ? "<br>" + p.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.titel)}</a>`).join(" · ") : ""}${p.suchanfrage ? `<br><span class="muted">Suchanfrage: ${esc(p.suchanfrage)}</span>` : ""}`
       + (p.aehnlichkeit != null ? `<br><span class="muted">Ähnlichkeit zu bisherigen Erklärungen: ${Math.round(p.aehnlichkeit * 100)} %</span>` : "");
     else if (ev.type === "finished") body = `🎉 Abgeschlossen – ${esc(p.zusammenfassung)}`;
-    else if (ev.type === "fallback_used") body = `⚠️ <strong>Fallback</strong> bei ${esc(SCHRITT[p.schrittart] || p.schrittart)} – Grund: <span class="muted">${esc(p.grund)}</span>`
+    else if (ev.type === "fallback_used") body = `⚠️ <strong>Fallback</strong> bei ${esc(SCHRITT[p.schrittart] || p.schrittart)}`
+      + (p.art ? ` <span class="pill fehlerart">${esc(FEHLERART[p.art] || p.art)}</span>` : "")
+      + ` – Grund: <span class="muted">${esc(p.grund)}</span>`
+      + (p.antwort_meta ? `<br><span class="muted">Antwort des Modells: ${esc(metaText(p.antwort_meta))}</span>` : "")
       + (p.kontext ? `<br><span class="fb">Kontext zu gross:</span> Prompt ${p.kontext.geschaetzt ? "ca. " : ""}${p.kontext.prompt_tokens} Tokens, Maximum ${p.kontext.max_tokens} (OLLAMA_NUM_CTX), Überschreitung ${p.kontext.geschaetzt ? "ca. " : ""}${Math.max(p.kontext.differenz, 0)} Tokens. Das Sprachmodell hat nur einen Teil des Materials gesehen.` : "");
     else if (ev.type === "regel_verstoss") body = `🧪 Regelverstoss bei ${esc(SCHRITT[p.schrittart] || p.schrittart)}${p.behoben ? " (nach Neugenerierung behoben)" : ""}: <span class="muted">${(p.verstoesse || []).map(esc).join(" | ")}</span>`;
     else if (ev.type === "status_geaendert") body = `🔁 Status: ${esc(STATUS[p.von] || p.von)} → <strong>${esc(STATUS[p.nach] || p.nach)}</strong>${p.grund ? ` <span class="muted">(${esc(p.grund)})</span>` : ""}`;
@@ -347,6 +351,19 @@ const SCHRITT = {
   ABSCHLUSS: "Abschluss", LERNZIELE_VORSCHLAGEN: "Lernziele vorschlagen",
   MATERIAL_PRUEFEN: "Material prüfen",
 };
+
+// T-09: Art des Fehlers und Metadaten der Ollama-Antwort
+const FEHLERART = { leere_antwort: "leere Antwort", json_unlesbar: "unlesbares JSON",
+                    struktur: "falsche Struktur", technisch: "technischer Fehler" };
+function metaText(m) {
+  const t = [];
+  if (m.done_reason) t.push(`done_reason=${m.done_reason}`);
+  if (m.prompt_tokens != null) t.push(`Prompt ${m.prompt_tokens} Tokens`);
+  if (m.antwort_tokens != null) t.push(`Antwort ${m.antwort_tokens} Tokens`);
+  if (m.gesamt_sekunden != null) t.push(`${m.gesamt_sekunden} s`);
+  if (m.thinking_zeichen) t.push(`${m.thinking_zeichen} Zeichen im Feld thinking`);
+  return t.join(", ");
+}
 
 // T-08: Auslastung des Kontextfensters auch ohne Fehler beobachten
 function promptGroesse(z, fenster) {

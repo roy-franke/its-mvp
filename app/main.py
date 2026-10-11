@@ -471,6 +471,11 @@ def _log_llm_meta(sid: str, schrittart: str, data: dict):
         payload = {"schrittart": schrittart, "grund": data.get("_fehler", "unbekannt")}
         if data.get("_kontext"):
             payload["kontext"] = data["_kontext"]      # T-08: Prompt zu lang
+        if data.get("_fehlerart"):
+            # T-09: leere Antwort, unlesbares JSON, falsche Struktur oder technischer Fehler
+            payload["art"] = data["_fehlerart"]
+        if data.get("_antwort_meta"):
+            payload["antwort_meta"] = data["_antwort_meta"]
         store.log_event(sid, "fallback_used", payload)
     if data.get("_verstoesse"):
         store.log_event(sid, "regel_verstoss", {

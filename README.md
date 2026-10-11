@@ -84,7 +84,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 - **Materialgebunden**: Der Systemprompt verpflichtet den Tutor auf das Lektionsmaterial und macht Unsicherheit sichtbar (Verlässlichkeit vor Eloquenz).
 - **Trennung Inhalt/Tutorlogik**: Die Adaptionslogik (tutor.adapt) ist deterministischer Code, kein LLM-Entscheid – nachvollziehbar und testbar. Das LLM generiert Inhalte, Bewertungen und Feedback.
 - **Lernpfade rekonstruierbar**: Jedes Ereignis (Fragen, Antworten, Bewertungen, Adaptionen mit Begründung) landet im Event-Log und ist in der Lehrpersonen-Sicht einsehbar.
-- **Robustheit**: Scheitert ein LLM-Aufruf oder ist die Antwort kein lesbares JSON, wird er einmal automatisch wiederholt. Erst danach greift ein Fallback, der für sich allein brauchbar ist: Ein Theorie-Fallback zeigt den passenden Abschnitt des Lektionsmaterials direkt an; lässt sich keiner bestimmen, meldet der Tutor offen ein technisches Problem und bietet «Nochmals versuchen» an. Jeder Fallback erzeugt ein Event `fallback_used` mit Grund und erscheint in der Messübersicht.
+- **Robustheit**: Scheitert ein LLM-Aufruf oder ist die Antwort kein lesbares JSON, wird er einmal automatisch wiederholt. Erst danach greift ein Fallback, der für sich allein brauchbar ist: Ein Theorie-Fallback zeigt den passenden Abschnitt des Lektionsmaterials direkt an; lässt sich keiner bestimmen, meldet der Tutor offen ein technisches Problem und bietet «Nochmals versuchen» an. Jeder Fallback erzeugt ein Event `fallback_used` mit Grund und erscheint in der Messübersicht. Seit T-09 unterscheidet der Grund leere Antworten, unlesbares JSON, falsche Struktur und technische Fehler und enthält bei Ollama done_reason, Tokenzahlen und Dauer; nach einer leeren Antwort ist der zweite Versuch verändert (ohne format=json, mit ausdrücklicher Bitte um direkte Antwort). `tests/eval/diagnose_ollama.py` prüft das Verhalten des echten Modells.
 
 ## API-Überblick
 
@@ -140,7 +140,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `LLM_TIMEOUT` | Zeitlimit pro LLM-Aufruf in Sekunden (Standard 300) |
 | `OLLAMA_FORMAT_JSON` | Ollama erzwingt gültiges JSON, wo der Tutor JSON erwartet (Standard `true`) |
 | `ITS_MOCK_DELAY` | Nur für Tests: Verzögerung des Mock-Providers in Sekunden |
-| `ITS_MOCK_FAIL` | Nur für Tests: Schrittarten, bei denen der Mock scheitert, z.B. `THEORIE_SCHRITT` |
+| `ITS_MOCK_FAIL` | Nur für Tests: Schrittarten, bei denen der Mock scheitert, z.B. `THEORIE_SCHRITT`. Mit `:leer` liefert er eine leere Antwort, mit `:leer_json` nur bei format=json (T-09) |
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |
 | `TEACHER_PASSWORD` | Passwort für `/teacher`; leer = kein Login (nur lokal) |
 | `CLASS_CODE` | Zugangscode für Lernende; leer = kein Code |
