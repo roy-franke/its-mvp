@@ -25,3 +25,12 @@ def test_folgenreiche_handlung_rot_umrandet():
     assert '<button id="modal-ok" class="danger">' in index
     lektionen = Path("static/lessons.html").read_text(encoding="utf-8")
     assert '<button class="danger" id="modal-ok">Ja, Lektion archivieren</button>' in lektionen
+
+
+def test_t16_niveau_dropdown_ohne_festhalten():
+    text = Path("static/index.html").read_text(encoding="utf-8")
+    auswahl = text[text.index('<select id="level-control"'):text.index("</select>", text.index('<select id="level-control"'))]
+    assert "festhalten" not in auswahl
+    for label in ("Automatisch (empfohlen)", ">Grundlagen<", ">Fortgeschritten<", ">Vertieft<"):
+        assert label in auswahl
+    assert "bis du wieder «Automatisch» wählst" in text

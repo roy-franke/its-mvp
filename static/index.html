@@ -242,12 +242,15 @@
       <!-- Niveau selbst steuern (D-04) -->
       <div id="level-box" class="levelbox">
         <label for="level-control">Niveau</label>
-        <select id="level-control" class="action-select">
-          <option value="auto">automatisch anpassen</option>
-          <option value="basic">Grundlagen festhalten</option>
-          <option value="intermediate">Fortgeschritten festhalten</option>
-          <option value="advanced">Vertieft festhalten</option>
+        <!-- T-16: intern bleibt es die Aktion «festhalten» -->
+        <select id="level-control" class="action-select" aria-describedby="level-hilfe">
+          <option value="auto">Automatisch (empfohlen)</option>
+          <option value="basic">Grundlagen</option>
+          <option value="intermediate">Fortgeschritten</option>
+          <option value="advanced">Vertieft</option>
         </select>
+        <span class="muted" id="level-hilfe" style="font-size:.8rem">Wählst du ein Niveau, bleibt es so,
+          bis du wieder «Automatisch» wählst.</span>
         <span class="muted" id="level-fix" style="font-size:.8rem"></span>
       </div>
       <div class="progressbar"><div id="prog-fill"></div></div>
@@ -1141,6 +1144,7 @@ function renderProgress(p) {
   // Niveausteuerung: bei «fix» durch die Lehrperson nur Anzeige
   const fix = p.niveauanpassung === "fix";
   $("level-control").classList.toggle("hidden", fix);
+  $("level-hilfe").classList.toggle("hidden", fix);
   $("level-control").value = p.niveau_fixiert ? p.level : "auto";
   $("level-fix").textContent = fix ? "Deine Lehrperson hat das Niveau für diese Lektion festgelegt." : "";
   $("prog-text").textContent = `${currentLessonTitle ? currentLessonTitle + " · " : ""}Schritt ${Math.min(p.step + 1, p.total_steps)} von ${p.total_steps}`;
