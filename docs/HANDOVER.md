@@ -50,9 +50,8 @@ Pausieren/Fortsetzen über localStorage plus DB-Zustand. Abschlussbilanz mit
 Lernzielabgleich.
 
 Nach LLMTutor-Vorbild (Swiss Learning Analytics, siehe Abschnitt 6):
-dreistufige Bewertung korrekt/teilweise/falsch (teilweise → Nachbesserung mit
-Hinweis, zählt nicht als Fehler; zweite unvollständige Nachbesserung wird
-akzeptiert) und Sicherheitsfrage 1-10 vor der ersten Bewertung jeder Aufgabe
+dreistufige Bewertung korrekt/teilweise/falsch (teilweise → Wahl zwischen
+Ergänzen, Lösung ansehen und Weiter, seit D-07; zählt weder als Fehler noch als richtig) und Sicherheitsfrage 1-10 vor der ersten Bewertung jeder Aufgabe
 (protokolliert, Durchschnitt in der Teacher-Übersicht).
 
 Lehrpersonen: Monitoring unter `/teacher` (Sessionübersicht mit Fortschritt,

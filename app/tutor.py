@@ -1146,12 +1146,34 @@ def wahl_nach_bewertungsfehler(task: dict | None, anzahl: int) -> list[dict]:
     return wahl
 
 
+MAX_ERGAENZUNGEN = 3
+
+
+def wahl_nach_teilweise(task: dict | None, ergaenzungen: int) -> list[dict]:
+    """D-07: Möglichkeiten nach einer teilweise richtigen Antwort.
+
+    «Antwort ergänzen» ist nach dem ersten «teilweise» der Hauptbutton und
+    entfällt nach dem dritten Ergänzungsversuch, damit keine Schleife entsteht.
+    """
+    task = task or {}
+    wahl = []
+    if ergaenzungen < MAX_ERGAENZUNGEN:
+        wahl.append({"id": "ergaenzen", "label": "Antwort ergänzen", "haupt": ergaenzungen == 0})
+    if task.get("erwartete_antwort") or task.get("erwartete_elemente"):
+        wahl.append({"id": "loesung", "label": "Lösung ansehen"})
+    wahl.append({"id": "weiter", "label": "Weiter zur nächsten Aufgabe",
+                 "haupt": ergaenzungen >= MAX_ERGAENZUNGEN})
+    return wahl
+
+
 def offene_wahl(profile: dict) -> list[dict]:
     """Die Möglichkeiten, die im aktuellen Wartezustand zur Wahl stehen."""
     wartet = profile.get("wartet_auf")
     task = profile.get("current_task") or {}
     if wartet in ("bewertung_wiederholen", "wahl_unbewertet"):
         return wahl_nach_bewertungsfehler(task, (profile.get("unbewertet") or {}).get("anzahl", 1))
+    if wartet == "wahl_teilweise":
+        return wahl_nach_teilweise(task, profile.get("ergaenzungen_aktuell", 0))
     if wartet in ("wahl_fallback", "nochmals") and task.get("typ") == "fehler":
         wahl = task.get("wahl") or [{"id": "nochmals", "label": "Nochmals versuchen", "haupt": True}]
         if profile.get("witz_erzaehlt"):
@@ -1383,25 +1405,15 @@ def adapt(profile: dict, bewertung: str, kontext: dict | None = None) -> tuple[s
             profile["niveau_frage_offen"] = True
         return "next", ""
     if bewertung == "teilweise":
+        # D-07, Entscheid E1: Die lernende Person entscheidet selbst, wie es
+        # weitergeht (ergänzen, Lösung ansehen, weiter). Kein automatisches
+        # Weitergehen mehr, und eine teilweise Antwort zählt nie als richtig.
+        # Die Serie richtiger Antworten beginnt neu.
         profile["partial"] = profile.get("partial", 0) + 1
         _serie_zuruecksetzen(profile)
         profile["attempts_current"] += 1
         versuche.append("teilweise")
-        if profile["attempts_current"] == 1:
-            return "retry", (
-                "Da fehlt noch etwas Wichtiges. Schau dir den Hinweis an und "
-                "ergänze deine Antwort."
-            )
-        # Zweite Nachbesserung immer noch unvollständig: akzeptieren und weiter,
-        # ohne den Lernenden in einer Schleife festzuhalten.
-        profile["attempts_current"] = 0
-        versuche.clear()
-        profile["correct"] += 1
-        profile["step"] += 1
-        return "next", (
-            "Der Kern stimmt – nimm die Ergänzungen aus dem Feedback mit, "
-            "wir gehen weiter."
-        )
+        return "wahl_teilweise", ""
     # falsch
     profile["wrong"] += 1
     _serie_zuruecksetzen(profile)

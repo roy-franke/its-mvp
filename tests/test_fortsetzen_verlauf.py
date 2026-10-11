@@ -59,7 +59,7 @@ def test_ak4_kein_llm_aufruf_beim_fortsetzen(monkeypatch):
     original = llm._PROVIDERS["mock"]
     monkeypatch.setitem(llm._PROVIDERS, "mock", lambda s, u, json_mode=False: aufrufe.append(u) or original(s, u))
     st = c.post(f"/api/session/{sid}/fortsetzen").json()
-    assert st["wartet_auf"] == "antwort" and aufrufe == []
+    assert st["wartet_auf"] == "wahl_teilweise" and aufrufe == []
 
 
 def test_n05_verlauf_bleibt_unveraendert_schlank():

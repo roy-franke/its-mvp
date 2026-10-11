@@ -539,6 +539,9 @@ def next_step(sid: str, request: Request, adaptation: str | None = None,
     s = _owned(request, sid, aktion=not prefetch)
     if prefetch and s["status"] != "aktiv":
         return {"vorabruf": False, "done": False}
+    if prefetch and tutor.offene_wahl(s["profile"]):
+        # D-07/T-11/T-12: Solange eine Wahl offen ist, ist unklar, wie es weitergeht
+        return {"vorabruf": False, "done": False}
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
     _modus(profile, lesson)
@@ -599,6 +602,7 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
     if "material_abschnitt" in task:
         profile.setdefault("fallback_abschnitte", []).append(task["material_abschnitt"])
     profile["current_task"] = public_task
+    profile["ergaenzungen_aktuell"] = 0
     profile["last_type"] = step_type
     profile["wartet_auf"] = "weiter" if step_type == "theorie" else "antwort"
     profile["letztes_feedback"] = None
@@ -672,13 +676,14 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         "confidence": confidence,
         "selbsteinschaetzung": selbsteinschaetzung,
     })
-    if action == "retry":
+    offen = action in ("retry", "wahl_teilweise")
+    if offen:
         profile["antworten_aktuell"] = vorher + [{"antwort": text, "bewertung": result["bewertung"],
                                                   "hinweis": result.get("hinweis", "")}]
     else:
         profile["antworten_aktuell"] = []
-    finished = profile["step"] >= tutor.total_steps() and action != "retry"
-    profile["wartet_auf"] = "antwort" if action == "retry" else "weiter"
+    finished = profile["step"] >= tutor.total_steps() and not offen
+    profile["wartet_auf"] = {"retry": "antwort", "wahl_teilweise": "wahl_teilweise"}.get(action, "weiter")
     profile["letztes_feedback"] = {
         "bewertung": result["bewertung"], "feedback": result.get("feedback", ""),
         "hinweis": result.get("hinweis", ""), "adaption": action,
@@ -695,6 +700,7 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         "adaption_begruendung": reason,
         "niveau_frage": niveau_frage,
         "selbsteinschaetzung": selbsteinschaetzung,
+        "wahl": tutor.offene_wahl(profile),        # D-07: nach «teilweise» entscheidet die lernende Person
         "finished": finished,
         "progress": _progress(profile),
     }
@@ -780,7 +786,35 @@ def choose(sid: str, request: Request, req: WahlRequest):
         return {"weiter": True, "loesung": loesung, "finished": finished, "progress": _progress(profile)}
     if wartet in ("wahl_fallback", "nochmals"):
         return _wahl_nach_fallback(sid, lesson, profile, task, req.wahl)
+    if wartet == "wahl_teilweise":
+        return _wahl_nach_teilweise(sid, profile, task, req.wahl)
     raise HTTPException(409, "Gerade ist keine Auswahl offen.")
+
+
+def _wahl_nach_teilweise(sid: str, profile: dict, task: dict, wahl: str) -> dict:
+    """D-07: Wahl nach einer teilweise richtigen Antwort (Wertung nach Entscheid E1)."""
+    ergaenzungen = profile.get("ergaenzungen_aktuell", 0)
+    store.log_event(sid, "wahl_nach_teilweise", {"wahl": wahl, "ergaenzungen": ergaenzungen,
+                                                 "konzept": task.get("konzept", "")})
+    if wahl == "ergaenzen":
+        profile["ergaenzungen_aktuell"] = ergaenzungen + 1
+        profile["wartet_auf"] = "antwort"
+        store.update_session(sid, profile=profile)
+        bisher = (profile.get("antworten_aktuell") or [{}])[-1].get("antwort", "")
+        return {"ergaenzen": True, "antwort": bisher, "frage": task.get("frage", ""),
+                "progress": _progress(profile)}
+    loesung, elemente = None, []
+    if wahl == "loesung":
+        loesung = task.get("erwartete_antwort") or ""
+        elemente = [str(e) for e in task.get("erwartete_elemente") or []]
+        store.log_event(sid, "loesung_gezeigt", {"loesung": loesung, "elemente": elemente})
+    # «Weiter» bzw. nach der Lösung: bearbeitet, protokolliert als «teilweise»,
+    # weder Fehler noch richtige Antwort (Entscheid E1)
+    finished = _schritt_ohne_wertung(profile, "teilweise")
+    store.update_session(sid, profile=profile)
+    if loesung is not None:
+        return {"loesung": loesung, "elemente": elemente, "finished": finished, "progress": _progress(profile)}
+    return {"weiter": True, "finished": finished, "progress": _progress(profile)}
 
 
 def _aktuelles_konzept(profile: dict, history: list[dict]) -> str:

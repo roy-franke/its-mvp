@@ -186,25 +186,23 @@ def test_correct_rate():
     assert tutor.correct_rate(p) == 0.5
 
 
-def test_teilweise_gibt_nachbesserung():
+def test_teilweise_bietet_eine_wahl():
+    """D-07: keine automatische Weiterleitung, die lernende Person entscheidet."""
     p = _profile()
     action, reason = tutor.adapt(p, "teilweise")
-    assert action == "retry"
-    assert reason
+    assert action == "wahl_teilweise"
     assert p["partial"] == 1
     assert p["wrong"] == 0      # zählt nicht als Fehler
     assert p["step"] == 0
 
 
-def test_teilweise_zweimal_wird_akzeptiert():
+def test_teilweise_zweimal_zaehlt_nicht_als_richtig():
+    """Entscheid E1: Die zweite teilweise Antwort zählt nicht mehr als richtig."""
     p = _profile()
     tutor.adapt(p, "teilweise")
-    action, reason = tutor.adapt(p, "teilweise")
-    assert action == "next"
-    assert reason
-    assert p["step"] == 1
-    assert p["correct"] == 1    # wird als bestanden gewertet
-    assert p["partial"] == 2
+    action, _ = tutor.adapt(p, "teilweise")
+    assert action == "wahl_teilweise"
+    assert p["step"] == 0 and p["correct"] == 0 and p["partial"] == 2
 
 
 def test_teilweise_dann_korrekt():

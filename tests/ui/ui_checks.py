@@ -466,6 +466,8 @@ def lp_lernverlauf(pw):
         start_lernsequenz(page, base, name="Verlauf")
         zur_aufgabe(page)
         beantworte(page, "Anna haftet, weil Schaden da ist.")        # teilweise
+        page.click(".wahlbox button[data-wahl='ergaenzen']")          # D-07
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
         beantworte(page, "Dazu Widerrechtlichkeit, Kausalzusammenhang, Verschulden.", None)
         page.fill("#chat-input", "Ich möchte auf dem Grundniveau bleiben.")
         page.click("#btn-ask")
@@ -478,7 +480,7 @@ def lp_lernverlauf(pw):
         expect(detail).to_contain_text("Status", timeout=10000)
         text = detail.inner_text()
         for stichwort in ("Fallback", "Einstufung", "Theorie", "Aufgabe", "Erwartet:", "teilweise richtig",
-                          "Versuch 2", "Niveau", "pausiert"):
+                          "Versuch 2", "Niveau", "pausiert", "Wahl nach teilweise richtiger Antwort"):
             check(f"Lernverlauf zeigt «{stichwort}»", stichwort in text)
         check("Lernverlauf ohne Skriptfehler", not fehler, "; ".join(fehler))
         page.click(".tabs button[data-tab='zeiten']")
@@ -501,7 +503,10 @@ def bis_zum_abschluss(page):
     for _ in range(20):
         if page.locator("#view-done").is_visible():
             return
-        if page.locator("#btn-answer").is_visible() and page.locator("#btn-answer").is_enabled():
+        if page.locator(".wahlbox button[data-wahl='weiter']").count():
+            page.click(".wahlbox button[data-wahl='weiter']")
+            page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        elif page.locator("#btn-answer").is_visible() and page.locator("#btn-answer").is_enabled():
             beantworte(page, GUT, 8)
         elif page.locator("#btn-continue").is_visible():
             page.click("#btn-continue")
@@ -849,6 +854,43 @@ def t15_dialoge(pw):
         check("T-16 AK1 Niveau-Einträge ohne «festhalten»",
               optionen == ["Automatisch (empfohlen)", "Grundlagen", "Fortgeschritten", "Vertieft"], str(optionen))
         check("T-16 Hilfetext beim Dropdown", "bis du wieder" in page.inner_text("#level-box"))
+
+
+@scenario("d07")
+def d07_teilweise(pw):
+    """D-07 AK1/AK2/AK4: Drei Möglichkeiten nach «teilweise», Ergänzen mit bisheriger Antwort, Pause."""
+    with server() as base:
+        browser = launch(pw)
+        page = browser.new_context().new_page()
+        start_lernsequenz(page, base, name="Teilweise")
+        zur_aufgabe(page)
+        beantworte(page, "Anna haftet, weil Schaden da ist.", 9)
+        knoepfe = page.locator(".wahlbox button")
+        expect(knoepfe).to_have_count(3, timeout=10000)
+        check("D-07 AK1 drei Möglichkeiten",
+              knoepfe.all_inner_texts() == ["Antwort ergänzen", "Lösung ansehen", "Weiter zur nächsten Aufgabe"],
+              str(knoepfe.all_inner_texts()))
+        check("D-07 AK1 «Antwort ergänzen» ist Hauptbutton",
+              "secondary" not in page.get_attribute(".wahlbox button[data-wahl='ergaenzen']", "class"))
+        check("D-07 AK1 keine automatische Weiterleitung",
+              not page.locator("#btn-continue").is_visible() and "Der Kern stimmt" not in page.inner_text("#chat"))
+        page.click("#btn-pause")
+        expect(page.locator("#home-banner")).to_be_visible(timeout=10000)
+        p2 = browser.new_context().new_page()
+        anmelden(p2, base, "Teilweise")
+        p2.click("#seq-list button[data-act='resume']")
+        expect(p2.locator(".wahlbox button")).to_have_count(3, timeout=10000)
+        check("D-07 AK4 nach dem Fortsetzen wieder drei Möglichkeiten", True)
+        p2.click(".wahlbox button[data-wahl='ergaenzen']")
+        p2.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("D-07 AK2 bisherige Antwort steht zur Bearbeitung bereit",
+              p2.input_value("#chat-input") == "Anna haftet, weil Schaden da ist." and p2.locator("#btn-answer").is_enabled())
+        p2.fill("#chat-input", GUT)
+        p2.click("#btn-answer")
+        p2.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("D-07 AK2 Ergänzung ohne erneute Sicherheitsfrage bewertet",
+              "Richtig" in p2.locator(".msg.tutor.good").last.inner_text())
+        browser.close()
 
 
 def run(names):

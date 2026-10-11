@@ -1017,6 +1017,9 @@ async function waehle(id, label) {
       return;
     }
     if (d.ergaenzen) {
+      // D-07: Die bisherige Antwort steht zur Bearbeitung bereit
+      const frage = d.frage || (currentTask && currentTask.frage);
+      if (frage) addMsg("tutor question", "↩️ Ergänze deine Antwort zur Aufgabe: " + frage, "Tutor");
       $("chat-input").value = d.antwort || "";
       setAnswerMode(true);
       confidenceAsked = true;          // Sicherheit wurde für diese Aufgabe schon erfasst

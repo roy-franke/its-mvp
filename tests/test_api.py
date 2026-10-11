@@ -125,14 +125,14 @@ def test_teilweise_korrekte_antwort():
                      json={"answer": TEILWEISE_ANTWORT}).json()
     assert a1["bewertung"] == "teilweise"
     assert a1["korrekt"] is False
-    assert a1["adaption"] == "retry" and a1["hinweis"]
+    assert a1["adaption"] == "wahl_teilweise" and a1["hinweis"]
+    assert [w["id"] for w in a1["wahl"]] == ["ergaenzen", "loesung", "weiter"]   # D-07
     assert a1["progress"]["partial"] == 1
     assert a1["progress"]["wrong"] == 0
-    # Zweite Nachbesserung immer noch teilweise: akzeptieren und weiter
-    a2 = client.post(f"/api/session/{sid}/answer",
-                     json={"answer": TEILWEISE_ANTWORT}).json()
-    assert a2["adaption"] == "next"
-    assert a2["progress"]["step"] == 1
+    # Weiter zur nächsten Aufgabe: bearbeitet, weder Fehler noch richtig (E1)
+    a2 = client.post(f"/api/session/{sid}/wahl", json={"wahl": "weiter"}).json()
+    assert a2["weiter"] and a2["progress"]["step"] == 1
+    assert a2["progress"]["correct"] == 0 and a2["progress"]["wrong"] == 0
 
 
 def test_sicherheitsangabe_wird_protokolliert():

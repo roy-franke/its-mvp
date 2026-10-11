@@ -97,7 +97,8 @@ def test_nachbesserung_wird_mit_erstem_versuch_bewertet(monkeypatch):
         if c.post(f"/api/session/{sid}/next").json()["task"]["typ"] == "aufgabe":
             break
     a1 = c.post(f"/api/session/{sid}/answer", json={"answer": "Anna haftet, weil Schaden da ist."}).json()
-    assert a1["bewertung"] == "teilweise" and a1["adaption"] == "retry"
+    assert a1["bewertung"] == "teilweise" and a1["adaption"] == "wahl_teilweise"
+    c.post(f"/api/session/{sid}/wahl", json={"wahl": "ergaenzen"})       # D-07
     a2 = c.post(f"/api/session/{sid}/answer",
                 json={"answer": "Dazu kommen Widerrechtlichkeit, Kausalzusammenhang und Verschulden."}).json()
     bewerten = [p for p in prompts if "ANTWORT_BEWERTEN" in p]
@@ -114,12 +115,12 @@ def test_nachbesserung_wird_mit_erstem_versuch_bewertet(monkeypatch):
     assert "Versuch 1 des Lernenden" not in [p for p in prompts if "ANTWORT_BEWERTEN" in p][-1]
 
 
-def test_zweite_unvollstaendige_nachbesserung_wird_akzeptiert():
-    """README: bleibt die Nachbesserung unvollständig, geht es weiter."""
+def test_zweite_unvollstaendige_nachbesserung_fuehrt_nicht_automatisch_weiter():
+    """D-07: Auch nach der zweiten teilweisen Antwort entscheidet die lernende Person."""
     p = tutor.new_profile()
     tutor.adapt(p, "teilweise")
     action, reason = tutor.adapt(p, "teilweise")
-    assert action == "next" and "Ergänzungen" in reason
+    assert action == "wahl_teilweise" and p["step"] == 0 and p["correct"] == 0
 
 
 def test_bewertung_mit_temperatur_null(monkeypatch):
