@@ -82,6 +82,9 @@
   .check-result th, .check-result td { border-bottom:1px solid var(--border); padding:6px 8px;
                                        text-align:left; vertical-align:top; }
   .check-result th { color:var(--muted); font-size:.78rem; text-transform:uppercase; }
+  .experimentell { font-size:.72rem; font-weight:600; text-transform:uppercase; letter-spacing:.03em;
+                   color:#7c2d12; background:#ffedd5; border:1px solid #fdba74; border-radius:999px;
+                   padding:2px 8px; cursor:help; }
   .kontext-warnung { border-left:4px solid #dc2626; background:#fef2f2; padding:10px 14px;
                      border-radius:0 8px 8px 0; margin:12px 0 0; color:#7f1d1d; }
 </style>
@@ -123,21 +126,25 @@
       <div class="charcount"><span id="chars">0</span> Zeichen</div>
     </details>
 
-    <label>2. Titel und Lernziele
-      <span class="sub">– selbst schreiben oder von der KI vorschlagen lassen</span></label>
+    <label for="titel">2. Titel <span class="sub">– Pflichtfeld, von dir festgelegt. Er setzt den Rahmen
+      für die Lernziele.</span></label>
+    <input type="text" id="titel" placeholder="Titel der Lektion (Pflichtfeld)" required aria-required="true">
+    <label for="ziele">3. Lernziele <span class="sub">– eines pro Zeile, selbst schreiben oder vorschlagen lassen</span></label>
     <div class="btnrow" style="margin-bottom:10px">
-      <button class="secondary" id="btn-suggest">✨ Titel &amp; Lernziele vorschlagen (KI)</button>
+      <button class="secondary" id="btn-suggest" disabled>✨ Lernziele vorschlagen (KI)</button>
+      <span class="experimentell" id="exp-ziele" title="Die Vorschläge sind ein erster Entwurf. Sie müssen geprüft und ergänzt werden.">experimentell</span>
+      <span class="sub" id="suggest-hinweis">Die Vorschläge müssen geprüft und ergänzt werden. Möglich, sobald
+        ein Titel und mindestens 100 Zeichen Material vorhanden sind.</span>
       <span class="spinner hidden" id="suggest-spinner">KI analysiert das Material …</span>
     </div>
-    <input type="text" id="titel" placeholder="Titel der Lektion">
     <textarea id="ziele" rows="5" style="margin-top:8px"
       placeholder="Lernziele – ein Ziel pro Zeile&#10;z.B. Die vier Voraussetzungen der Verschuldenshaftung erklären"></textarea>
 
-    <label>3. Tutorverhalten <span class="sub">– optionale Hinweise an den Tutor</span></label>
+    <label>4. Tutorverhalten <span class="sub">– optionale Hinweise an den Tutor</span></label>
     <textarea id="hinweise" rows="3"
       placeholder="z.B. «Arbeite viel mit Alltagsbeispielen aus der Berufswelt», «Sei streng bei Fachbegriffen», «Stelle oft Rückfragen» …"></textarea>
 
-    <label>4. Tutor-Einstellungen <span class="sub">– fehlt eine Einstellung, gilt der Standard</span></label>
+    <label>5. Tutor-Einstellungen <span class="sub">– fehlt eine Einstellung, gilt der Standard</span></label>
     <div class="settings">
       <label for="s-einsatzart" style="margin-top:4px;font-weight:600">Einsatzart
         <span class="sub">Einführung: Der Tutor fragt nur ab, was er vorher in dieser Sequenz erklärt hat.
@@ -177,7 +184,7 @@
             Antworten. <span id="websuche-status"></span></span></span></label>
     </div>
 
-    <label>5. Material prüfen <span class="sub">– optional: Deckt das Material jedes Lernziel mit
+    <label>6. Material prüfen <span class="sub">– optional: Deckt das Material jedes Lernziel mit
       Erklärung, Beispiel und Begründung ab? Eine Empfehlung, das Speichern bleibt jederzeit möglich.</span></label>
     <div class="btnrow">
       <button class="secondary" id="btn-check">🔍 Material prüfen (KI)</button>
@@ -275,6 +282,7 @@ function renderSources() {
     `${sources.length} ${sources.length === 1 ? "Quelle" : "Quellen"} · ` +
     `${total.toLocaleString("de-CH")} Zeichen` + (marked ? ` · ${marked} markiert` : "");
   $("btn-remove").disabled = marked === 0;
+  if (typeof suggestAktualisieren === "function") suggestAktualisieren();
 }
 
 $("btn-all").onclick = () => { sources.forEach(s => s.checked = true); renderSources(); };
@@ -341,8 +349,21 @@ function collectMaterial() {
 }
 
 /* -------------------------------------------------------------------- Aktionen */
+// T-18: Lernziel-Vorschlag erst mit Titel und genügend Material
+function suggestBereit() {
+  return $("titel").value.trim().length > 0 && collectMaterial().length >= 100;
+}
+function suggestAktualisieren() {
+  if ($("suggest-spinner").classList.contains("hidden")) $("btn-suggest").disabled = !suggestBereit();
+}
+$("titel").addEventListener("input", suggestAktualisieren);
+$("material").addEventListener("input", suggestAktualisieren);
+
 $("btn-suggest").onclick = async () => {
   const material = collectMaterial();
+  const titel = $("titel").value.trim();
+  showResult("", "");
+  if (!titel) { showResult("error", "Zuerst einen Titel eingeben. Er setzt den Rahmen für die Lernziele."); $("titel").focus(); return; }
   if (material.length < 100) {
     showResult("error", "Zuerst mindestens eine Datei hochladen oder Text einfügen (mindestens 100 Zeichen).");
     return;
@@ -351,20 +372,25 @@ $("btn-suggest").onclick = async () => {
   try {
     const r = await fetch("/api/teacher/lessons/suggest-goals", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ material }),
+      body: JSON.stringify({ material, titel }),
     });
     const d = await r.json();
     if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Vorschlag fehlgeschlagen");
-    if (d.titel && !$("titel").value.trim()) $("titel").value = d.titel;
     if (d.lernziele && d.lernziele.length) $("ziele").value = d.lernziele.join("\n");
-    showResult("success", "Vorschlag übernommen – bitte prüfen und anpassen.");
+    showResult("success", "Lernziele vorgeschlagen (experimentell). Bitte prüfen und ergänzen.");
   } catch (e) { showResult("error", e.message); }
-  $("btn-suggest").disabled = false; $("suggest-spinner").classList.add("hidden");
+  $("suggest-spinner").classList.add("hidden"); suggestAktualisieren();
 };
 
 $("btn-save").onclick = async () => {
   const material = collectMaterial();
+  showResult("", "");
+  if (!$("titel").value.trim()) {
+    showResult("error", "Bitte zuerst einen Titel eingeben (Pflichtfeld).");
+    $("titel").focus();
+    return;
+  }
   if (material.length < 100) {
     showResult("error", "Zuerst mindestens eine Datei hochladen oder Text einfügen (mindestens 100 Zeichen).");
     return;

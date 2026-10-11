@@ -197,22 +197,31 @@ WISSEN_TEXT = {
 }
 
 
-def suggest_goals(material: str) -> dict:
-    """Schlägt aus hochgeladenem Material Titel und Lernziele vor (für Lehrpersonen)."""
+def suggest_goals(material: str, titel: str = "") -> dict:
+    """Schlägt aus hochgeladenem Material Lernziele vor (für Lehrpersonen, experimentell).
+
+    T-18: Der Titel stammt von der Lehrperson und setzt den Rahmen. Die KI
+    schlägt keinen Titel mehr vor und nur Lernziele, die zum Titel passen.
+    """
     data = llm.chat_json(
         "Du unterstützt Lehrpersonen an einer Schweizer Berufsmaturitätsschule "
         "beim Erstellen von Lektionen. Du schreibst Deutsch mit Schweizer "
         "Rechtschreibung (kein ß, immer ss). Du antwortest IMMER ausschliesslich "
         "mit einem einzigen JSON-Objekt.",
         "AUFGABE: LERNZIELE_VORSCHLAGEN\n"
-        "Analysiere das folgende Lernmaterial und schlage einen prägnanten "
-        "Lektionstitel sowie 3-5 kompetenzorientierte Lernziele vor "
-        "(beobachtbare Verben wie erklären, anwenden, einordnen, begründen).\n\n"
+        f"Die Lektion heisst «{titel.strip()}». Der Titel setzt den Rahmen: Schlage nur Lernziele vor, "
+        "die zu diesem Titel passen, auch wenn das Material weitere Themen enthält.\n"
+        "Analysiere das folgende Lernmaterial und schlage 3-5 kompetenzorientierte Lernziele vor "
+        "(beobachtbare Verben wie erklären, anwenden, einordnen, begründen), die sich mit dem "
+        "Material erreichen lassen.\n\n"
         f"MATERIAL:\n{material[:8000]}\n\n"
-        'Format: {"titel": "...", "lernziele": ["...", "..."]}',
-        fallback={"titel": "", "lernziele": []},
+        'Format: {"lernziele": ["...", "..."]}',
+        fallback={"lernziele": []},
     )
-    return llm.public(data)
+    out = llm.public(data)
+    out.pop("titel", None)          # kein Titelvorschlag mehr (T-18)
+    out["experimentell"] = True
+    return out
 
 
 MINDESTLAENGE_MATERIAL = 1000

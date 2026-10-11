@@ -163,6 +163,7 @@ class LessonCreateRequest(BaseModel):
 
 class SuggestGoalsRequest(BaseModel):
     material: str
+    titel: str = ""
 
 
 class TeacherLoginRequest(BaseModel):
@@ -377,10 +378,12 @@ def lesson_check_material(req: CheckMaterialRequest):
 
 @teacher_api.post("/lessons/suggest-goals")
 def lesson_suggest_goals(req: SuggestGoalsRequest):
-    """KI-Vorschlag für Titel und Lernziele aus dem Material."""
+    """KI-Vorschlag für Lernziele (experimentell, T-18): Der Titel der Lehrperson setzt den Rahmen."""
+    if not req.titel.strip():
+        raise HTTPException(400, "Zuerst einen Titel eingeben. Er setzt den Rahmen für die Lernziele.")
     if len(req.material.strip()) < 100:
         raise HTTPException(400, "Zuerst Material einfügen (mindestens 100 Zeichen)")
-    return tutor.suggest_goals(req.material)
+    return tutor.suggest_goals(req.material, req.titel)
 
 
 def _extract_text(filename: str, data: bytes) -> str:

@@ -474,7 +474,6 @@ def _mock_text(system: str, user: str) -> str:
         return json.dumps({"ziele": ergebnisse, "gesamt": "Mock-Prüfung."}, ensure_ascii=False)
     if "LERNZIELE_VORSCHLAGEN" in user:
         return json.dumps({
-            "titel": "Neue Lektion (Mock-Vorschlag)",
             "lernziele": [
                 "Die zentralen Begriffe des Materials erklären",
                 "Die wichtigsten Zusammenhänge an Beispielen anwenden",

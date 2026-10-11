@@ -80,10 +80,10 @@ def test_validierung():
 
 
 def test_lernziele_vorschlag():
-    r = client.post("/api/teacher/lessons/suggest-goals", json={"material": MATERIAL})
+    r = client.post("/api/teacher/lessons/suggest-goals", json={"material": MATERIAL, "titel": "Haftung"})
     assert r.status_code == 200
     d = r.json()
-    assert d["titel"] and len(d["lernziele"]) >= 3
+    assert "titel" not in d and len(d["lernziele"]) >= 3 and d["experimentell"] is True   # T-18
 
 
 def test_quellen_werden_gespeichert():

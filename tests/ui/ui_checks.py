@@ -928,6 +928,30 @@ def t17_duplizieren(pw):
         check("T-17 AK2 Kopie sofort in der Lektionsauswahl", any(i.endswith("-kopie") for i in ids), str(ids))
 
 
+@scenario("t18")
+def t18_titel_lernziele(pw):
+    """T-18 AK1/AK3: Ohne Titel weder Vorschlag noch Speichern, Kennzeichnung «experimentell»."""
+    with server() as base:
+        page = launch(pw).new_page()
+        page.goto(base + "/teacher/lessons/new")
+        page.click("#paste-box summary")
+        page.fill("#material", "Die Verschuldenshaftung nach Art. 41 OR verlangt vier Voraussetzungen. " * 4)
+        check("T-18 AK1 Vorschlag ohne Titel gesperrt", page.locator("#btn-suggest").is_disabled())
+        page.fill("#ziele", "Ziel A")
+        vorher = len(httpx.get(base + "/api/lessons").json())
+        page.click("#btn-save")
+        page.wait_for_timeout(500)
+        check("T-18 AK1 Speichern ohne Titel abgelehnt", "Titel" in page.inner_text("#result")
+              and len(httpx.get(base + "/api/lessons").json()) == vorher)
+        check("T-18 AK3 Kennzeichnung «experimentell» sichtbar", page.locator("#exp-ziele").is_visible())
+        page.fill("#titel", "Verschuldenshaftung")
+        check("T-18 Vorschlag mit Titel möglich", page.locator("#btn-suggest").is_enabled())
+        page.click("#btn-suggest")
+        expect(page.locator("#result")).to_contain_text("experimentell", timeout=10000)
+        check("T-18 Titel bleibt der eigene", page.input_value("#titel") == "Verschuldenshaftung"
+              and page.input_value("#ziele").count("\n") >= 2)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:
