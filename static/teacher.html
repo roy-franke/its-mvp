@@ -116,7 +116,7 @@
     <a href="/teacher/lessons">📚 Lektionen verwalten</a>
     <a href="/teacher/lessons/new">＋ Neue Lektion</a>
     <a href="/">Zur Lernenden-Ansicht</a>
-    <a href="/teacher/logout">Abmelden</a>
+    <a href="/logout?ziel=lehrperson" id="link-abmelden">Abmelden</a>
   </nav>
 </header>
 
@@ -547,6 +547,10 @@ async function loadTimings() {
     : "";
 }
 
+// T-22/T-23: Abmelden ausblenden, wenn es bei Header-Anmeldung keine Abmeldeadresse gibt
+fetch("/api/me").then(r => r.json()).then(m => {
+  $("link-abmelden").classList.toggle("hidden", !m.abmelden);
+}).catch(() => {});
 loadSessions();
 setInterval(loadSessions, 15000);
 setInterval(() => { if (!$("tab-zeiten").classList.contains("hidden")) loadTimings(); }, 15000);

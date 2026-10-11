@@ -93,7 +93,8 @@
 <div class="wrap">
   <header>
     <h1 id="page-title">📚 Neue Lektion erstellen</h1>
-    <a href="/teacher/lessons">← Zur Lektionsliste</a>
+    <span><a href="/teacher/lessons">← Zur Lektionsliste</a>
+      <a href="/logout?ziel=lehrperson" id="link-abmelden" style="margin-left:14px">Abmelden</a></span>
   </header>
   <div id="edit-notice" class="notice hidden" style="margin-bottom:16px"></div>
 
@@ -554,6 +555,9 @@ async function loadForEdit() {
 
 renderSources();
 if (editId) loadForEdit();
+fetch("/api/me").then(r => r.json()).then(m => {
+  $("link-abmelden").classList.toggle("hidden", !m.abmelden);
+}).catch(() => {});
 // N-03: zeigen, ob die Recherche auf dem Server überhaupt eingeschaltet ist
 fetch("/api/teacher/websuche").then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;

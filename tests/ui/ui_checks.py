@@ -1031,6 +1031,49 @@ def t20_archivieren(pw):
               and "zählen nicht in den Auswertungen" in (label.get_attribute("title") or ""))
 
 
+@scenario("t22")
+def t22_abmelden(pw):
+    """T-22 AK1-3: Abmelden als Lehrperson und aus der laufenden Lernansicht."""
+    with server(TEACHER_PASSWORD="geheim") as base:
+        browser = launch(pw)
+        page = browser.new_context().new_page()
+        page.goto(base + "/teacher/login")
+        page.fill("#pw", "geheim")
+        page.click("#btn")
+        page.wait_for_url(base + "/teacher")
+        page.click("#link-abmelden")
+        page.wait_for_url(base + "/teacher/login")
+        page.goto(base + "/teacher")
+        check("T-22 AK1 nach dem Abmelden führt /teacher zur Login-Seite", page.url.endswith("/teacher/login"),
+              page.url)
+        check("T-22 Login-Seite leer", page.input_value("#pw") == "")
+        lern = browser.new_context().new_page()
+        start_lernsequenz(lern, base, name="Abmelden")
+        knopf = lern.locator("#btn-abmelden")
+        check("T-22 Abmelden in der laufenden Lernansicht sichtbar", knopf.is_visible())
+        knopf.click()
+        expect(lern.locator("#view-start")).to_be_visible(timeout=10000)
+        check("T-22 AK2 leere Anmeldemaske", lern.input_value("#name") == "" and lern.input_value("#pin") == "")
+        r = lern.request.get(base + "/api/me/sequenzen")
+        check("T-22 AK2 Sequenzen ohne neue Anmeldung nicht sichtbar", r.status == 401, str(r.status))
+        lp = browser.new_context().new_page()
+        lp.goto(base + "/teacher/login")
+        lp.fill("#pw", "geheim")
+        lp.click("#btn")
+        lp.wait_for_url(base + "/teacher")
+        seqs = lp.request.get(base + "/api/teacher/sessions?testlaeufe=true").json()
+        status = [x["status"] for x in seqs if x["name"] == "Abmelden"]
+        check("T-22 laufende Sequenz beim Abmelden pausiert", status == ["pausiert"], str(status))
+        browser.close()
+    with server() as base:
+        page = launch(pw).new_page()
+        page.goto(base + "/teacher")
+        page.click("#link-abmelden")
+        page.wait_for_url(base + "/teacher/login")
+        page.goto(base + "/teacher")
+        check("T-22 AK1 auch ohne TEACHER_PASSWORD wirksam", page.url.endswith("/teacher/login"), page.url)
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

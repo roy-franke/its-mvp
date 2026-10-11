@@ -54,6 +54,7 @@
     <span>
       <a href="/teacher/lessons/new">＋ Neue Lektion</a>
       <a href="/teacher">← Zum Monitoring</a>
+      <a href="/logout?ziel=lehrperson" id="link-abmelden">Abmelden</a>
     </span>
   </header>
 
@@ -225,6 +226,9 @@ if (params.get("gespeichert")) {
   $("banner").classList.remove("hidden");
 }
 load();
+fetch("/api/me").then(r => r.json()).then(m => {
+  $("link-abmelden").classList.toggle("hidden", !m.abmelden);
+}).catch(() => {});
 </script>
 </body>
 </html>

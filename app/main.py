@@ -1380,8 +1380,9 @@ def access_info():
 
 
 @app.get("/api/me")
-def me(request: Request):
+def me(request: Request, response: Response):
     """Wer bin ich? Grundlage für die rollenabhängige Oberfläche (T-04)."""
+    response.headers["Cache-Control"] = "no-store"
     ident = auth.identity(request)
     header = ident.via == "header"
     return {
@@ -1393,6 +1394,8 @@ def me(request: Request):
         "header_anmeldung": header,
         "code_required": bool(auth.class_code()) and not header,
         "teacher_login_required": auth.auth_enabled(),
+        # T-22/T-23: Abmelde-Button anzeigen? Bei Header-Anmeldung nur mit Abmeldeadresse
+        "abmelden": auth.abmelden_moeglich(request),
     }
 
 
@@ -1449,12 +1452,51 @@ def _login_learner(request: Request, response: Response, name: str | None,
             store.set_user_pin(key, auth.hash_pin(pin))
     response.set_cookie(auth.LEARNER_COOKIE, auth.make_learner_token(name),
                         max_age=auth.LEARNER_COOKIE_MAX_AGE, httponly=True, samesite="lax")
+    response.delete_cookie(auth.ABGEMELDET_COOKIE, path="/")
     return name
 
 
+def _abmelden(request: Request, response: Response) -> str:
+    """T-22: Gemeinsames Abmelden für Lehrpersonen und Lernende.
+
+    Löscht alle Cookies des ITS, setzt den Abmelde-Merker (wirkt auch ohne
+    TEACHER_PASSWORD) und pausiert eine laufende Lernsequenz der Person,
+    damit sie sich später fortsetzen lässt. Gibt die bisherige Rolle zurück.
+    """
+    ident = auth.identity(request)
+    if ident.key:
+        for s in store.sessions_of_user(ident.key):
+            if s["status"] == "aktiv":
+                store.set_vorabruf(s["id"], None)
+                store.set_status(s["id"], "pausiert", "Beim Abmelden pausiert")
+    for name in (auth.COOKIE_NAME, auth.LEARNER_COOKIE):
+        response.delete_cookie(name, path="/")
+    response.set_cookie(auth.ABGEMELDET_COOKIE, "1", httponly=True, samesite="lax")
+    response.headers["Cache-Control"] = "no-store"
+    return "lehrperson" if (ident.teacher_cookie or ident.is_teacher) else "lernend"
+
+
+@app.get("/logout")
+def logout(request: Request, ziel: str | None = None):
+    """T-22/T-23: Abmelden mit Weiterleitung.
+
+    Ohne Header-Anmeldung landen Lehrpersonen auf der leeren Login-Seite,
+    Lernende auf der leeren Anmeldemaske der Startseite.
+    """
+    r = RedirectResponse("/", status_code=303)
+    rolle = _abmelden(request, r)
+    ziel_url = "/teacher/login" if (ziel == "lehrperson" or (ziel is None and rolle == "lehrperson")) else "/"
+    if auth.trust_headers():
+        extern = auth.logout_url(request)          # T-23: Abmelden beim Proxy
+        if extern:
+            ziel_url = extern
+    r.headers["Location"] = ziel_url
+    return r
+
+
 @app.post("/api/learner/logout")
-def learner_logout(response: Response):
-    response.delete_cookie(auth.LEARNER_COOKIE)
+def learner_logout(request: Request, response: Response):
+    _abmelden(request, response)
     return {"ok": True}
 
 
@@ -1466,16 +1508,15 @@ def teacher_login(req: TeacherLoginRequest, response: Response):
     # Lernsequenzen, die eine Lehrperson startet, als Testlauf (E3).
     response.set_cookie(auth.COOKIE_NAME, auth.make_token(),
                         max_age=auth.COOKIE_MAX_AGE, httponly=True, samesite="lax")
+    response.delete_cookie(auth.ABGEMELDET_COOKIE, path="/")
     if not auth.auth_enabled():
         return {"ok": True, "hinweis": "Zugangsschutz ist deaktiviert (TEACHER_PASSWORD leer)"}
     return {"ok": True}
 
 
 @app.get("/teacher/logout")
-def teacher_logout():
-    r = RedirectResponse("/teacher/login")
-    r.delete_cookie(auth.COOKIE_NAME)
-    return r
+def teacher_logout(request: Request):
+    return logout(request, ziel="lehrperson")
 
 
 @app.get("/api/info")
@@ -1538,8 +1579,9 @@ def _page(name: str) -> FileResponse:
     Mal eine Rückfrage beim Server – bei unveränderter Datei bleibt es beim
     schlanken 304.
     """
+    # T-22: no-store, damit nach dem Abmelden keine zwischengespeicherte Seite erscheint
     return FileResponse(BASE / "static" / name,
-                        headers={"Cache-Control": "no-cache"})
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/")

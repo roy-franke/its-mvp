@@ -149,9 +149,11 @@
 <div class="wrap">
   <header>
     <h1>🎓 ITS – Dein Lerntutor</h1>
-    <span>
+    <span style="display:flex;gap:14px;align-items:baseline">
       <!-- Nur für Lehrpersonen sichtbar (T-04); der Server prüft die Rolle zusätzlich -->
       <a href="/teacher" id="teacher-link" class="hidden">Lehrpersonen-Sicht</a>
+      <!-- T-22: Abmelden auf allen Seiten, auch in der laufenden Lernansicht -->
+      <button class="linkbtn hidden" id="btn-abmelden">Abmelden</button>
     </span>
   </header>
 
@@ -522,7 +524,9 @@ async function loadMe() {
     $("name").title = "Dein Name kommt aus der Anmeldung deiner Schule.";
     $("pin-box").classList.add("hidden");
   }
-  $("btn-logout").classList.toggle("hidden", !!me.name_fixiert);
+  // T-22/T-23: Abmelden nur, wenn es wirkt (bei Header-Anmeldung nur mit Abmeldeadresse)
+  $("btn-logout").classList.toggle("hidden", !me.abmelden);
+  $("btn-abmelden").classList.toggle("hidden", !(me.abmelden && (me.name || me.lehrperson)));
   return me;
 }
 
@@ -550,10 +554,16 @@ $("btn-login").onclick = async () => {
 $("name").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-login").click(); });
 $("pin").addEventListener("keydown", e => { if (e.key === "Enter") $("btn-login").click(); });
 
-$("btn-logout").onclick = async () => {
-  await api("/learner/logout");
-  location.reload();
-};
+// T-22: Abmelden löscht Cookies und die Einträge des ITS im localStorage und
+// pausiert eine laufende Lernsequenz (serverseitig). Danach leere Anmeldemaske.
+function abmelden() {
+  try {
+    for (const k of Object.keys(localStorage)) if (k.toLowerCase().startsWith("its")) localStorage.removeItem(k);
+  } catch { /* localStorage gesperrt: nichts zu löschen */ }
+  location.href = "/logout?ziel=lernend";
+}
+$("btn-logout").onclick = abmelden;
+$("btn-abmelden").onclick = () => { if (!busy) abmelden(); };
 
 const STATUS_LABEL = { aktiv: "aktiv", pausiert: "pausiert", abgeschlossen: "abgeschlossen",
                        abgebrochen: "abgebrochen", archiviert: "archiviert" };

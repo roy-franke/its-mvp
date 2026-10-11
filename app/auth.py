@@ -42,6 +42,10 @@ from . import store
 
 COOKIE_NAME = "its_teacher"
 LEARNER_COOKIE = "its_learner"
+# T-22: Merker nach dem Abmelden. Ohne TEACHER_PASSWORD (lokale Entwicklung)
+# gilt sonst jede Anfrage als Lehrperson, und /teacher/login leitete sofort
+# zurück auf /teacher: Das Abmelden hatte keine sichtbare Wirkung.
+ABGEMELDET_COOKIE = "its_abgemeldet"
 COOKIE_MAX_AGE = 12 * 3600             # 12 Stunden – reicht für einen Unterrichtstag
 LEARNER_COOKIE_MAX_AGE = 30 * 24 * 3600
 
@@ -182,8 +186,23 @@ def is_teacher(request: Request) -> bool:
     if ident.via == "header":
         return ident.is_teacher          # Header entscheidet, auch ohne Passwort
     if not auth_enabled():
-        return True                      # lokale Entwicklung ohne Passwort
+        # lokale Entwicklung ohne Passwort, ausser nach einem Abmelden (T-22)
+        return ident.teacher_cookie or not request.cookies.get(ABGEMELDET_COOKIE)
     return ident.teacher_cookie
+
+
+# ---------------------------------------------------------------- Abmelden (T-22, T-23)
+
+def logout_url(request: Request) -> str | None:
+    """Adresse zum Abmelden beim Proxy (T-23); ohne Header-Anmeldung keine."""
+    return None
+
+
+def abmelden_moeglich(request: Request) -> bool:
+    """Gibt es einen wirksamen Weg zum Abmelden? Bei Header-Anmeldung nur mit Abmeldeadresse."""
+    if _header_identity(request):
+        return bool(logout_url(request))
+    return True
 
 
 def require_teacher(request: Request):
