@@ -772,6 +772,8 @@ def choose(sid: str, request: Request, req: WahlRequest):
         if req.wahl == "nochmals_bewerten":
             return _antwort_bewerten(sid, lesson, profile, task, offen.get("antwort", ""), offen.get("confidence"))
         loesung = task.get("erwartete_antwort") if req.wahl == "musterloesung" else None
+        if loesung:
+            store.log_event(sid, "loesung_gezeigt", {"loesung": loesung, "elemente": []})
         profile["ohne_bewertung"] = profile.get("ohne_bewertung", 0) + 1
         finished = _schritt_ohne_wertung(profile, "unbewertet")
         store.update_session(sid, profile=profile)
@@ -967,7 +969,10 @@ def resume(sid: str, request: Request):
     ident = auth.identity(request)
     if ident.key != s["user_key"] and ident.is_teacher:
         raise HTTPException(403, "Lehrpersonen können fremde Sequenzen nur ansehen.")
-    return _state(store.get_session(sid))
+    # T-14: der ganze bisherige Dialog, ohne LLM-Aufruf, nur aus dem Event-Log
+    zustand = _state(store.get_session(sid))
+    zustand["verlauf"] = tutor.verlauf_fuer_lernende(store.get_events(sid), fuer_fortsetzen=True)[0]
+    return zustand
 
 
 def _eigene(request: Request, sid: str) -> dict:

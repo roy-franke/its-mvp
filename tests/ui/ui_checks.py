@@ -790,6 +790,45 @@ def t13_formatierung(pw):
               "<h4 class=\"fmt-titel\">" in html and "&lt;script&gt;" in html and "<img" not in html)
 
 
+@scenario("t14")
+def t14_verlauf_fortsetzen(pw):
+    """T-14 AK1-3: Nach Pausieren und Fortsetzen im zweiten Browser steht der ganze Dialog im Chat."""
+    with server() as base:
+        browser = launch(pw)
+        a = browser.new_context().new_page()
+        start_lernsequenz(a, base, name="Verlauf")
+        a.fill("#chat-input", "Was heisst adäquat?")
+        a.click("#btn-ask")
+        a.wait_for_selector("#waiting", state="detached", timeout=30000)
+        zur_aufgabe(a)
+        beantworte(a, "Schaden ist da.", 4)                    # teilweise
+        vorher = [m for m in a.locator("#chat .msg").all_inner_texts()]
+        a.click("#btn-pause")
+        expect(a.locator("#home-banner")).to_be_visible(timeout=10000)
+        b = browser.new_context().new_page()
+        llm_anfragen = api_requests(b, "/next")
+        anmelden(b, base, "Verlauf")
+        b.click("#seq-list button[data-act='resume']")
+        expect(b.locator("#view-learn")).to_be_visible(timeout=10000)
+        nachher = b.locator("#chat .msg").all_inner_texts()
+        eigene = [m for m in nachher if m.startswith("Du (Antwort)")]
+        check("T-14 AK1 eigene Antwort wieder im Chat", any("Schaden ist da." in m for m in eigene), str(eigene))
+        check("T-14 AK1 Verständnisfrage und Antwort wieder im Chat",
+              any("Was heisst adäquat?" in m for m in nachher) and len(nachher) >= len(vorher) - 1,
+              f"{len(nachher)} / {len(vorher)}")
+        reihen = [m.split("\n")[0] for m in nachher]
+        check("T-14 AK2 Reihenfolge: Theorie vor Aufgabe vor Antwort vor Feedback",
+              reihen.index("Tutor – Theorie") < reihen.index("Du (Antwort)")
+              < max(i for i, r in enumerate(reihen) if r == "Tutor"), str(reihen))
+        check("T-14 Trennlinie mit Datum", "fortgesetzt am" in b.locator(".trenner").inner_text())
+        text = b.locator("#chat").inner_text()
+        check("T-14 AK3 keine internen Einträge", "Regelverstoss" not in text and "Vorbereiteter" not in text)
+        check("T-14 AK4 kein neuer Schritt beim Fortsetzen", llm_anfragen == [], str(llm_anfragen))
+        check("T-14 offener Schritt mit passenden Buttons",
+              b.locator(".wahlbox button").count() > 0 or b.locator("#btn-answer").is_visible())
+        browser.close()
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

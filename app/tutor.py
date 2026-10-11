@@ -905,13 +905,19 @@ def _kalibrierung_deutung(r: float | None, f: float | None) -> str:
 
 # ---------------------------------------------------------------- N-05
 
-def verlauf_fuer_lernende(events: list[dict]) -> tuple[list[dict], list[dict]]:
+def verlauf_fuer_lernende(events: list[dict], fuer_fortsetzen: bool = False) -> tuple[list[dict], list[dict]]:
     """Baut den Lernverlauf für die lernende Person aus dem Event-Log (N-05).
 
     Übernommen werden nur ausdrücklich erlaubte Felder (Whitelist), damit neue
     interne Angaben im Log nie versehentlich bei Lernenden landen.
     Rückgabe: (Einträge, Schwächen). Schwächen sind Konzepte mit falschen oder
     teilweise richtigen Antworten, jeweils mit Anker auf die erste Aufgabe.
+
+    T-14: Mit `fuer_fortsetzen` kommen die Einträge dazu, die die lernende
+    Person im Chat schon gesehen hat: Einstufung, Hinweise zur Adaption und
+    zum Niveau, Statuswechsel (Pausieren und Fortsetzen), Fallback-Meldungen,
+    ihre eigenen Wahlen und Witze. Regelverstösse, verworfene Vorabrufe,
+    Fallback-Gründe und Musterlösungen bleiben weiterhin draussen.
     """
     eintraege: list[dict] = []
     schwaechen: dict[str, dict] = {}
@@ -924,6 +930,8 @@ def verlauf_fuer_lernende(events: list[dict]) -> tuple[list[dict], list[dict]]:
                     if p.get(k)}}
             if p.get("optionen"):
                 e["optionen"] = list(p["optionen"])
+            if p.get("nochmals_anders"):
+                e["nochmals_anders"] = True
             eintraege.append(e)
             aufgabe = e if p["typ"] == "aufgabe" else aufgabe
         elif typ == "answer_submitted":
@@ -931,9 +939,13 @@ def verlauf_fuer_lernende(events: list[dict]) -> tuple[list[dict], list[dict]]:
                               "sicherheit": p.get("confidence")})
         elif typ == "answer_evaluated" and p.get("bewertung") != "unbewertet":
             bew = p.get("bewertung") or ("korrekt" if p.get("korrekt") else "falsch")
-            eintraege.append({"art": "bewertung", "zeit": zeit, "bewertung": bew,
-                              **{k: p.get(k) for k in ("feedback", "hinweis", "selbsteinschaetzung")
-                                 if p.get(k)}})
+            e = {"art": "bewertung", "zeit": zeit, "bewertung": bew,
+                 **{k: p.get(k) for k in ("feedback", "hinweis", "selbsteinschaetzung") if p.get(k)}}
+            if fuer_fortsetzen and p.get("adaption"):
+                e["adaption"] = p["adaption"]
+            eintraege.append(e)
+            if fuer_fortsetzen and p.get("adaption_begruendung"):
+                eintraege.append({"art": "notiz", "zeit": zeit, "text": p["adaption_begruendung"]})
             if bew in ("falsch", "teilweise") and aufgabe:
                 konzept = aufgabe.get("konzept") or aufgabe.get("titel") or "ohne Konzept"
                 eintrag = schwaechen.setdefault(konzept, {"konzept": konzept, "anker": aufgabe["id"],
@@ -951,6 +963,31 @@ def verlauf_fuer_lernende(events: list[dict]) -> tuple[list[dict], list[dict]]:
         elif typ == "finished":
             eintraege.append({"art": "abschluss", "zeit": zeit,
                               **{k: p.get(k) for k in ("zusammenfassung", "empfehlung") if p.get(k)}})
+        elif not fuer_fortsetzen:
+            continue
+        elif typ == "assessment_evaluated":
+            eintraege.append({"art": "einstufung", "zeit": zeit,
+                              "level_label": LEVEL_LABELS.get(p.get("level"), p.get("level", "")),
+                              "begruendung": p.get("begruendung", "")})
+        elif typ == "answer_evaluated":          # unbewertet: technischer Fehler (T-11)
+            eintraege.append({"art": "technisch", "zeit": zeit, "text": p.get("feedback", "")})
+        elif typ == "task" and p.get("typ") == "fehler":
+            eintraege.append({"art": "fallback", "zeit": zeit, "text": p.get("inhalt", "")})
+        elif typ == "niveau_geaendert":
+            eintraege.append({"art": "notiz", "zeit": zeit,
+                              "text": f"Niveau: {LEVEL_LABELS.get(p.get('von'), p.get('von'))} → "
+                                      f"{LEVEL_LABELS.get(p.get('nach'), p.get('nach'))}"})
+        elif typ == "status_geaendert":
+            eintraege.append({"art": "status", "zeit": zeit, "von": p.get("von"), "nach": p.get("nach")})
+        elif typ in ("wahl_nach_bewertungsfehler", "wahl_nach_fallback", "wahl_nach_teilweise"):
+            eintraege.append({"art": "wahl", "zeit": zeit, "wahl": p.get("wahl")})
+        elif typ == "witz":
+            eintraege.append({"art": "witz", "zeit": zeit, "text": p.get("witz", "")})
+        elif typ == "kopie_erkannt":
+            eintraege.append({"art": "kopie", "zeit": zeit, "text": p.get("meldung", "")})
+        elif typ == "loesung_gezeigt":
+            eintraege.append({"art": "loesung", "zeit": zeit, "text": p.get("loesung", ""),
+                              "elemente": list(p.get("elemente") or [])})
     return eintraege, list(schwaechen.values())
 
 

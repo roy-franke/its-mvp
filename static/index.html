@@ -101,6 +101,9 @@
              padding: 10px 12px; }
   .msg.user.wahl { background: #e0e7ff; color: #1e3a8a; font-size: .88rem; padding: 6px 12px; }
   .msg.tutor.witz { background: #fdf4ff; border-color: #f0abfc; }
+  .trenner { align-self: stretch; text-align: center; font-size: .78rem; color: var(--muted);
+             display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+  .trenner::before, .trenner::after { content: ""; flex: 1; border-top: 1px dashed #cbd5e1; }
 
   /* Übersicht der eigenen Lernsequenzen (T-05) */
   .seq { display: flex; align-items: center; gap: 12px; padding: 12px 0;
@@ -650,28 +653,88 @@ async function resumeSession(sid) {
   }
   $("chat").innerHTML = "";
   show("view-learn");
-  addNote(`Willkommen zurück, ${st.name}! Wir machen dort weiter, wo du aufgehört hast.`);
   renderProgress(st.progress);
+  // T-14: der ganze bisherige Dialog, gleich dargestellt wie live erzeugte Schritte
+  zeigeVerlauf(st.verlauf || [], st.name);
   const t = st.current_task;
+  currentTask = t;
   if (st.wartet_auf === "abschluss" || !t) {
     setChatBusy(true);
     try { await nextTask(); } catch (e) { addError(e); setRetryMode(); }
     finally { setChatBusy(false); }
     return;
   }
-  renderTask(t, undefined, false);
-  if (st.wartet_auf === "weiter" && t.typ === "aufgabe" && st.letztes_feedback) {
-    renderFeedback(st.letztes_feedback);
-    setContinueMode(st.letztes_feedback.adaption, st.letztes_feedback.finished);
-    prefetchNext($("btn-continue").dataset.adaptation || undefined);
-  } else if (st.wartet_auf === "antwort" && st.letztes_feedback) {
-    renderFeedback(st.letztes_feedback);       // Nachbesserung nach Hinweis
-  }
+  // Offener Schritt: nur die passenden Buttons, ohne erneuten LLM-Aufruf (AK 4)
   if ((st.wahl || []).length) {
-    // Offene Wahl (T-11, T-12, D-07): nach dem Fortsetzen wieder anbieten
-    setWaitMode();
+    setWaitMode();                           // offene Wahl (T-11, T-12, D-07)
     renderWahl(st.wahl);
+  } else if (st.wartet_auf === "antwort" && t.typ === "aufgabe") {
+    confidenceAsked = !!st.letztes_feedback; // Sicherheit nur vor der ersten Bewertung
+    setAnswerMode(true);
+  } else if (t.typ === "theorie") {
+    setTheoryMode();
+  } else if (st.letztes_feedback) {
+    setContinueMode(st.letztes_feedback.adaption, st.letztes_feedback.finished);
+  } else {
+    setRetryMode();
   }
+  if (st.progress && st.progress.niveau_frage_offen)
+    addLevelQuestion("Möchtest du anspruchsvollere Aufgaben?");
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+// ---------- Verlauf im Chat (T-14)
+const WAHL_TEXT = { nochmals_bewerten: "Nochmals bewerten lassen", musterloesung: "Musterlösung ansehen und weiter",
+  ohne_bewertung: "Ohne Bewertung weiter", nochmals: "Nochmals versuchen", abschnitt: "Abschnitt aus dem Material",
+  naechstes_thema: "Zum nächsten Thema", direkt_aufgabe: "Direkt zur Aufgabe", witz: "Witz zum Thema",
+  ergaenzen: "Antwort ergänzen", loesung: "Lösung ansehen", weiter: "Weiter zur nächsten Aufgabe" };
+
+function zeigeVerlauf(eintraege, name) {
+  let pausiertAm = null, frage = "";
+  for (const e of eintraege) {
+    if (e.art === "theorie") zeigeTheorie(e);
+    else if (e.art === "aufgabe") { zeigeAufgabe(e); frage = e.frage || ""; }
+    else if (e.art === "antwort") addMsg("user", e.text || "", "Du (Antwort)");
+    else if (e.art === "bewertung") {
+      renderFeedback(e);
+      if (e.adaption === "retry" && e.bewertung !== "teilweise") {
+        if (frage) addMsg("tutor question", "↩️ Ergänze deine Antwort zur Aufgabe: " + frage, "Tutor");
+      }
+    }
+    else if (e.art === "notiz") addNote(e.text);
+    else if (e.art === "einstufung") addNote(`Einstufung: Du startest auf Niveau «${e.level_label}». ${e.begruendung || ""}`);
+    else if (e.art === "frage") addMsg("user ask", e.text || "", "Du (Frage)");
+    else if (e.art === "tutor") zeigeTutorAntwort(e);
+    else if (e.art === "technisch") addMsg("tutor mid", "⚠️ " + (e.text || ""), "Tutor");
+    else if (e.art === "fallback") addMsg("tutor mid fallback", "🤔 " + (e.text || ""), "Tutor");
+    else if (e.art === "wahl") addMsg("user wahl", WAHL_TEXT[e.wahl] || e.wahl, "Du (Auswahl)");
+    else if (e.art === "witz") addMsg("tutor witz", "😄 " + (e.text || ""), "Tutor");
+    else if (e.art === "kopie") addMsg("tutor mid", "✍️ " + (e.text || ""), "Tutor");
+    else if (e.art === "loesung") zeigeLoesung(e.text, e.elemente);
+    else if (e.art === "status") {
+      if (e.nach === "pausiert") pausiertAm = e.zeit;
+      else if (e.nach === "aktiv" && pausiertAm) {
+        addTrenner(`Pausiert am ${datum(pausiertAm)} · fortgesetzt am ${datum(e.zeit)}`);
+        pausiertAm = null;
+      }
+    }
+  }
+  if (!eintraege.length) addNote(`Willkommen zurück, ${name}! Wir machen dort weiter, wo du aufgehört hast.`);
+}
+
+function datum(t) {
+  return new Date(t * 1000).toLocaleString("de-CH", { day: "numeric", month: "numeric", year: "numeric",
+                                                      hour: "2-digit", minute: "2-digit" });
+}
+function addTrenner(text) {
+  const div = document.createElement("div");
+  div.className = "trenner";
+  div.textContent = text;
+  $("chat").insertBefore(div, $("waiting"));
+}
+function zeigeLoesung(text, elemente) {
+  addMsg("tutor good", "📘 Musterlösung: " + (text || "") +
+    ((elemente || []).length ? "\n\nDazu gehören:\n" + elemente.map(x => "- " + x).join("\n") : ""), "Tutor");
 }
 
 // ---------- Einstufung
@@ -742,6 +805,50 @@ async function nextTask(adaptation) {
   renderTask(d.task, adaptation, true);
 }
 
+// Darstellung eines Theorie- bzw. Aufgabenschritts, live und beim Fortsetzen gleich (T-14)
+function zeigeTheorie(t) {
+  const titel = (t.nochmals_anders ? "Nochmals anders erklärt: " : "") + (t.titel || "");
+  const m = addMsg("tutor theory", (titel ? "### 📖 " + titel + "\n\n" : "") + (t.inhalt || "") +
+    (t.beispiel ? "\n\n💡 **Beispiel:** " + t.beispiel : ""), "Tutor – Theorie");
+  quellenZeile(m, t.quelle);
+  return m;
+}
+function zeigeAufgabe(t) {
+  addMsg("tutor", (t.titel ? "### " + t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
+  if (t.frage) {
+    const optionen = (t.optionen || []).map((o, i) => `${"ABCDEFGH"[i]}) ${o}`).join("\n");
+    addMsg("tutor question", "❓ " + t.frage + (optionen ? "\n\n" + optionen : ""), "Tutor");
+  }
+}
+function zeigeTutorAntwort(d) {
+  if (d.internet) {
+    // N-03: Internetrecherche mit Quellenlinks und Hinweis auf fehlende Prüfung
+    const m = addMsg("tutor extern web", d.antwort ?? d.text,
+      "Tutor · Internetrecherche, nicht von der Lehrperson geprüft");
+    if ((d.links || []).length) {
+      const ul = document.createElement("ul");
+      ul.className = "links";
+      for (const l of d.links) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.href = l.url; a.textContent = l.titel || l.url;
+        a.target = "_blank"; a.rel = "noopener noreferrer";
+        li.appendChild(a); ul.appendChild(li);
+      }
+      m.appendChild(ul);
+    }
+    if (d.hinweis) {
+      const h = document.createElement("span");
+      h.className = "quelle"; h.textContent = "⚠️ " + d.hinweis;
+      m.appendChild(h);
+    }
+  } else if (d.ausserhalb_material) {
+    addMsg("tutor extern", d.antwort ?? d.text, "Tutor · Ergänzung ausserhalb des Lektionsmaterials");
+  } else {
+    addMsg("tutor", d.antwort ?? d.text, "Tutor");
+  }
+}
+
 function renderTask(t, adaptation, prefetch) {
   currentTask = t;
   if (t.typ === "fehler") {
@@ -753,19 +860,13 @@ function renderTask(t, adaptation, prefetch) {
     return;
   }
   if (t.typ === "theorie") {
-    const m = addMsg("tutor theory", "📖 " + (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || "") +
-      (t.beispiel ? "\n\n💡 Beispiel: " + t.beispiel : ""), "Tutor – Theorie");
-    quellenZeile(m, t.quelle);
+    zeigeTheorie(t);
     setTheoryMode();
     // Auf Theorie folgt immer eine Aufgabe – die kann schon entstehen,
     // während der Lernende die Erklärung liest.
     if (prefetch !== false) prefetchNext();
   } else {
-    addMsg("tutor", (t.titel ? t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
-    if (t.frage) {
-      const optionen = (t.optionen || []).map((o, i) => `${"ABCDEFGH"[i]}) ${o}`).join("\n");
-      addMsg("tutor question", "❓ " + t.frage + (optionen ? "\n\n" + optionen : ""), "Tutor");
-    }
+    zeigeAufgabe(t);
     confidenceAsked = false;   // Sicherheitsfrage einmal pro Aufgabe
     setAnswerMode(true);
   }
@@ -914,8 +1015,7 @@ async function waehle(id, label) {
     }
     if (d.progress) renderProgress(d.progress);
     if (d.loesung) {
-      addMsg("tutor good", "📘 Musterlösung: " + d.loesung +
-        ((d.elemente || []).length ? "\n\nDazu gehören:\n" + d.elemente.map(x => "- " + x).join("\n") : ""), "Tutor");
+      zeigeLoesung(d.loesung, d.elemente);
       setContinueMode("next", d.finished);
       prefetchNext();
       return;
@@ -938,32 +1038,7 @@ async function sendChat(text, art) {
   setChatBusy(true);
   try {
     const d = await api(`/session/${sessionId}/chat`, { message: text, art: art || "frage" });
-    if (d.internet) {
-      // N-03: Internetrecherche mit Quellenlinks und Hinweis auf fehlende Prüfung
-      const m = addMsg("tutor extern web", d.antwort,
-        "Tutor · Internetrecherche, nicht von der Lehrperson geprüft");
-      if ((d.links || []).length) {
-        const ul = document.createElement("ul");
-        ul.className = "links";
-        for (const l of d.links) {
-          const li = document.createElement("li");
-          const a = document.createElement("a");
-          a.href = l.url; a.textContent = l.titel || l.url;
-          a.target = "_blank"; a.rel = "noopener noreferrer";
-          li.appendChild(a); ul.appendChild(li);
-        }
-        m.appendChild(ul);
-      }
-      if (d.hinweis) {
-        const h = document.createElement("span");
-        h.className = "quelle"; h.textContent = "⚠️ " + d.hinweis;
-        m.appendChild(h);
-      }
-    } else if (d.ausserhalb_material) {
-      addMsg("tutor extern", d.antwort, "Tutor · Ergänzung ausserhalb des Lektionsmaterials");
-    } else {
-      addMsg("tutor", d.antwort, "Tutor");
-    }
+    zeigeTutorAntwort(d);
     if (d.angebot === "allgemeinwissen" || d.angebot === "internet") addOffer(d.angebot);
     if (d.progress) { renderProgress(d.progress); pendingNext = null; }
   } catch (e) { addError(e); }
@@ -1150,8 +1225,8 @@ function verlaufEintrag(e) {
     else div.appendChild(document.createTextNode(text));
   };
   if (e.art === "theorie") {
-    zeile("Theorie", "📖 " + (e.titel ? e.titel + "\n\n" : "") + (e.inhalt || "") +
-      (e.beispiel ? "\n\n💡 Beispiel: " + e.beispiel : ""), "tutor theory");
+    zeile("Theorie", (e.titel ? "### 📖 " + e.titel + "\n\n" : "") + (e.inhalt || "") +
+      (e.beispiel ? "\n\n💡 **Beispiel:** " + e.beispiel : ""), "tutor theory");
     quellenZeile(div, e.quelle);
   } else if (e.art === "aufgabe") {
     zeile("Aufgabe" + (e.konzept ? " · " + e.konzept : ""), (e.titel ? e.titel + "\n\n" : "") +
