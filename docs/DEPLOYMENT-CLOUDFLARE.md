@@ -237,6 +237,39 @@ Ist die Option aus oder fehlt der Header in einer Anfrage, gilt das
 bisherige Verfahren mit Passwort und Klassencode. Gesetzte Header haben dann
 keinerlei Wirkung.
 
+### Abmelden bei Header-Anmeldung (seit Oktober 2026, T-23)
+
+Liegt die Anmeldung beim Proxy, genügt es nicht, die Cookies des ITS zu
+löschen: Beim nächsten Aufruf meldet der Proxy dieselbe Person wieder an.
+Der Abmelde-Button leitet deshalb nach dem Löschen der Cookies auf die
+Abmeldeadresse des Proxys weiter. Diese kommt aus einem Header, den der Proxy
+setzt (Name in `ITS_LOGOUT_HEADER`, Standard `X-Logout-Url`), oder als feste
+Rückfalladresse aus `ITS_LOGOUT_URL`. Fehlt beides, blendet das ITS den
+Abmelde-Button aus und schreibt einmal eine Warnung ins Log. Übernommen werden
+nur Adressen, die mit `https://`, `http://` oder `/` beginnen; Werte wie
+`javascript:…` oder `//anderer-host` verwirft das ITS mit einer Warnung.
+
+Bei Cloudflare Access lautet die Abmeldeadresse in der Regel
+`/cdn-cgi/access/logout` auf dem geschützten Hostnamen. **Bitte vor dem
+Einsatz prüfen**, ob das in eurer Access-Konfiguration so funktioniert
+(einmal im Browser `https://tutor.casaai.me/cdn-cgi/access/logout` aufrufen).
+Der einfachste Weg ist die feste Adresse in der `.env`:
+
+```ini
+ITS_LOGOUT_URL=/cdn-cgi/access/logout
+```
+
+Soll der Proxy die Adresse selbst mitgeben, setzt eine Cloudflare-Transform-Rule
+(Rules → Transform Rules → Modify Request Header, Hostname tutor.casaai.me)
+den Header als statischen Wert:
+
+```text
+Set static   X-Logout-Url   https://tutor.casaai.me/cdn-cgi/access/logout
+```
+
+Ohne Header-Anmeldung hat dieser Header keine Wirkung; dann gilt das normale
+Abmelden mit Cookies (T-22).
+
 ## Hinweis Datenschutz
 
 Für Tests und Demos mit fiktiven Namen ist dieses Setup unbedenklich.

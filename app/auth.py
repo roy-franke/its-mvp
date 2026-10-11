@@ -32,6 +32,7 @@ zusätzlich mit dem Passwort an.
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 from dataclasses import dataclass
@@ -39,6 +40,8 @@ from dataclasses import dataclass
 from fastapi import HTTPException, Request
 
 from . import store
+
+log = logging.getLogger("its.auth")
 
 COOKIE_NAME = "its_teacher"
 LEARNER_COOKIE = "its_learner"
@@ -193,9 +196,44 @@ def is_teacher(request: Request) -> bool:
 
 # ---------------------------------------------------------------- Abmelden (T-22, T-23)
 
-def logout_url(request: Request) -> str | None:
-    """Adresse zum Abmelden beim Proxy (T-23); ohne Header-Anmeldung keine."""
+def logout_header() -> str:
+    return (os.getenv("ITS_LOGOUT_HEADER") or "X-Logout-Url").strip()
+
+
+_warnung_ohne_logout = False
+
+
+def _url_pruefen(url: str | None, quelle: str) -> str | None:
+    """Nur https://, http:// oder ein Pfad auf demselben Host (/…). Alles andere,
+    etwa javascript: oder //fremder-host, wird verworfen und als Warnung geloggt."""
+    url = (url or "").strip()
+    if not url:
+        return None
+    klein = url.lower()
+    if klein.startswith(("https://", "http://")) or (url.startswith("/") and not url.startswith("//")):
+        if not any(c in url for c in "\r\n\t\\") and " " not in url:
+            return url
+    log.warning("Abmeldeadresse aus %s verworfen (nur https://, http:// oder /…): %r", quelle, url[:120])
     return None
+
+
+def logout_url(request: Request) -> str | None:
+    """T-23: Adresse zum Abmelden beim Proxy.
+
+    Nur bei aktiver Header-Anmeldung. Zuerst aus dem Header ITS_LOGOUT_HEADER
+    (Standard X-Logout-Url), sonst aus ITS_LOGOUT_URL. Fehlt beides, gibt es
+    keinen Abmelde-Button (Entscheid E6), und der Server warnt einmal im Log.
+    """
+    global _warnung_ohne_logout
+    if not trust_headers():
+        return None
+    url = _url_pruefen(request.headers.get(logout_header()), f"Header {logout_header()}")
+    url = url or _url_pruefen(os.getenv("ITS_LOGOUT_URL"), "ITS_LOGOUT_URL")
+    if not url and not _warnung_ohne_logout:
+        _warnung_ohne_logout = True
+        log.warning("Header-Anmeldung aktiv, aber weder Header %s noch ITS_LOGOUT_URL liefern eine "
+                    "Abmeldeadresse. Der Abmelde-Button wird ausgeblendet.", logout_header())
+    return url
 
 
 def abmelden_moeglich(request: Request) -> bool:

@@ -1074,6 +1074,30 @@ def t22_abmelden(pw):
         check("T-22 AK1 auch ohne TEACHER_PASSWORD wirksam", page.url.endswith("/teacher/login"), page.url)
 
 
+@scenario("t23")
+def t23_abmelden_header(pw):
+    """T-23 AK1/E6: Abmelden bei Header-Anmeldung leitet auf die Adresse des Proxys."""
+    with server(ITS_TRUST_PROXY_HEADERS="true") as base:
+        browser = launch(pw)
+        ctx = browser.new_context(extra_http_headers={"X-Forwarded-User": "mia.muster", "X-User-Roles": "teacher",
+                                                      "X-Logout-Url": "/abgemeldet-beim-proxy"})
+        page = ctx.new_page()
+        page.goto(base + "/")
+        expect(page.locator("#btn-abmelden")).to_be_visible(timeout=10000)
+        check("T-23 AK1 Button in der Lernenden-Ansicht", True)
+        page.goto(base + "/teacher")
+        expect(page.locator("#link-abmelden")).to_be_visible()
+        page.click("#link-abmelden")
+        page.wait_for_url("**/abgemeldet-beim-proxy", timeout=10000)
+        check("T-23 AK1 Weiterleitung auf die Adresse aus dem Header", page.url.endswith("/abgemeldet-beim-proxy"))
+        ohne = browser.new_context(extra_http_headers={"X-Forwarded-User": "mia.muster"}).new_page()
+        ohne.goto(base + "/")
+        ohne.wait_for_load_state("networkidle")
+        check("T-23 E6 ohne Abmeldeadresse kein Button",
+              not ohne.locator("#btn-abmelden").is_visible() and not ohne.locator("#btn-logout").is_visible())
+        browser.close()
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

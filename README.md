@@ -155,6 +155,8 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_USER_HEADER` | Header mit dem Benutzernamen (Standard `X-Forwarded-User`) |
 | `ITS_ROLES_HEADER` | Header mit den Rollen (Standard `X-User-Roles`) |
 | `ITS_TEACHER_ROLE` | Rollenname für Lehrpersonen (Standard `teacher`) |
+| `ITS_LOGOUT_HEADER` | Header mit der Abmeldeadresse des Proxys bei Header-Anmeldung (Standard `X-Logout-Url`, T-23) |
+| `ITS_LOGOUT_URL` | Feste Rückfalladresse zum Abmelden bei Header-Anmeldung, z.B. `/cdn-cgi/access/logout` (Standard leer; ohne Adresse kein Abmelde-Button) |
 | `ITS_DOMAIN` | Domain für den HTTPS-Betrieb mit Docker/Caddy |
 
 ## Tests
