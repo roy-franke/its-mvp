@@ -363,6 +363,9 @@ def _mock_quelle(user: str) -> dict:
 
 def _mock_text(system: str, user: str) -> str:
     """Deterministischer Fake-Provider für Entwicklung und Demos ohne LLM."""
+    if _label(user) == "WITZ":
+        return json.dumps({"witz": "Warum hat das Lehrbuch so gute Laune? Es hat einfach für jedes "
+                                   "Problem ein Kapitel. (Mock-Witz)"}, ensure_ascii=False)
     if "EINSTUFUNGSFRAGEN" in user:
         return json.dumps({
             "questions": [

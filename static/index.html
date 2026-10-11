@@ -734,9 +734,11 @@ async function nextTask(adaptation) {
 function renderTask(t, adaptation, prefetch) {
   currentTask = t;
   if (t.typ === "fehler") {
-    // Technisches Problem: ehrlich sagen und «Nochmals versuchen» anbieten
-    addMsg("tutor bad", "⚠️ " + (t.inhalt || ""), "Tutor");
-    setRetryMode(adaptation);
+    // T-12: Offen sagen, dass es nicht geklappt hat, und eine Wahl anbieten
+    addMsg("tutor mid fallback", "🤔 " + (t.inhalt || ""), "Tutor");
+    setWaitMode();
+    renderWahl(t.wahl && t.wahl.length ? t.wahl
+      : [{ id: "nochmals", label: "Nochmals versuchen", haupt: true }]);
     return;
   }
   if (t.typ === "theorie") {

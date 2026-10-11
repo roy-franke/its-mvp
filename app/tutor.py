@@ -399,6 +399,13 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         )
         if vorher and vorher.get("beispiel"):
             instruction += f"Bisheriges Beispiel (nicht wiederverwenden): {vorher['beispiel']}\n"
+    elif adaptation == "naechstes_thema":
+        # T-12: Die lernende Person hat «Zum nächsten Thema» gewählt
+        bisher = list(dict.fromkeys((profile.get("covered") or []) + (profile.get("uebersprungen") or [])))
+        instruction += (
+            "Der Lernende möchte zum nächsten Thema. Führe ein NEUES Konzept aus dem Material ein, "
+            "das nicht zu diesen gehört: " + (", ".join(bisher) or "keine") + ".\n"
+        )
     else:
         instruction += (
             "Führe das nächste sinnvolle Konzept aus dem Material ein, das noch "
@@ -450,7 +457,7 @@ def _quelle_setzen(data: dict, lesson: dict) -> None:
 
 
 def generate_task(lesson: dict, profile: dict, history: list[dict],
-                  adaptation: str | None = None) -> dict:
+                  adaptation: str | None = None, ohne_erklaerpruefung: bool = False) -> dict:
     """Erzeugt die nächste Aufgabe basierend auf Profil, Verlauf und Adaption.
 
     D-01: Die Aufgabe verlangt Eigenleistung. Nach der Generierung prüft
@@ -489,9 +496,15 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
             "Der Lernende ist sicher unterwegs. Wähle ein neues Konzept oder eine "
             "anspruchsvollere Anwendung, gerne ein Fallbeispiel.\n"
         )
+    elif adaptation == "naechstes_thema":
+        bisher = list(dict.fromkeys((profile.get("covered") or []) + (profile.get("uebersprungen") or [])))
+        instruction += ("Der Lernende möchte zum nächsten Thema. Wähle ein Konzept, das nicht zu "
+                        "diesen gehört: " + (", ".join(bisher) or "keine") + ".\n")
     else:
         instruction += "Wähle das nächste sinnvolle Konzept aus dem Material.\n"
-    einfuehrung = einstellungen.settings(lesson)["einsatzart"] == "einfuehrung"
+    # T-12: «Direkt zur Aufgabe» ist eine ausdrückliche Wahl, die Erklärpflicht entfällt
+    einfuehrung = (einstellungen.settings(lesson)["einsatzart"] == "einfuehrung"
+                   and not ohne_erklaerpruefung)
     erklaert = profile.get("erklaert") or []
     if einfuehrung:
         instruction += (
@@ -1030,24 +1043,23 @@ FALLBACK_TEXTE = {
         "erreichte_lernziele": [],
         "empfehlung": "Bespreche deinen Verlauf mit deiner Lehrperson.",
     },
+    "theorie_wahl": {
+        "titel": "Keine Erklärung erzeugt",
+        "inhalt": "Mir ist gerade keine gute Erklärung gelungen. Wie möchtest du weitermachen?",
+    },
+    "aufgabe_wahl": {
+        "titel": "Keine Aufgabe erzeugt",
+        "inhalt": "Mir ist gerade keine gute Aufgabe eingefallen. Wie möchtest du weitermachen?",
+    },
     "theorie_material": {
         "titel": "Aus dem Lektionsmaterial",
-        "einleitung": "Dein Tutor konnte die Erklärung gerade nicht selbst formulieren. "
-                      "Hier ist deshalb der passende Abschnitt direkt aus dem "
-                      "Lektionsmaterial.",
+        "einleitung": "Hier ist der passende Abschnitt direkt aus dem Lektionsmaterial.",
     },
     "aufgabe_material": {
         "titel": "Aufgabe zum Lektionsmaterial",
-        "einleitung": "Dein Tutor konnte gerade keine neue Aufgabe erzeugen. Arbeite "
-                      "deshalb mit diesem Abschnitt aus dem Lektionsmaterial.",
+        "einleitung": "Hier ist ein Abschnitt aus dem Lektionsmaterial.",
         "frage": "Erkläre mit eigenen Worten, was dieser Abschnitt aussagt, und nenne "
                  "ein eigenes Beispiel, das nicht im Text steht.",
-    },
-    "technischer_fehler": {
-        "titel": "Technisches Problem",
-        "inhalt": "Dein Tutor konnte den nächsten Schritt wegen eines technischen "
-                  "Problems gerade nicht erzeugen. Klick auf «Nochmals versuchen». "
-                  "Wenn es wieder nicht klappt, sag deiner Lehrperson Bescheid.",
     },
 }
 
@@ -1092,6 +1104,11 @@ def offene_wahl(profile: dict) -> list[dict]:
     task = profile.get("current_task") or {}
     if wartet in ("bewertung_wiederholen", "wahl_unbewertet"):
         return wahl_nach_bewertungsfehler(task, (profile.get("unbewertet") or {}).get("anzahl", 1))
+    if wartet in ("wahl_fallback", "nochmals") and task.get("typ") == "fehler":
+        wahl = task.get("wahl") or [{"id": "nochmals", "label": "Nochmals versuchen", "haupt": True}]
+        if profile.get("witz_erzaehlt"):
+            wahl = [w for w in wahl if w["id"] != "witz"]
+        return wahl
     return []
 
 
@@ -1156,35 +1173,104 @@ def _meta(meta: dict) -> dict:
 META_FELDER = ("_kontext", "_fehlerart", "_antwort_meta")
 
 
-def _fehler_schritt(meta: dict) -> dict:
-    out = dict(FALLBACK_TEXTE["technischer_fehler"])
-    out.update({"typ": "fehler", "konzept": "", "wiederholbar": True, **_meta(meta)})
-    return out
-
-
 def theory_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dict) -> dict:
-    treffer = _passender_abschnitt(lesson, profile, adaptation)
-    if treffer is None:
-        return _fehler_schritt(meta)
-    idx, abschnitt = treffer
-    t = FALLBACK_TEXTE["theorie_material"]
-    schritt = {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
-               "konzept": "", "typ": "theorie", "material_abschnitt": idx, **_meta(meta)}
-    quelle = didaktik.quelle_fuer_abschnitt(lesson, abschnitt)
-    if quelle:
-        schritt["quelle"] = quelle
-    return schritt
+    return fallback_wahl(lesson, profile, "theorie", adaptation, meta)
 
 
 def task_fallback(lesson: dict, profile: dict, adaptation: str | None, meta: dict) -> dict:
+    return fallback_wahl(lesson, profile, "aufgabe", adaptation, meta)
+
+
+WAHL_FALLBACK = {
+    "aufgabe": [("nochmals", "Nochmals versuchen"),
+                ("abschnitt", "Abschnitt in eigenen Worten zusammenfassen"),
+                ("naechstes_thema", "Zum nächsten Thema"),
+                ("witz", "Witz zum Thema")],
+    "theorie": [("nochmals", "Nochmals versuchen"),
+                ("abschnitt", "Abschnitt aus dem Material lesen"),
+                ("direkt_aufgabe", "Direkt zur Aufgabe"),
+                ("witz", "Witz zum Thema")],
+}
+
+
+def fallback_wahl(lesson: dict, profile: dict, art: str, adaptation: str | None, meta: dict) -> dict:
+    """T-12: Statt eines Lückenbüssers sagt der Tutor offen, dass es nicht geklappt
+    hat, und bietet eine Wahl an.
+
+    Den Materialabschnitt gibt es nur, wenn sich einer bestimmen lässt; sonst
+    entfällt diese Möglichkeit, statt eine leere Ankündigung zu zeigen.
+    """
     treffer = _passender_abschnitt(lesson, profile, adaptation)
-    if treffer is None:
-        return _fehler_schritt(meta)
-    idx, abschnitt = treffer
+    t = FALLBACK_TEXTE[f"{art}_wahl"]
+    wahl = [{"id": i, "label": label, "haupt": i == "nochmals"} for i, label in WAHL_FALLBACK[art]
+            if i != "abschnitt" or treffer is not None]
+    schritt = {"typ": "fehler", "art": art, "titel": t["titel"], "inhalt": t["inhalt"],
+               "konzept": "", "wiederholbar": True, "wahl": wahl, "adaptation": adaptation or "",
+               **_meta(meta)}
+    if treffer is not None:
+        schritt["material_abschnitt"] = treffer[0]
+    return schritt
+
+
+def material_schritt(lesson: dict, art: str, idx: int) -> dict | None:
+    """Der gewählte Materialabschnitt als Theorie oder als Aufgabe (T-12, Wahl «abschnitt»)."""
+    abschnitte = material_abschnitte(lesson.get("material", ""))
+    if not 0 <= idx < len(abschnitte):
+        return None
+    abschnitt = abschnitte[idx]
+    if art == "theorie":
+        t = FALLBACK_TEXTE["theorie_material"]
+        schritt = {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}", "konzept": "",
+                   "typ": "theorie", "material_abschnitt": idx, "fallback": True, "aus_material": True}
+        quelle = didaktik.quelle_fuer_abschnitt(lesson, abschnitt)
+        if quelle:
+            schritt["quelle"] = quelle
+        return schritt
     t = FALLBACK_TEXTE["aufgabe_material"]
-    return {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}",
-            "frage": t["frage"], "konzept": "", "typ": "aufgabe",
-            "material_abschnitt": idx, **_meta(meta)}
+    return {"titel": t["titel"], "inhalt": f"{t['einleitung']}\n\n{abschnitt}", "frage": t["frage"],
+            "konzept": "", "typ": "aufgabe", "material_abschnitt": idx, "fallback": True,
+            "aus_material": True}
+
+
+# E2: Ein eigener, sehr kurzer Aufruf ohne Lektionsmaterial. Scheitert er, kommt
+# ein Witz aus dieser Liste. Alle respektvoll, ohne Personen oder Gruppen.
+WITZE = [
+    "Treffen sich zwei Atome. Sagt das eine: «Ich glaube, ich habe ein Elektron verloren.» "
+    "Fragt das andere: «Bist du sicher?» – «Ja, ich bin positiv.»",
+    "Was macht eine Mathematikerin im Garten? Wurzeln ziehen.",
+    "Warum sind Fische so gut in Mathematik? Weil sie in Schulen leben.",
+    "Sagt die Null zur Acht: «Schicker Gürtel!»",
+    "Wie nennt man einen Bumerang, der nicht zurückkommt? Einen Stock.",
+    "Ich wollte einen Witz über Zeitreisen erzählen. Aber der hat euch letzte Woche schon nicht gefallen.",
+    "Warum können Geister so schlecht lügen? Weil man durch sie hindurchsieht.",
+    "Was sagt der grosse Stift zum kleinen Stift? «Wachs-mal-stift!»",
+]
+
+
+def witz_erzaehlen(lesson: dict, konzept: str, profile: dict) -> dict:
+    """T-12, Entscheid E2: Witz zum Lernthema als kleine Entschädigung.
+
+    Bewusst ohne _system_prompt, damit er auch bei zu grossem Material klappt.
+    Er läuft trotzdem durch Messung und Rechtschreibkorrektur (llm.chat_json).
+    """
+    data = llm.chat_json(
+        "Du erzählst kurze, respektvolle Witze für Lernende einer Schweizer Berufsmaturitätsschule "
+        "(Jugendliche und Erwachsene). Schweizer Rechtschreibung, kein ß. Keine Witze über Personen, "
+        "Herkunft, Religion, Geschlecht, Aussehen oder Sexualität, nichts Anzügliches. Du verrätst "
+        "keine Lösung einer Aufgabe. Du antwortest ausschliesslich mit einem JSON-Objekt.",
+        "AUFGABE: WITZ\n"
+        f"Lektion: {lesson.get('titel', '')}\n"
+        + (f"Thema gerade: {konzept}\n" if konzept else "") +
+        "Erzähle einen kurzen Witz (1-3 Sätze) mit Bezug zum Thema der Lektion.\n"
+        'Format: {"witz": "..."}',
+        fallback={})
+    if not data.get("_fallback") and str(data.get("witz", "")).strip():
+        return {"witz": data["witz"].strip(), "quelle": "modell"}
+    gezeigt = profile.setdefault("witze_liste", [])
+    offen = [i for i in range(len(WITZE)) if i not in gezeigt] or list(range(len(WITZE)))
+    i = offen[0]
+    gezeigt.append(i)
+    return {"witz": WITZE[i], "quelle": "liste", "_fehler": data.get("_fehler", "")}
 
 
 # ---------------------------------------------------------------- Adaption

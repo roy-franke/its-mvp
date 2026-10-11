@@ -575,10 +575,11 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
     if task.get("_fallback"):
         public_task["fallback"] = True
     if task.get("typ") == "fehler":
-        # Nichts erzeugt: Profil bleibt, damit «Nochmals versuchen» denselben
-        # Schritt erneut anfordert.
+        # Nichts erzeugt (T-12): Profil bleibt, der Tutor bietet eine Wahl an.
+        # «Nochmals versuchen» fordert denselben Schritt erneut an.
         profile["current_task"] = public_task
-        profile["wartet_auf"] = "nochmals"
+        profile["wartet_auf"] = "wahl_fallback"
+        profile["witz_erzaehlt"] = False
         store.log_event(sid, "task", public_task)
         store.update_session(sid, profile=profile)
         return {"done": False, "task": tutor.fuer_lernende(public_task), "progress": _progress(profile)}
@@ -775,7 +776,50 @@ def choose(sid: str, request: Request, req: WahlRequest):
         finished = _schritt_ohne_wertung(profile, "unbewertet")
         store.update_session(sid, profile=profile)
         return {"weiter": True, "loesung": loesung, "finished": finished, "progress": _progress(profile)}
+    if wartet in ("wahl_fallback", "nochmals"):
+        return _wahl_nach_fallback(sid, lesson, profile, task, req.wahl)
     raise HTTPException(409, "Gerade ist keine Auswahl offen.")
+
+
+def _aktuelles_konzept(profile: dict, history: list[dict]) -> str:
+    theorie = tutor.letzte_theorie(history)
+    return ((theorie or {}).get("konzept") or (profile.get("covered") or [""])[-1] or "").strip()
+
+
+def _wahl_nach_fallback(sid: str, lesson: dict, profile: dict, task: dict, wahl: str) -> dict:
+    """T-12: Wahl, nachdem keine Aufgabe oder keine Theorie erzeugt werden konnte."""
+    history = store.get_events(sid)
+    art = task.get("art") or "aufgabe"
+    adaptation = task.get("adaptation") or None
+    konzept = _aktuelles_konzept(profile, history)
+    store.log_event(sid, "wahl_nach_fallback", {"wahl": wahl, "art": art, "konzept": konzept})
+    if wahl == "witz":
+        w = tutor.witz_erzaehlen(lesson, konzept, profile)
+        if w.get("_fehler"):
+            store.log_event(sid, "fallback_used", {"schrittart": "WITZ", "grund": w["_fehler"]})
+        store.log_event(sid, "witz", {"witz": w["witz"], "quelle": w["quelle"]})
+        profile["witz_erzaehlt"] = True
+        store.update_session(sid, profile=profile)
+        return {"witz": w["witz"], "wahl": tutor.offene_wahl(profile), "progress": _progress(profile)}
+    if wahl == "abschnitt":
+        schritt = tutor.material_schritt(lesson, art, task.get("material_abschnitt", -1))
+        if schritt is None:
+            raise HTTPException(409, "Dazu gibt es keinen passenden Abschnitt im Material.")
+        return _commit_step(sid, profile, art, schritt)
+    if wahl == "naechstes_thema":
+        if konzept and konzept not in profile.setdefault("uebersprungen", []):
+            profile["uebersprungen"].append(konzept)
+        if _einsatzart(lesson) == "einfuehrung":
+            return _commit_step(sid, profile, "theorie",
+                                tutor.generate_theory(lesson, profile, history, "naechstes_thema"))
+        return _commit_step(sid, profile, "aufgabe",
+                            tutor.generate_task(lesson, profile, history, "naechstes_thema"))
+    if wahl == "direkt_aufgabe":
+        return _commit_step(sid, profile, "aufgabe",
+                            tutor.generate_task(lesson, profile, history, None, ohne_erklaerpruefung=True))
+    # nochmals
+    step_type, neu = _generate_step(lesson, profile, history, adaptation)
+    return _commit_step(sid, profile, step_type, neu)
 
 
 @app.post("/api/session/{sid}/chat")

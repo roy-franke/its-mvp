@@ -66,13 +66,16 @@ def test_unlesbares_json_wird_wiederholt(provider):
 # ---------------------------------------------------------------- AK 2
 
 def test_theorie_fallback_zeigt_echten_materialtext(provider):
+    """T-12: Der Fallback bietet eine Wahl; «Abschnitt aus dem Material lesen» zeigt echten Text."""
     provider(FlakyProvider(fail=99))
     data = tutor.generate_theory(LESSON, _profile(), [])
-    assert data["_fallback"] and data["typ"] == "theorie"
-    abschnitt = data["inhalt"].split("\n\n", 1)[1]
+    assert data["_fallback"] and data["typ"] == "fehler" and data["art"] == "theorie"
+    assert [w["id"] for w in data["wahl"]] == ["nochmals", "abschnitt", "direkt_aufgabe", "witz"]
+    schritt = tutor.material_schritt(LESSON, "theorie", data["material_abschnitt"])
+    abschnitt = schritt["inhalt"].split("\n\n", 1)[1]
     # Der angezeigte Abschnitt stammt wörtlich aus dem Material
     assert abschnitt[:80] in " ".join(LESSON["material"].split())
-    assert len(abschnitt) > 100
+    assert len(abschnitt) > 100 and schritt["typ"] == "theorie"
 
 
 def test_ohne_material_ehrliche_fehlermeldung(provider):
@@ -80,15 +83,21 @@ def test_ohne_material_ehrliche_fehlermeldung(provider):
     leer = dict(LESSON, material="")
     data = tutor.generate_theory(leer, _profile(), [])
     assert data["typ"] == "fehler" and data["wiederholbar"] is True
-    assert "technischen Problems" in data["inhalt"]
+    assert "keine gute Erklärung" in data["inhalt"]
+    # Ohne Abschnitt entfällt diese Möglichkeit, statt leer angekündigt zu werden
+    assert "abschnitt" not in [w["id"] for w in data["wahl"]]
 
 
 def test_aufgaben_fallback_ist_brauchbar(provider):
     provider(FlakyProvider(fail=99))
     p = _profile("intermediate")
     data = tutor.generate_task(LESSON, p, [])
-    assert data["typ"] == "aufgabe" and data["frage"]
-    assert data["inhalt"].split("\n\n", 1)[1][:60] in " ".join(LESSON["material"].split())
+    assert data["typ"] == "fehler" and data["art"] == "aufgabe"
+    assert [w["label"] for w in data["wahl"]] == ["Nochmals versuchen", "Abschnitt in eigenen Worten zusammenfassen",
+                                                  "Zum nächsten Thema", "Witz zum Thema"]
+    schritt = tutor.material_schritt(LESSON, "aufgabe", data["material_abschnitt"])
+    assert schritt["typ"] == "aufgabe" and schritt["frage"]
+    assert schritt["inhalt"].split("\n\n", 1)[1][:60] in " ".join(LESSON["material"].split())
 
 
 def test_fallback_zeigt_nacheinander_verschiedene_abschnitte(provider):

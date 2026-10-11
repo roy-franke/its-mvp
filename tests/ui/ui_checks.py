@@ -127,10 +127,13 @@ def start_lernsequenz(page, base: str, name: str = "UI-Test", lesson: str = "haf
 
 @scenario("t01")
 def t01_nochmals_versuchen(pw):
-    """T-01 AK2: Scheitern beide Aufrufe, erscheint eine brauchbare Ausgabe."""
+    """T-01/T-12: Scheitern beide Aufrufe, erscheint eine Wahl mit echtem Materialabschnitt."""
     with server(ITS_MOCK_FAIL="THEORIE_SCHRITT") as base:
         page = launch(pw).new_page()
         start_lernsequenz(page, base)
+        expect(page.locator(".wahlbox button[data-wahl='abschnitt']")).to_be_visible(timeout=30000)
+        page.click(".wahlbox button[data-wahl='abschnitt']")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
         theorie = page.locator(".msg.tutor.theory").last
         expect(theorie).to_be_visible(timeout=30000)
         text = theorie.inner_text()
@@ -141,19 +144,20 @@ def t01_nochmals_versuchen(pw):
 
 @scenario("t01b")
 def t01_button_nochmals_versuchen(pw):
-    """T-01 AK2: Ohne bestimmbaren Abschnitt erscheint «Nochmals versuchen»."""
+    """T-01/T-12: Ohne bestimmbaren Abschnitt erscheint die Wahl ohne «Abschnitt»."""
     leer = {"id": "leer", "titel": "Leere Lektion", "lernziele": ["Etwas verstehen"],
-            "material": "Kurz.", "einstufungsfragen_fallback": ["a?", "b?", "c?"]}
+            "material": "Kurz.", "einstufungsfragen_fallback": ["Frage a zum Thema?", "Frage b zum Thema?",
+                                                               "Frage c zum Thema?"]}
     with server(extra_lessons={"leer": leer}, ITS_MOCK_FAIL="THEORIE_SCHRITT") as base:
         page = launch(pw).new_page()
         start_lernsequenz(page, base, lesson="leer")
-        expect(page.locator(".msg.tutor.bad").last).to_contain_text("technischen Problems", timeout=30000)
-        btn = page.locator("#btn-continue")
-        check("T-01 Button «Nochmals versuchen» sichtbar",
-              btn.is_visible() and "Nochmals versuchen" in btn.inner_text())
-        reqs = api_requests(page, "/next")
-        btn.click()
-        expect(page.locator(".msg.tutor.bad")).to_have_count(2, timeout=30000)
+        expect(page.locator(".msg.tutor.fallback").last).to_contain_text("keine gute Erklärung", timeout=30000)
+        labels = page.locator(".wahlbox button").all_inner_texts()
+        check("T-12 ohne Abschnitt keine Ankündigung eines Abschnitts",
+              labels == ["Nochmals versuchen", "Direkt zur Aufgabe", "Witz zum Thema"], str(labels))
+        reqs = api_requests(page, "/wahl")
+        page.click(".wahlbox button[data-wahl='nochmals']")
+        expect(page.locator(".msg.tutor.fallback")).to_have_count(2, timeout=30000)
         check("T-01 «Nochmals versuchen» fordert den Schritt neu an", len(reqs) == 1, str(reqs))
 
 
@@ -709,6 +713,32 @@ def t11_bewertungsschleife(pw):
               p2.locator(".msg.tutor").count() > anzahl and "0 falsch" in p2.inner_text("#prog-badges"),
               p2.inner_text("#prog-badges"))
         browser.close()
+
+
+@scenario("t12")
+def t12_fallback_wahl(pw):
+    """T-12 AK1/AK3: Vier Möglichkeiten bei der Aufgabe, Witz aus der Liste, Buttons gesperrt beim Warten."""
+    with server(ITS_MOCK_FAIL="NAECHSTE_AUFGABE,WITZ", ITS_MOCK_DELAY="1") as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Fallback")
+        page.click("#btn-continue")                                   # Theorie gelesen
+        expect(page.locator(".wahlbox button")).to_have_count(4, timeout=30000)
+        labels = page.locator(".wahlbox button").all_inner_texts()
+        check("T-12 AK1 vier Möglichkeiten", labels == ["Nochmals versuchen",
+              "Abschnitt in eigenen Worten zusammenfassen", "Zum nächsten Thema", "Witz zum Thema"], str(labels))
+        check("T-12 freundlicher Text", "keine gute Aufgabe eingefallen" in page.locator(".msg.tutor.fallback").last.inner_text())
+        page.click(".wahlbox button[data-wahl='witz']")
+        check("T-12 Buttons während der Anfrage deaktiviert",
+              page.locator("#waiting").is_visible() and all(b.is_disabled() for b in page.locator(".wahlbox button").all()))
+        expect(page.locator(".msg.tutor.witz")).to_have_count(1, timeout=30000)
+        check("T-12 AK3 Witz aus der hinterlegten Liste", "Mock-Witz" not in page.locator(".msg.tutor.witz").inner_text())
+        labels = page.locator(".wahlbox button").all_inner_texts()
+        check("T-12 danach die übrigen Möglichkeiten", len(labels) == 3 and "Witz zum Thema" not in labels, str(labels))
+        page.click(".wahlbox button[data-wahl='abschnitt']")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("T-12 Abschnitt wird als Aufgabe angezeigt",
+              "eigenen Worten" in page.locator(".msg.tutor.question").last.inner_text()
+              and page.locator("#btn-answer").is_visible())
 
 
 def run(names):

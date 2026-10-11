@@ -75,7 +75,9 @@ def test_systemprompt_bleibt_gleich():
 
 
 def test_fallback_theorie_nennt_die_quelle_des_abschnitts():
-    t = tutor.theory_fallback(LEKTION, tutor.new_profile(), None, {"_fehler": "x"})
+    wahl = tutor.theory_fallback(LEKTION, tutor.new_profile(), None, {"_fehler": "x"})
+    # T-12: Der Abschnitt erscheint erst nach der Wahl «Abschnitt aus dem Material lesen»
+    t = tutor.material_schritt(LEKTION, "theorie", wahl["material_abschnitt"])
     assert t["quelle"] in didaktik.quellen_der_lektion(LEKTION)
     abschnitt = t["inhalt"].split("\n\n", 1)[1]
     assert didaktik.quelle_fuer_abschnitt(LEKTION, abschnitt) == t["quelle"]
