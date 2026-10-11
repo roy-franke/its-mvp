@@ -829,6 +829,28 @@ def t14_verlauf_fortsetzen(pw):
         browser.close()
 
 
+@scenario("t15")
+def t15_dialoge(pw):
+    """T-15/T-16: Eindeutige Dialogbuttons, Niveau-Auswahl ohne «festhalten»."""
+    with server() as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Dialog")
+        page.click("#btn-abort")
+        expect(page.locator("#modal")).to_be_visible()
+        ok, zurueck = page.inner_text("#modal-ok"), page.inner_text("#modal-cancel")
+        check("T-15 AK1 Abbrechen-Dialog beschriftet", ok == "Ja, Lektion abbrechen" and zurueck == "Nein, weiterlernen",
+              f"{ok} / {zurueck}")
+        check("T-15 sichere Wahl als Hauptbutton, Handlung rot umrandet",
+              "danger" in page.get_attribute("#modal-ok", "class")
+              and "secondary" not in (page.get_attribute("#modal-cancel", "class") or ""))
+        page.click("#modal-cancel")
+        check("T-15 «Nein, weiterlernen» bleibt in der Lektion", page.locator("#view-learn").is_visible())
+        optionen = page.locator("#level-control option").all_inner_texts()
+        check("T-16 AK1 Niveau-Einträge ohne «festhalten»",
+              optionen == ["Automatisch (empfohlen)", "Grundlagen", "Fortgeschritten", "Vertieft"], str(optionen))
+        check("T-16 Hilfetext beim Dropdown", "bis du wieder" in page.inner_text("#level-box"))
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

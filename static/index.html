@@ -309,9 +309,10 @@
   <div class="modal-box">
     <p id="modal-text"></p>
     <div class="btnrow">
-      <button id="modal-ok">OK</button>
+      <!-- T-15: Die sichere Wahl ist der Hauptbutton, die folgenreiche Handlung rot umrandet -->
+      <button id="modal-cancel">Nein, zurück</button>
       <button id="modal-alt" class="secondary hidden"></button>
-      <button id="modal-cancel" class="secondary">Abbrechen</button>
+      <button id="modal-ok" class="danger">OK</button>
     </div>
   </div>
 </div>
@@ -356,18 +357,23 @@ function showError(id, msg) {
 }
 
 // ---------- Bestätigungsdialog
-function confirmDialog(text, okLabel, altLabel) {
+// T-15: Jeder Button nennt seine Handlung; der Button zum Zurückkehren heisst nie «Abbrechen».
+function confirmDialog(text, okLabel, altLabel, zurueckLabel) {
   return new Promise(resolve => {
     $("modal-text").textContent = text;
-    $("modal-ok").textContent = okLabel || "OK";
+    $("modal-ok").textContent = okLabel;
     $("modal-alt").textContent = altLabel || "";
     $("modal-alt").classList.toggle("hidden", !altLabel);
+    $("modal-cancel").textContent = zurueckLabel || "Nein, zurück";
+    // Gibt es eine sichere Alternative (z.B. «Bisherige fortsetzen»), ist sie der Hauptbutton
+    $("modal-alt").classList.toggle("secondary", false);
+    $("modal-cancel").classList.toggle("secondary", !!altLabel);
     $("modal").classList.remove("hidden");
     const done = v => { $("modal").classList.add("hidden"); resolve(v); };
     $("modal-ok").onclick = () => done("ok");
     $("modal-alt").onclick = () => done("alt");
     $("modal-cancel").onclick = () => done(null);
-    $("modal-ok").focus();
+    (altLabel ? $("modal-alt") : $("modal-cancel")).focus();
   });
 }
 
@@ -605,7 +611,7 @@ async function startLesson(lessonId, neuBeginnen, fragen) {
   if (fragen) {
     const ok = await confirmDialog("Neu beginnen? Deine bisherige Lernsequenz zu dieser Lektion " +
       "wird archiviert. Deine Lehrperson sieht sie weiterhin, du selbst kannst sie danach " +
-      "nicht mehr fortsetzen.", "Neu beginnen");
+      "nicht mehr fortsetzen.", "Ja, neu beginnen", null, "Nein, zurück");
     if (!ok) return;
   }
   $("start-spinner").classList.remove("hidden");
@@ -619,7 +625,8 @@ async function startLesson(lessonId, neuBeginnen, fragen) {
       const fortsetzbar = ["aktiv", "pausiert"].includes(e.detail.status);
       const wahl = await confirmDialog("Zu dieser Lektion hast du schon eine Lernsequenz " +
         `(Status: ${STATUS_LABEL[e.detail.status] || e.detail.status}). Neu beginnen archiviert ` +
-        "den bisherigen Stand.", "Neu beginnen", fortsetzbar ? "Bisherige fortsetzen" : null);
+        "den bisherigen Stand.", "Neu beginnen", fortsetzbar ? "Bisherige fortsetzen" : null,
+        "Zurück zur Übersicht");
       if (wahl === "alt") return resumeSession(e.detail.session_id);
       if (wahl !== "ok") return;
       d = await api("/session/start", { lesson_id: lessonId, neu_beginnen: true });
@@ -1283,7 +1290,8 @@ $("btn-pause").onclick = async () => {
 $("btn-abort").onclick = async () => {
   if (busy) return;
   const ok = await confirmDialog("Lektion wirklich abbrechen? Du kannst diese Lernsequenz " +
-    "danach nicht mehr fortsetzen, aber die Lektion jederzeit neu beginnen.", "Ja, abbrechen");
+    "danach nicht mehr fortsetzen, aber die Lektion jederzeit neu beginnen.", "Ja, Lektion abbrechen",
+    null, "Nein, weiterlernen");
   if (!ok) return;
   setChatBusy(true);
   try {
