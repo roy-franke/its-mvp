@@ -147,7 +147,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `LLM_TIMEOUT` | Zeitlimit pro LLM-Aufruf in Sekunden (Standard 300) |
 | `OLLAMA_FORMAT_JSON` | Ollama erzwingt gültiges JSON, wo der Tutor JSON erwartet (Standard `true`) |
 | `ITS_MOCK_DELAY` | Nur für Tests: Verzögerung des Mock-Providers in Sekunden |
-| `ITS_MOCK_FAIL` | Nur für Tests: Schrittarten, bei denen der Mock scheitert, z.B. `THEORIE_SCHRITT`. Mit `:leer` liefert er eine leere Antwort, mit `:leer_json` nur bei format=json (T-09) |
+| `ITS_MOCK_FAIL` | Nur für Tests: Schrittarten, bei denen der Mock scheitert, z.B. `THEORIE_SCHRITT`. Mit `:leer` liefert er eine leere Antwort, mit `:leer_json` nur bis zum veränderten zweiten Versuch (T-09) |
 | `ITS_LESSONS_DIR` | Optionaler Pfad zum Lektionenordner |
 | `TEACHER_PASSWORD` | Passwort für `/teacher`; leer = kein Login (nur lokal) |
 | `CLASS_CODE` | Zugangscode für Lernende; leer = kein Code |

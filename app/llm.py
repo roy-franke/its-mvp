@@ -344,6 +344,24 @@ def _chat_ollama(system: str, user: str, json_mode: bool = False) -> tuple[str, 
     meta = _ollama_meta(data)
     inhalt = data["message"].get("content") or ""
     denken = data["message"].get("thinking") or ""
+    if not inhalt.strip() and denken and "{" not in denken and payload.get("think") is not False:
+        # T-09, belegt mit tests/eval/diagnose_ollama.py am 12.10.2026: Fehlt das
+        # Feld think (OLLAMA_THINK leer oder vom Server abgelehnt), denkt qwen3:30b
+        # bis OLLAMA_NUM_PREDICT und liefert nichts (12 von 12 Aufrufen leer,
+        # done_reason=length). Mit think=false waren alle Antworten gültig.
+        log.warning("Leere Antwort, Denkmodus hat %d Zeichen verbraucht; erneut mit think=false",
+                    len(denken))
+        payload["think"] = False
+        r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
+        if r.status_code == 400:
+            # Server kennt das Feld nicht: dann bleibt es bei der leeren Antwort
+            log.warning("Server lehnt think=false ab: %s", r.text[:200])
+            return inhalt, meta
+        r.raise_for_status()
+        data = r.json()
+        meta = dict(_ollama_meta(data), think_erzwungen=True)
+        inhalt = data["message"].get("content") or ""
+        denken = data["message"].get("thinking") or ""
     if not inhalt.strip() and "{" in denken:
         # T-09: Qwen3 beginnt trotz think=false gelegentlich mit «<think>». Ollama
         # schiebt dann die ganze Ausgabe ins Feld thinking, und content bleibt
@@ -498,14 +516,14 @@ def _chat_mock(system: str, user: str, json_mode: bool = False) -> tuple[str, di
     if delay > 0:
         time.sleep(delay)
     # Varianten (T-09): «X:leer» liefert immer eine leere Antwort, «X:leer_json»
-    # nur mit format=json, so dass der veränderte zweite Versuch gelingt.
+    # nur bis zum veränderten zweiten Versuch (Hinweis «/no_think» im Prompt).
     fail = {x.strip() for x in os.getenv("ITS_MOCK_FAIL", "").split(",") if x.strip()}
     label = _label(user)
     if label in fail:
         raise LLMError(f"Mock-Fehler für {label} (ITS_MOCK_FAIL)")
     leer_meta = {"done_reason": "length", "prompt_tokens": 1200, "antwort_tokens": 1024,
                  "gesamt_sekunden": 9.5}
-    if f"{label}:leer" in fail or (f"{label}:leer_json" in fail and json_mode):
+    if f"{label}:leer" in fail or (f"{label}:leer_json" in fail and LEER_HINWEIS not in user):
         return "\n\n   \n", leer_meta
     return _mock_text(system, user), {}
 
@@ -640,9 +658,10 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     damit der Aufrufer ein Event fallback_used protokollieren kann.
 
     T-09: Eine leere Antwort ist ein eigener Fehlerfall. Der nächste Versuch
-    ist dann nicht identisch: Er verzichtet auf format=json (das JSON wird
-    danach mit extract_json repariert) und bittet ausdrücklich um eine direkte
-    Antwort ohne Vorüberlegungen. Die Metadaten der Antwort (done_reason,
+    ist dann nicht identisch: Er bittet ausdrücklich um eine direkte Antwort
+    ohne Vorüberlegungen («/no_think»). format=json bleibt eingeschaltet: Die
+    Diagnose vom 12.10.2026 zeigte, dass qwen3:30b ohne format=json in 12 von
+    12 Aufrufen bis zum Tokenlimit schrieb und nie gültiges JSON lieferte. Die Metadaten der Antwort (done_reason,
     Tokenzahlen, Dauer) landen im Log und im Fallback.
 
     `check` ist eine optionale Prüffunktion (dict -> str | None). Meldet sie
@@ -681,7 +700,6 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
             fehler.append(grund)
             fehlerart = "leere_antwort"
             # Zweiter Versuch mit veränderter Anfrage statt identisch zu wiederholen
-            json_mode = False
             prompt = user + LEER_HINWEIS
             continue
         parsed = extract_json(text)
@@ -741,7 +759,7 @@ LEER_HINWEIS = ("\n\nWICHTIG: Deine letzte Antwort war leer. Antworte jetzt dire
                 "Vorüberlegungen mit genau einem JSON-Objekt im verlangten Format. /no_think")
 
 _META_FELDER = ("done_reason", "prompt_tokens", "antwort_tokens", "gesamt_sekunden",
-                "thinking_zeichen", "aus_thinking")
+                "thinking_zeichen", "aus_thinking", "think_erzwungen")
 
 
 def _meta_kurz(meta: dict) -> dict:
@@ -760,6 +778,8 @@ def _meta_text(m: dict) -> str:
         teile.append(f"{m['gesamt_sekunden']} s")
     if m.get("thinking_zeichen"):
         teile.append(f"{m['thinking_zeichen']} Zeichen im Feld thinking")
+    if m.get("think_erzwungen"):
+        teile.append("nach erneutem Aufruf mit think=false")
     return ", ".join(teile)
 
 

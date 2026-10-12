@@ -25,13 +25,14 @@ def test_ak2_zweiter_versuch_ist_veraendert(provider):
 
     def p(system, user, json_mode=False):
         aufrufe.append((user, json_mode))
-        if json_mode:
+        if llm.LEER_HINWEIS not in user:
             return "", {"done_reason": "length", "antwort_tokens": 1024}
-        return 'Hier: {"antwort": "Jetzt klappt es."}', {}
+        return '{"antwort": "Jetzt klappt es."}', {}
     provider(p)
     data = llm.chat_json("sys", "AUFGABE: FRAGE_BEANTWORTEN\nx", fallback={"antwort": "fb"})
     assert data["antwort"] == "Jetzt klappt es."
-    assert aufrufe[0][1] is True and aufrufe[1][1] is False         # ohne format=json
+    # format=json bleibt: ohne JSON-Modus schrieb qwen3:30b in der Diagnose bis zum Limit
+    assert aufrufe[0][1] is True and aufrufe[1][1] is True
     assert aufrufe[0][0] != aufrufe[1][0] and llm.LEER_HINWEIS in aufrufe[1][0]
     assert "leere Antwort" in data["_fehler_vorher"][0]
 
@@ -95,3 +96,46 @@ def test_ollama_meta_enthaelt_done_reason():
     m = llm._ollama_meta({"done_reason": "length", "eval_count": 1024, "total_duration": 9_500_000_000,
                           "message": {"thinking": "abc"}})
     assert m["done_reason"] == "length" and m["gesamt_sekunden"] == 9.5 and m["thinking_zeichen"] == 3
+
+
+class _Antwort:
+    def __init__(self, daten, status=200):
+        self.daten, self.status_code, self.text = daten, status, ""
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.daten
+
+
+def test_denkmodus_ohne_think_feld_wird_mit_think_false_wiederholt(monkeypatch):
+    """Diagnose 12.10.2026, Variante D: ohne Feld think denkt qwen3:30b bis zum Limit."""
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_THINK", "")                      # Feld think fehlt
+    gesendet = []
+
+    def post(url, json=None, timeout=None):
+        gesendet.append(dict(json))
+        if json.get("think") is False:
+            return _Antwort({"message": {"content": '{"antwort": "direkt"}'}, "done_reason": "stop"})
+        return _Antwort({"message": {"content": "", "thinking": "Okay, let me think " * 200},
+                         "done_reason": "length", "eval_count": 1024})
+    monkeypatch.setattr(llm.httpx, "post", post)
+    data = llm.chat_json("sys", "AUFGABE: FRAGE_BEANTWORTEN\n", fallback={})
+    assert data["antwort"] == "direkt" and data["_versuche"] == 1
+    assert "think" not in gesendet[0] and gesendet[1]["think"] is False
+
+
+def test_think_false_ohne_inhalt_wird_nicht_endlos_wiederholt(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_THINK", "false")
+    gesendet = []
+
+    def post(url, json=None, timeout=None):
+        gesendet.append(json)
+        return _Antwort({"message": {"content": "", "thinking": "hmm"}, "done_reason": "length"})
+    monkeypatch.setattr(llm.httpx, "post", post)
+    data = llm.chat_json("sys", "AUFGABE: FRAGE_BEANTWORTEN\n", fallback={})
+    assert data["_fallback"] and data["_fehlerart"] == "leere_antwort"
+    assert len(gesendet) == 2                                    # zwei Versuche, keine Zusatzaufrufe
