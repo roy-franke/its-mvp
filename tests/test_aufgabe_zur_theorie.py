@@ -65,3 +65,17 @@ def test_begriffspruefung_nur_bei_klaren_faellen():
     # Beschreibungen, Begriffe aus der Theorie oder Wörter ausserhalb der Lektion: kein Verstoss
     for b in (["die Sorgfalt in der Beaufsichtigung beweisen"], ["Familienhaupt"], ["Velohelm"]):
         assert didaktik.begriff_nicht_erklaert(_aufgabe("x", schluesselbegriffe=b), texte, LESSON) is None, b
+
+
+def test_fehlendes_konzept_wird_aus_titel_oder_frage_ergaenzt():
+    """Evaluation 12.10.2026: Aufgabe «Quantenmessung im Labor» ohne Feld konzept."""
+    messung = {"typ": "theorie", "titel": "Quantenmessung", "konzept": "Quantenmessung", "inhalt": "x"}
+    a = _aufgabe(None, titel="Quantenmessung im Labor")
+    didaktik.konzept_ergaenzen(a, messung)
+    assert a["konzept"] == "Quantenmessung" and didaktik.aufgabe_passt_zur_theorie(a, messung) is None
+    b = _aufgabe(None, titel="Ein Baum stürzt")                   # nennt das Konzept nicht
+    didaktik.konzept_ergaenzen(b, messung)
+    assert not b["konzept"] and didaktik.aufgabe_passt_zur_theorie(b, messung)
+    c = _aufgabe("Superposition")                                # vorhandenes Konzept bleibt
+    didaktik.konzept_ergaenzen(c, messung)
+    assert c["konzept"] == "Superposition"

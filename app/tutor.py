@@ -614,6 +614,8 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
     texte = erklaerte_texte(history)
 
     def pruefen(d: dict) -> str | None:
+        if direkt_nach_theorie:
+            didaktik.konzept_ergaenzen(d, theorie)
         return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie, lesson)
                 or didaktik.elemente_passen_zur_frage(d)
                 or (didaktik.aufgabe_passt_zur_theorie(d, theorie) if direkt_nach_theorie else None)

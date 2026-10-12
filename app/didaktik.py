@@ -654,6 +654,22 @@ def _stamm_passt(t: str, a: str) -> bool:
     return len(t) >= 5 and t in a
 
 
+def konzept_ergaenzen(task: dict, theorie: dict | None) -> None:
+    """D-09: Lässt das Modell das Feld konzept weg (Evaluation vom 12.10.2026,
+    1 von 20 Aufgaben), obwohl Titel oder Frage das Konzept der unmittelbar
+    vorangehenden Theorie nennen, wird dieses übernommen. Sonst bleibt das Feld
+    leer, und aufgabe_passt_zur_theorie verlangt eine Korrektur."""
+    if not theorie or (task.get("konzept") or "").strip():
+        return
+    tk = (theorie.get("konzept") or "").strip()
+    if not tk:
+        return
+    t_staemme = [x for x in staemme(konzept_normalisieren(tk)) if len(x) >= 5]
+    text = staemme(" ".join(str(task.get(f) or "") for f in ("titel", "frage")))
+    if t_staemme and all(any(_stamm_passt(t, w) for w in text) for t in t_staemme):
+        task["konzept"] = tk
+
+
 def aufgabe_passt_zur_theorie(task: dict, theorie: dict | None) -> str | None:
     """D-09: Das Konzept einer Aufgabe direkt nach einer Theorie ist das Konzept
     dieser Theorie. Ein anderes Thema oder das Oberthema ist ein Verstoss."""
