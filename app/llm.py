@@ -140,7 +140,9 @@ def reset_timings() -> None:
 # der Messübersicht sichtbar (geschätzt neben gemessen) und lässt sich mit
 # tests/eval/diagnose_ollama.py nachprüfen.
 
-ZEICHEN_PRO_TOKEN = float(os.getenv("ITS_ZEICHEN_PRO_TOKEN", "3.0"))
+# Kalibriert am 12.10.2026 mit qwen3:30b: Mit 3.0 lag die Schätzung 15 % über
+# prompt_eval_count. 3.4 bleibt knapp vorsichtig.
+ZEICHEN_PRO_TOKEN = float(os.getenv("ITS_ZEICHEN_PRO_TOKEN", "3.4"))
 TOKENS_PRO_NACHRICHT = 8          # Rollen-Markierungen der Chat-Vorlage
 KONTEXT_WARNGRENZE = 0.8          # Lektionseditor: Warnung ab 80 Prozent
 

@@ -137,7 +137,7 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_TOTAL_STEPS` | Anzahl Lernschritte pro Durchlauf (Standard 8) |
 | `ITS_DB_PATH` | Optionaler Pfad zur SQLite-DB |
 | `OLLAMA_NUM_CTX` | Kontextfenster für Ollama (Standard 16384). Seit T-08 prüft der Server vor jedem Aufruf, ob der Prompt hineinpasst, und warnt im Log; der Lektionseditor warnt ab 80 Prozent |
-| `ITS_ZEICHEN_PRO_TOKEN` | Faktor für die Schätzung der Promptlänge (Standard `3.0`, bewusst vorsichtig für deutschen Text) |
+| `ITS_ZEICHEN_PRO_TOKEN` | Faktor für die Schätzung der Promptlänge (Standard `3.4`, am 12.10.2026 mit qwen3:30b kalibriert, leicht vorsichtig) |
 | `OLLAMA_KEEP_ALIVE` | Wie lange das Modell geladen bleibt (Standard 30m) |
 | `OLLAMA_NUM_PREDICT` | Obergrenze für die Antwortlänge in Token (Standard 1024) |
 | `OLLAMA_THINK` | Denkmodus von Reasoning-Modellen (`false` = schnell, Standard) |

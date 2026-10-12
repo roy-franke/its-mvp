@@ -40,9 +40,13 @@ def ollama(monkeypatch):
 
 
 def test_schaetzung_ist_vorsichtig():
-    # 3 Zeichen pro Token: deutscher Text wird eher über- als unterschätzt
-    assert llm.schaetze_tokens("x" * 3000) == 1001
-    assert llm.prompt_tokens_schaetzen("a" * 300, "b" * 300) > 200
+    # 3.4 Zeichen pro Token, kalibriert mit qwen3:30b (12.10.2026): gemessen
+    # 1865 bis 2388 Tokens, mit 3.4 geschätzt rund 1 % darüber
+    assert llm.schaetze_tokens("x" * 3400) == 1001
+    assert llm.prompt_tokens_schaetzen("a" * 340, "b" * 340) > 200
+    # Paare (geschätzt mit 3.0, gemessen) aus tests/eval/diagnose_ollama.py
+    for alt, gemessen in [(2169, 1865), (2254, 1945), (2737, 2378), (2742, 2388)]:
+        assert int(alt * 3.0 / llm.ZEICHEN_PRO_TOKEN) >= gemessen
 
 
 def test_ak1_warnung_mit_laenge_maximum_und_differenz(ollama, caplog):
