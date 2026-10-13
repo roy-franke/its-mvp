@@ -196,8 +196,9 @@ STRENGE_TEXT = {
 WISSEN_TEXT = {
     "allgemeinwissen": "WISSENSQUELLEN: Grundlage ist das Lektionsmaterial. Reicht es für eine "
                        "Erklärung oder eine Verständnisfrage nicht aus, darfst du mit gesichertem "
-                       "Allgemeinwissen erklären; setze dann ausserhalb_material auf true. Die "
-                       "Bewertung von Antworten bleibt immer an das Lektionsmaterial gebunden.",
+                       "Allgemeinwissen erklären; setze dann ausserhalb_material auf true. Bewertet wird "
+                       "nach dem Lektionsmaterial; eine Antwort, die darüber hinausgeht, prüfst du mit "
+                       "gesichertem Allgemeinwissen (D-15).",
     "material": "WISSENSQUELLEN: Erkläre nur mit dem Lektionsmaterial. Reicht es nicht, sag das "
                 "neutral und empfiehl, die Lehrperson zu fragen.",
 }
@@ -878,6 +879,10 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                     f"{task['erwartete_antwort']}\n")
     if task.get("schluesselbegriffe"):
         kontext += "Schlüsselbegriffe der Lösung: " + ", ".join(task["schluesselbegriffe"]) + "\n"
+    if task.get("alternative_loesungen"):
+        # D-13/D-15: weitere vertretbare Lösungen aus der Generierung oder der Gegenprüfung
+        kontext += ("Weitere vertretbare Lösungen (ebenfalls nie verraten): "
+                    + " | ".join(task["alternative_loesungen"]) + "\n")
     festgelegt = didaktik.elemente_normalisieren(task.get("erwartete_elemente"))
     dimensionen = [e["dimension"] for e in festgelegt]
     letzte = vorher[-1] if vorher else None
@@ -937,15 +942,23 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "eine Behörde oder ein Verein sein, ein «Wert» auch ein Bruch oder ein Ausdruck.\n"
         "2. Prüfe für jedes Element den Status:\n"
         "   korrekt = sachlich richtig vorhanden (gemäss der Bewertungsstrenge);\n"
+        "   vertretbar = weicht von der erwarteten Lösung ab, ist aber richtig unter einer Annahme, die der "
+        "Sachverhalt offenlässt, oder entspricht einer der weiteren vertretbaren Lösungen; nenne die Annahme "
+        "in annahme;\n"
         "   ungenau = sachlich zutreffend, aber zu allgemein, nur umschrieben oder ohne den "
         "verlangten Fachbegriff;\n"
-        "   falsch = widerspricht der erwarteten Lösung (anderes Ergebnis, anderes Ja/Nein, "
-        "vertauschte Bedeutung zweier Begriffe);\n"
+        + WISSEN_BEWERTUNG["allgemeinwissen" if einstellungen.allgemeinwissen_erlaubt(lesson) else "material"] +
+        "   falsch = widerspricht dem Sachverhalt oder dem Lektionsmaterial (zum Beispiel ein Fahrzeug, das im "
+        "Fall nicht vorkommt, oder ein Rechenergebnis, das nicht stimmt). Eine Abweichung von der erwarteten "
+        "Lösung allein ist NICHT falsch;\n"
         "   fehlt = kommt nicht vor.\n"
+        "   Bevor du ein Element als falsch einstufst, prüfe zwei Fragen: Ist die Antwort richtig unter einer "
+        "Annahme, die der Sachverhalt offenlässt? Passt sie zu einer weiteren vertretbaren Lösung? Wenn ja, "
+        "ist sie vertretbar.\n"
         "   Begründe jeden Status in einem Satz aus dem Fall (begruendung) und gib in antwort kurz wieder, "
         "was der Lernende im neuesten Versuch zu diesem Element schreibt (leer, wenn nichts).\n"
-        "Kommt die Antwort zu einem anderen Ergebnis als die erwartete Lösung, setze "
-        "sachlicher_widerspruch auf true, auch wenn einzelne Wörter stimmen.\n"
+        "Setze sachlicher_widerspruch nur auf true, wenn die Antwort dem Sachverhalt oder dem Material "
+        "widerspricht, nicht schon, wenn sie zu einem anderen, aber vertretbaren Ergebnis kommt.\n"
         "Urteil: 'korrekt' = alle Elemente korrekt. 'teilweise' = mindestens ein Element "
         "korrekt oder ungenau und keines falsch. 'falsch' = nichts Zutreffendes oder ein "
         "sachlicher Widerspruch.\n\n"
@@ -958,11 +971,18 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "Ergänzung geben, OHNE die Antwort zu verraten.\n"
         "- falsch: knapp erklären, was nicht stimmt, ohne die richtige Antwort zu nennen; im "
         "Hinweis einen gezielten Denkanstoss geben. Keine positiven Floskeln.\n"
+        "- vertretbar: die Antwort anerkennen, die Annahme nennen, unter der sie gilt, und die in der "
+        "Aufgabe erwartete Lösung als weitere, naheliegendere Sicht zeigen, ohne die Antwort abzuwerten "
+        "(sinngemäss: «Das ist vertretbar, wenn … Der Fall sagt dazu nichts. Naheliegender ist hier …»).\n"
+        "- nicht beurteilbar: offen sagen, dass die Antwort über das Lektionsmaterial hinausgeht und du sie "
+        "deshalb nicht abschliessend beurteilen kannst.\n"
         "Formuliere den Hinweis als Anstoss, nicht als neue Frage, die statt der Aufgabe "
         "beantwortet werden soll. Verrate die Lösung nie, auch nicht implizit, und sprich nie von "
         "der «Musterlösung»: Der Lernende kennt sie nicht.\n\n"
-        'Format: {"elemente": [{"element": "zentrales Element", "status": "korrekt|ungenau|falsch|fehlt", '
-        '"begruendung": "ein Satz", "antwort": "was der Lernende dazu schreibt"}], '
+        'Format: {"elemente": [{"element": "zentrales Element", '
+        '"status": "korrekt|vertretbar|ungenau|nicht_beurteilbar|falsch|fehlt", '
+        '"begruendung": "ein Satz", "antwort": "was der Lernende dazu schreibt", '
+        '"annahme": "nur bei vertretbar", "ausserhalb_material": false}], '
         '"sachlicher_widerspruch": false, '
         '"bewertung": "korrekt|teilweise|falsch", '
         '"feedback": "2-4 Sätze direkt an den Lernenden", '
@@ -998,6 +1018,18 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         data["bewertung"] = urteil
     data["korrekt"] = data["bewertung"] == "korrekt"
     return data
+
+
+# D-15, Entscheid E2: Umgang mit Antworten, die über das Material hinausgehen.
+# Die Regel hängt von der Lektionseinstellung «Wissensstufen» ab und steht im
+# Benutzerteil der Bewertung (der Systemprompt bleibt für alle Schritte gleich).
+WISSEN_BEWERTUNG = {
+    "allgemeinwissen": "   Geht ein Element über das Lektionsmaterial hinaus, prüfe es mit gesichertem "
+                       "Allgemeinwissen: Trifft es zu, ist es vertretbar, und du setzt ausserhalb_material auf "
+                       "true. Nie falsch, nur weil es im Material nicht vorkommt;\n",
+    "material": "   nicht_beurteilbar = geht über das Lektionsmaterial hinaus, und du kannst es mit dem Material "
+                "nicht abschliessend beurteilen. Nie falsch, nur weil es im Material nicht vorkommt;\n",
+}
 
 
 # D-15/D-18: zusätzliche Sicht bei einer Neubewertung, die nicht als Versuch zählt
@@ -1184,7 +1216,11 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
         auftrag = (f"Der Lernende stellt folgende Verständnisfrage: {question}\n"
                    "Beantworte sie kurz (2-5 Sätze) und verständlich. Wenn sie direkt nach der "
                    "Lösung der aktuellen Aufgabe verlangt, gib die Lösung NICHT preis, sondern "
-                   "einen Denkanstoss. Ist eine Annahme in der Frage falsch, sag das direkt.\n")
+                   "einen Denkanstoss. Ist eine Annahme in der Frage falsch, sag das direkt. "
+                   # D-15: Alternativen ernsthaft prüfen, nichts zum Fall erfinden
+                   "Schlägt der Lernende eine andere Lösung vor, prüfe sie ernsthaft am Sachverhalt: Unter "
+                   "welcher Annahme wäre sie richtig, und sagt der Fall dazu etwas? Erfinde keine Angaben, "
+                   "die nicht im Fall stehen.\n")
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: FRAGE_BEANTWORTEN\n"
@@ -1391,6 +1427,10 @@ def verlauf_fuer_lernende(events: list[dict], fuer_fortsetzen: bool = False) -> 
             eintraege.append({"art": "witz", "zeit": zeit, "text": p.get("witz", "")})
         elif typ == "kopie_erkannt":
             eintraege.append({"art": "kopie", "zeit": zeit, "text": p.get("meldung", "")})
+        elif typ == "widerspruch_lernende":
+            eintraege.append({"art": "einwand", "zeit": zeit, "text": p.get("begruendung", "")})
+        elif typ == "urteil_korrigiert":
+            eintraege.append({"art": "notiz", "zeit": zeit, "text": p.get("meldung", "")})
         elif typ == "loesung_gezeigt":
             eintraege.append({"art": "loesung", "zeit": zeit, "text": p.get("loesung", ""),
                               "elemente": list(p.get("elemente") or [])})
@@ -1586,6 +1626,31 @@ def offene_wahl(profile: dict) -> list[dict]:
             wahl = [w for w in wahl if w["id"] != "witz"]
         return wahl
     return []
+
+
+WIDERSPRUCH_LABEL = "Ich sehe das anders"
+NEU_BEWERTEN_LABEL = "Antwort neu bewerten lassen"
+
+
+def zusatz_wahl(profile: dict) -> list[dict]:
+    """Zusätzliche Möglichkeiten neben dem eigentlichen Ablauf (D-15, D-18).
+
+    Sie blockieren nichts: Die Aufgabe bleibt beantwortbar bzw. die Wahl nach
+    «teilweise» offen. «Ich sehe das anders» gibt es einmal pro Aufgabe nach
+    «teilweise» oder «falsch», solange die Aufgabe offen ist (Entscheid E5).
+    «Antwort neu bewerten lassen» erscheint, wenn der Tutor im Chat einen
+    Irrtum in seiner Bewertung erkannt hat (Entscheid E4).
+    """
+    task = profile.get("current_task") or {}
+    bisher = profile.get("antworten_aktuell") or []
+    if task.get("typ") != "aufgabe" or profile.get("wartet_auf") not in ("antwort", "wahl_teilweise") or not bisher:
+        return []
+    out = []
+    if profile.get("neubewertung_offen"):
+        out.append({"id": "neu_bewerten", "label": NEU_BEWERTEN_LABEL, "haupt": True, "zusatz": True})
+    if not profile.get("widerspruch_genutzt") and bisher[-1].get("bewertung") in ("teilweise", "falsch"):
+        out.append({"id": "widerspruch", "label": WIDERSPRUCH_LABEL, "zusatz": True})
+    return out
 
 
 def material_abschnitte(material: str, min_len: int = 250, max_len: int = 1200) -> list[str]:

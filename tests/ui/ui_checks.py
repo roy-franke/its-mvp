@@ -1256,6 +1256,63 @@ def t26_zeitstempel(pw):
         check("T-26 schmaler Bildschirm: Leiste scrollt nicht horizontal", breite[0] <= breite[1], str(breite))
 
 
+@scenario("d15")
+def d15_widerspruch(pw):
+    """D-15 AK5: «Ich sehe das anders» einmal pro Aufgabe, zählt nicht als Versuch, Legende passt."""
+    with server() as base:
+        browser = launch(pw)
+        page = browser.new_context().new_page()
+        start_lernsequenz(page, base, name="Einwand")
+        zur_aufgabe(page)
+        beantworte(page, "Anna haftet, weil Schaden da ist.", 6)              # teilweise
+        knopf = page.locator(".wahlbox button[data-wahl='widerspruch']")
+        expect(knopf).to_be_visible(timeout=10000)
+        check("D-15 «Ich sehe das anders» nach «teilweise» sichtbar", knopf.inner_text() == "Ich sehe das anders")
+        knopf.click()
+        check("D-15 Einwand: Begründung senden und Zurück, keine Wahl mehr offen",
+              page.locator("#btn-einwand").is_visible() and page.locator("#btn-einwand-zurueck").is_visible()
+              and page.locator(".wahlbox").count() == 0)
+        r = legende(page)
+        check("D-15 Legende erklärt den Einwand", "Begründung senden" in r["genannt"] and not r["fehlt"], r["text"])
+        page.click("#btn-einwand-zurueck")
+        expect(page.locator(".wahlbox button[data-wahl='widerspruch']")).to_be_visible(timeout=10000)
+        check("D-15 Zurück stellt die Wahl wieder her", page.locator(".wahlbox button").count() == 4)
+        page.click(".wahlbox button[data-wahl='widerspruch']")
+        page.fill("#chat-input", "Ich finde, das reicht für den Fall.")
+        page.click("#btn-einwand")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        legende_pruefen(page, "nach dem Einwand")
+        check("D-15 Tutor bleibt mit Begründung bei seinem Urteil",
+              "Ich bleibe bei meiner Bewertung" in page.locator(".msg.tutor.mid").last.inner_text())
+        check("D-15 zählt nicht als Versuch (Hinweis)", "nicht als zusätzlicher Versuch" in page.inner_text("#chat"))
+        check("D-15 nur einmal pro Aufgabe",
+              page.locator(".wahlbox button[data-wahl='widerspruch']").count() == 0
+              and page.locator(".wahlbox button").count() == 3)
+        check("D-15 Zählung unverändert: 1 teilweise", "1 teilweise" in page.inner_text("#prog-badges"))
+        page.click(".wahlbox button[data-wahl='weiter']")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        zur_aufgabe(page)
+        beantworte(page, "weiss nicht", 3)                                       # falsch, zweiter Versuch offen
+        expect(page.locator(".wahlbox.zusatz button[data-wahl='widerspruch']")).to_be_visible(timeout=10000)
+        check("D-15 nach «falsch» bleibt die Antwort möglich, Widerspruch als Zusatz",
+              page.locator("#btn-answer").is_enabled())
+        page.click(".wahlbox button[data-wahl='widerspruch']")
+        page.fill("#chat-input", "Das stimmt doch, der Fall lässt offen, ob sie vorsichtig war.")
+        page.click("#btn-einwand")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("D-15 berechtigter Einwand ändert das Urteil",
+              "Richtig" in page.locator(".msg.tutor.good").last.inner_text()
+              and "Die Bewertung ist neu" in page.inner_text("#chat"))
+        check("D-15 kein Fehler gezählt", "0 falsch" in page.inner_text("#prog-badges"))
+        page.goto(base + "/teacher")
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-events")).to_contain_text("Widerspruch der lernenden Person", timeout=10000)
+        text = page.inner_text("#detail-events")
+        check("D-15 Lernverlauf zeigt Widerspruch und vertretbare Alternative",
+              "Urteil geändert" in text and "Vertretbare Alternative anerkannt" in text)
+        browser.close()
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

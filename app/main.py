@@ -700,6 +700,8 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
         profile.setdefault("fallback_abschnitte", []).append(task["material_abschnitt"])
     profile["current_task"] = public_task
     profile["ergaenzungen_aktuell"] = 0
+    profile["widerspruch_genutzt"] = False          # D-15: einmal pro Aufgabe
+    profile.pop("neubewertung_offen", None)         # D-18
     profile["last_type"] = step_type
     profile["wartet_auf"] = "weiter" if step_type == "theorie" else "antwort"
     profile["letztes_feedback"] = None
@@ -749,6 +751,7 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         store.update_session(sid, profile=profile)
         return {"bewertung": "kopie", "korrekt": False, "feedback": tutor.KOPIE_TEXT, "hinweis": "",
                 "adaption": "kopie", "adaption_begruendung": "", "finished": False, "wahl": [],
+                "zusatz": tutor.zusatz_wahl(profile),
                 "kopie": {"anteil": kopie["anteil"], "quelle": kopie["quelle"]}, "progress": _progress(profile)}
     vorher = profile.get("antworten_aktuell") or []
     uebernommen = kopie["passagen"] if kopie["anteil"] >= didaktik.TEILKOPIE_SCHWELLE else None
@@ -763,7 +766,20 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         profile.setdefault("confidence", []).append(confidence)
         profile.setdefault("kalibrierung", []).append({"confidence": confidence,
                                                        "bewertung": result["bewertung"]})
-    selbsteinschaetzung = tutor.selbsteinschaetzung_rueckmeldung(confidence, result["bewertung"])
+    return _bewertung_anwenden(sid, lesson, profile, task, text, confidence, result, vorher)
+
+
+def _bewertung_anwenden(sid: str, lesson: dict, profile: dict, task: dict, text: str,
+                        confidence: int | None, result: dict, vorher: list[dict],
+                        neubewertung: str | None = None, extra: dict | None = None) -> dict:
+    """Adaption, Protokoll und Antwort nach einer Bewertung.
+
+    Gemeinsam für die erste Bewertung und die Neubewertungen, die nicht als
+    Versuch zählen (D-15 Widerspruch, D-17 Urteilskorrektur, D-18
+    Selbstkorrektur): `neubewertung` nennt dann die Art.
+    """
+    selbsteinschaetzung = (tutor.selbsteinschaetzung_rueckmeldung(confidence, result["bewertung"])
+                           if not neubewertung else None)
     kontext = {
         "einsatzart": _einsatzart(lesson),
         "konzept_erklaert": tutor.konzept_erklaert(task.get("konzept"), profile.get("erklaert") or []),
@@ -792,7 +808,9 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         "versuch": len(vorher) + 1,
         "confidence": confidence,
         "selbsteinschaetzung": selbsteinschaetzung,
+        **({"neubewertung": neubewertung} if neubewertung else {}),
     })
+    _alternativen_protokollieren(sid, result, text)
     offen = action in ("retry", "wahl_teilweise")
     if offen:
         # D-14: Der Elementstatus geht an die nächste Bewertung (neuester Stand zählt)
@@ -801,6 +819,8 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
                                                   "elemente": result.get("elemente", [])}]
     else:
         profile["antworten_aktuell"] = []
+    if neubewertung:
+        profile.pop("neubewertung_offen", None)
     finished = profile["step"] >= tutor.total_steps() and not offen
     profile["wartet_auf"] = {"retry": "antwort", "wahl_teilweise": "wahl_teilweise"}.get(action, "weiter")
     profile["letztes_feedback"] = {
@@ -815,14 +835,98 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         "korrekt": result["korrekt"],
         "feedback": result.get("feedback", ""),
         "hinweis": result.get("hinweis", ""),
-        "adaption": action,           # next | retry | simplify | explain
+        "adaption": action,           # next | retry | simplify | explain | wahl_teilweise
         "adaption_begruendung": reason,
         "niveau_frage": niveau_frage,
         "selbsteinschaetzung": selbsteinschaetzung,
         "wahl": tutor.offene_wahl(profile),        # D-07: nach «teilweise» entscheidet die lernende Person
+        "zusatz": tutor.zusatz_wahl(profile),      # D-15/D-18: Widerspruch, Neubewertung
         "finished": finished,
         "progress": _progress(profile),
+        **(extra or {}),
     }
+
+
+def _alternativen_protokollieren(sid: str, result: dict, text: str) -> None:
+    """D-15: Vertretbare Alternativen und nicht beurteilbare Antworten für die Lehrperson sichtbar machen."""
+    for e in result.get("elemente") or []:
+        if e.get("status") in ("vertretbar", "nicht_beurteilbar"):
+            store.log_event(sid, "alternative_anerkannt", {
+                "element": e.get("element", ""), "status": e["status"], "annahme": e.get("annahme", ""),
+                "antwort": e.get("antwort") or text, "ausserhalb_material": bool(e.get("ausserhalb_material")),
+                "begruendung": e.get("begruendung", "")})
+
+
+def _urteil_zuruecknehmen(profile: dict, urteil: str) -> None:
+    """Macht die Zählung einer Bewertung rückgängig, bevor eine Neubewertung sie ersetzt.
+
+    Nur für offene Aufgaben (nach «teilweise» oder dem ersten «falsch»): Die
+    Neubewertung zählt nicht als zusätzlicher Versuch (D-15, D-17, D-18).
+    """
+    feld = {"teilweise": "partial", "falsch": "wrong"}.get(urteil)
+    if feld:
+        profile[feld] = max(0, profile.get(feld, 0) - 1)
+    profile["attempts_current"] = max(0, profile.get("attempts_current", 0) - 1)
+    versuche = profile.get("versuche_aktuell") or []
+    if versuche:
+        versuche.pop()
+
+
+def _neu_bewerten(sid: str, lesson: dict, profile: dict, task: dict, art: str, text: str) -> dict:
+    """Bewertet die letzte Antwort mit einer zusätzlichen Sicht neu, ohne neuen Versuch.
+
+    art: widerspruch (D-15, Begründung der lernenden Person) oder
+    tutor_korrektur (D-18, Antwort des Tutors im Chat). Bleibt das Urteil,
+    ändert sich am Stand nichts; ändert es sich, ersetzt es das bisherige.
+    """
+    bisher = profile.get("antworten_aktuell") or []
+    if not bisher:
+        raise HTTPException(409, "Es gibt keine bewertete Antwort zu dieser Aufgabe.")
+    letzte, vorher = bisher[-1], bisher[:-1]
+    result = tutor.evaluate_answer(lesson, profile, task, letzte.get("antwort", ""), vorher,
+                                   zweite_sicht={"art": art, "text": text})
+    _log_llm_meta(sid, "ANTWORT_BEWERTEN", result)
+    alt = letzte.get("bewertung")
+    neu = result.get("bewertung")
+    ereignis = "widerspruch_lernende" if art == "widerspruch" else "tutor_neubewertung"
+    protokoll = {"begruendung" if art == "widerspruch" else "chat_antwort": text,
+                 "urteil_vorher": alt, "urteil_nachher": neu if neu != "unbewertet" else alt,
+                 "feedback": result.get("feedback", "")}
+    vorheriges = profile.get("letztes_feedback") or {}
+    if neu == "unbewertet" or neu == alt:
+        if neu == "unbewertet":
+            result = {"feedback": "Die erneute Prüfung hat gerade nicht geklappt. Deine bisherige Bewertung bleibt "
+                                  "bestehen.", "hinweis": letzte.get("hinweis", "")}
+        else:
+            # Mehr Begründung hilft auch beim nächsten Versuch
+            bisher[-1] = dict(letzte, elemente=result.get("elemente") or letzte.get("elemente"),
+                              hinweis=result.get("hinweis") or letzte.get("hinweis", ""))
+            store.log_event(sid, "answer_evaluated", {
+                "bewertung": alt, "korrekt": alt == "korrekt", "feedback": result.get("feedback", ""),
+                "hinweis": result.get("hinweis", ""), "adaption": vorheriges.get("adaption", ""),
+                "adaption_begruendung": "", "level": profile["level"], "elemente": result.get("elemente", []),
+                "versuch": len(vorher) + 1, "neubewertung": art, "urteil_unveraendert": True})
+        if art == "widerspruch":
+            profile["widerspruch_genutzt"] = True
+        else:
+            profile.pop("neubewertung_offen", None)
+        store.log_event(sid, ereignis, dict(protokoll, geaendert=False))
+        store.update_session(sid, profile=profile)
+        return {"bewertung": alt, "korrekt": False, "feedback": result.get("feedback", ""),
+                "hinweis": result.get("hinweis", ""), "adaption": vorheriges.get("adaption", "retry"),
+                "adaption_begruendung": "", "wahl": tutor.offene_wahl(profile),
+                "zusatz": tutor.zusatz_wahl(profile), "finished": False, "progress": _progress(profile),
+                "neubewertung": {"art": art, "geaendert": False}}
+    _urteil_zuruecknehmen(profile, alt)
+    profile["antworten_aktuell"] = vorher
+    kal = profile.get("kalibrierung") or []
+    if kal and len(vorher) == 0:
+        kal[-1]["bewertung"] = neu          # N-04: Sicherheit bezieht sich auf den ersten Versuch
+    if art == "widerspruch":
+        profile["widerspruch_genutzt"] = True
+    store.log_event(sid, ereignis, dict(protokoll, geaendert=True))
+    return _bewertung_anwenden(sid, lesson, profile, task, letzte.get("antwort", ""), None, result, vorher,
+                               neubewertung=art, extra={"neubewertung": {"art": art, "geaendert": True}})
 
 
 def _bewertung_gescheitert(sid: str, profile: dict, task: dict, text: str, confidence: int | None,
@@ -874,6 +978,7 @@ def _schritt_ohne_wertung(profile: dict, bewertung: str) -> bool:
 
 class WahlRequest(BaseModel):
     wahl: str
+    text: str | None = None          # D-15: Begründung bei «Ich sehe das anders»
 
 
 @app.post("/api/session/{sid}/wahl")
@@ -888,9 +993,19 @@ def choose(sid: str, request: Request, req: WahlRequest):
     profile = s["profile"]
     task = profile.get("current_task") or {}
     wartet = profile.get("wartet_auf")
-    erlaubt = [w["id"] for w in tutor.offene_wahl(profile)]
+    erlaubt = [w["id"] for w in tutor.offene_wahl(profile) + tutor.zusatz_wahl(profile)]
     if req.wahl not in erlaubt:
         raise HTTPException(409, "Diese Auswahl ist gerade nicht möglich.")
+    if req.wahl == "widerspruch":
+        # D-15, Entscheid E5: einmal pro Aufgabe, zählt nicht als Versuch
+        begruendung = (req.text or "").strip()
+        if not begruendung:
+            raise HTTPException(400, "Schreib kurz, warum du das anders siehst.")
+        return _neu_bewerten(sid, lesson, profile, task, "widerspruch", begruendung[:1000])
+    if req.wahl == "neu_bewerten":
+        # D-18, Entscheid E4: Der Tutor hat sich im Chat korrigiert
+        offen = profile.get("neubewertung_offen") or {}
+        return _neu_bewerten(sid, lesson, profile, task, "tutor_korrektur", offen.get("antwort", ""))
     if wartet in ("bewertung_wiederholen", "wahl_unbewertet"):
         offen = profile.get("unbewertet") or {}
         store.log_event(sid, "wahl_nach_bewertungsfehler", {"wahl": req.wahl, "fehler_anzahl": offen.get("anzahl")})
@@ -1115,6 +1230,7 @@ def _state(s: dict) -> dict:
         "wartet_auf": wartet,
         "letztes_feedback": p.get("letztes_feedback"),
         "wahl": tutor.offene_wahl(p),
+        "zusatz": tutor.zusatz_wahl(p) if wartet not in ("einstufung", "abschluss") else [],
         "questions": p.get("assessment_questions", []) if wartet == "einstufung" else [],
         "total_steps": tutor.total_steps(),
     }

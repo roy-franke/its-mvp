@@ -501,6 +501,40 @@ function renderEvent(ev, mitDatum) {
     else if (ev.type === "kopie_erkannt") { cls += " regel_verstoss"; body = `✍️ <strong>Kopie erkannt</strong> (D-11): ${Math.round(p.anteil * 100)} % der Antwort wörtlich aus «${esc(p.quelle || "")}», nicht bewertet und nicht als Versuch gezählt`; }
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
+    else if (ev.type === "alternative_anerkannt") {
+      // D-15: vertretbare Alternative oder Antwort ausserhalb des Materials
+      cls += " wahl";
+      body = `${p.status === "nicht_beurteilbar" ? "❔ Nicht beurteilbar (ausserhalb des Materials)" : "☑️ Vertretbare Alternative anerkannt"}: `
+        + `<strong>${esc(p.element)}</strong> – «${esc(p.antwort)}»`
+        + (p.annahme ? `<br><span class="muted">Annahme: ${esc(p.annahme)}</span>` : "")
+        + (p.ausserhalb_material ? `<br><span class="muted">geprüft mit Allgemeinwissen, ausserhalb des Materials</span>` : "")
+        + `<br><span class="muted">Prüfe, ob die Aufgabe eindeutig genug ist.</span>`;
+    }
+    else if (ev.type === "widerspruch_lernende" || ev.type === "tutor_neubewertung") {
+      // D-15 (E5) und D-18 (E4): Neubewertung ohne zusätzlichen Versuch
+      cls += " regel_verstoss";
+      const wer = ev.type === "widerspruch_lernende" ? "🙋 Widerspruch der lernenden Person" : "🔁 Neubewertung nach Selbstkorrektur";
+      body = `${wer}: ${p.geaendert ? `Urteil geändert von <strong>${esc(p.urteil_vorher)}</strong> zu <strong>${esc(p.urteil_nachher)}</strong>` : `Urteil bleibt <strong>${esc(p.urteil_vorher)}</strong>`}`
+        + (p.begruendung ? `<br><em>«${esc(p.begruendung)}»</em>` : "")
+        + (p.chat_antwort ? `<br><span class="muted">Chat-Antwort: ${esc(p.chat_antwort)}</span>` : "");
+    }
+    else if (ev.type === "tutor_korrektur") {
+      cls += " regel_verstoss";
+      body = `🤔 Der Tutor korrigiert im Chat seine Bewertung (Urteil vorher: ${esc(p.urteil_vorher || "–")})`
+        + `<br><span class="muted">${esc(p.antwort)}</span>`
+        + (p.neubewertung_angeboten ? `<br><span class="muted">«Antwort neu bewerten lassen» angeboten</span>` : "")
+        + (p.erkannt ? `<br><span class="muted">${esc(p.erkannt)}</span>` : "");
+    }
+    else if (ev.type === "urteil_korrigiert") {
+      cls += " regel_verstoss";
+      body = `✔️ Urteil korrigiert (D-17): <strong>${esc(p.urteil_vorher)}</strong> → <strong>${esc(p.urteil_nachher)}</strong>`
+        + `<br><span class="muted">${esc(p.grund || "")}</span>`;
+    }
+    else if (ev.type === "abschwaechung_warnung") {
+      cls += " regel_verstoss";
+      body = `⚠️ Gleiche Antwort bis auf eine vorsichtige Formulierung, anderes Urteil (D-16): `
+        + `${esc(p.urteil_vorher)} → ${esc(p.urteil_nachher)}<br><span class="muted">${esc(p.woerter.join(", "))}</span>`;
+    }
     else if (ev.type === "musterloesung_geprueft") {
       // D-14/D-15: Status der Elemente
 const STATUS_SYMBOL = { korrekt: "✅", vertretbar: "☑️", ungenau: "🔸", nicht_beurteilbar: "❔", falsch: "❌", fehlt: "◻️" };

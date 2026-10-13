@@ -447,6 +447,32 @@ def _mock_text(system: str, user: str) -> str:
              or re.search(r"Antwort des Lernenden:\s*(.+)", user))
         ans = (m.group(1).strip() if m else "")
         zitat = ans[:60]
+        einwand = re.search(r"WIDERSPRUCH DES LERNENDEN[^«]*«(.+?)»", user)
+        if (einwand and re.search(r"stimmt doch|vertretbar|annahme", einwand.group(1), re.I)) \
+                or "SELBSTKORREKTUR" in user:
+            # D-15/D-18: Der Einwand bzw. die Selbstkorrektur trifft zu
+            return json.dumps({
+                "elemente": [{"element": "Voraussetzungen genannt", "status": "vertretbar",
+                              "begruendung": "Unter der genannten Annahme trifft das zu.", "antwort": zitat,
+                              "annahme": "der Fall lässt diesen Punkt offen"},
+                             {"element": "auf den Fall angewendet", "status": "korrekt",
+                              "begruendung": "Die Anwendung passt zum Fall.", "antwort": zitat}],
+                "sachlicher_widerspruch": False, "bewertung": "korrekt",
+                "feedback": "Ich habe deine Antwort nochmals geprüft und ändere meine Bewertung: Das ist vertretbar, "
+                            "wenn man annimmt, dass der Fall diesen Punkt offenlässt. (Mock-Bewertung)",
+                "hinweis": ""}, ensure_ascii=False)
+        if einwand:
+            return json.dumps({
+                "elemente": [{"element": "Schaden erkannt", "status": "korrekt",
+                              "begruendung": "Der Schaden ist erkannt.", "antwort": zitat},
+                             {"element": "übrige Voraussetzungen", "status": "fehlt",
+                              "begruendung": "Auch mit deiner Begründung fehlen die übrigen Voraussetzungen.",
+                              "antwort": ""}],
+                "sachlicher_widerspruch": False, "bewertung": "teilweise",
+                "feedback": "Ich bleibe bei meiner Bewertung: Der Fall verlangt alle vier Voraussetzungen, und "
+                            "drei davon fehlen noch. (Mock-Bewertung)",
+                "hinweis": "Prüfe Widerrechtlichkeit, Kausalzusammenhang und Verschulden am Fall."},
+                ensure_ascii=False)
         if len(ans) >= 40:
             return json.dumps({
                 "elemente": [{"element": "Voraussetzungen genannt", "status": "korrekt",

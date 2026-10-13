@@ -141,9 +141,19 @@ REGELN: dict[str, dict] = {
     },
     "D05_MATERIAL": {
         "paket": "D-05", "bereich": "bewertung",
-        "titel": "Bewertung bleibt materialgebunden",
-        "regel": "Bewertet wird nur anhand des Lektionsmaterials, auch wenn du in Erklärungen "
-                 "Allgemeinwissen verwenden darfst.",
+        "titel": "Bewertung bleibt am Material und am Sachverhalt",
+        # D-15 (Auftrag 3): Christians Grundsatz. Früher «nur anhand des Lektionsmaterials».
+        "regel": "Bewertet wird anhand des Lektionsmaterials und des Sachverhalts. Eine Antwort ist nie falsch, "
+                 "nur weil sie von der erwarteten Lösung abweicht oder im Material nicht vorkommt; falsch ist, "
+                 "was dem Sachverhalt oder dem Material widerspricht.",
+        "pruefbar": False,
+    },
+    "D15_NICHTWISSEN": {
+        "paket": "D-15", "bereich": "allgemein",
+        "titel": "Nichtwissen offen benennen",
+        "regel": "Benenne offen, was du nicht sicher weisst oder was der Fall offenlässt. Erfinde keine Angaben "
+                 "zum Sachverhalt einer Aufgabe. Schlägt die lernende Person eine andere Lösung vor, prüfe sie "
+                 "ernsthaft am Sachverhalt, statt sie mit einer Begründung abzulehnen, die nicht im Fall steht.",
         "pruefbar": False,
     },
     # ------------------------------------------------------------ Auftrag 2 (Oktober 2026)
@@ -279,7 +289,10 @@ def ueberschneidung(a: str, b: str, ausnahmen: set[str] | None = None) -> tuple[
 
 # ---------------------------------------------------------------- D-05
 
-ELEMENT_STATUS = ("korrekt", "ungenau", "falsch", "fehlt")
+# D-15 (Entscheide E1, E2): «vertretbar» zählt wie «korrekt», «nicht_beurteilbar» wie «ungenau»
+ELEMENT_STATUS = ("korrekt", "vertretbar", "ungenau", "nicht_beurteilbar", "falsch", "fehlt")
+WIE_KORREKT = ("korrekt", "vertretbar")
+WIE_UNGENAU = ("ungenau", "nicht_beurteilbar")
 
 
 def urteil_aus_elementen(elemente, widerspruch: bool = False) -> str | None:
@@ -296,11 +309,12 @@ def urteil_aus_elementen(elemente, widerspruch: bool = False) -> str | None:
         return None
     if widerspruch or "falsch" in status:
         return "falsch"
-    if all(s == "korrekt" for s in status):
+    if all(s in WIE_KORREKT for s in status):
         return "korrekt"
     # «ungenau»: sachlich zutreffend, aber zu allgemein oder unpräzis (etwa
     # «Kausalhaftung» statt «Tierhalterhaftung»). Das ist ein Teilerfolg, kein Fehler.
-    if "korrekt" in status or "ungenau" in status:
+    # «nicht_beurteilbar» (D-15): über das Material hinaus, offen gemeldet, zählt wie «ungenau».
+    if any(s in WIE_KORREKT + WIE_UNGENAU for s in status):
         return "teilweise"
     return "falsch"
 

@@ -149,5 +149,6 @@ def test_prompt_kennt_ungenau_und_widerspruch(monkeypatch):
         "feedback": "Stimmt.", "hinweis": ""}, prompts))
     tutor.evaluate_answer(LESSON, tutor.new_profile(), HUND, "Tierhalterhaftung")
     user = prompts[0][1]
-    assert "ungenau" in user and "anderen Ergebnis als die erwartete Lösung" in user
+    # D-15: «falsch» heisst Widerspruch zum Sachverhalt oder Material, nicht Abweichung von der Lösung
+    assert "ungenau" in user and "widerspricht dem Sachverhalt oder dem Lektionsmaterial" in user
     assert "nur was die Frage tatsächlich verlangt" in user

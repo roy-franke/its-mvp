@@ -274,6 +274,9 @@
           <button id="btn-theory" class="secondary action">📖 Theorie dazu</button>
           <button id="btn-deeper" class="secondary action hidden">📖 Genauer erklären</button>
           <button id="btn-continue" class="action hidden">Weiter</button>
+          <!-- D-15: Widerspruch gegen eine Bewertung mit kurzer Begründung -->
+          <button id="btn-einwand" class="action hidden" data-legende="einwand">Begründung senden</button>
+          <button id="btn-einwand-zurueck" class="secondary action hidden" data-legende="einwand_zurueck">Zurück</button>
         </div>
         <!-- T-25: Die Legende beschreibt genau die sichtbaren Buttons (aktualisiereLegende) -->
         <div class="hint" id="legende" aria-live="polite">«Antwort abschicken» beantwortet die Aufgabe und wird bewertet.
@@ -478,6 +481,7 @@ function addError(e) {
 
 function setAnswerMode(on, art) {
   answerEnabled = on;
+  einwandModus(false);
   antwortArt = on ? (art || "antwort") : "antwort";
   $("btn-answer").disabled = !on;
   $("btn-answer").classList.toggle("hidden", !on);
@@ -488,6 +492,7 @@ function setAnswerMode(on, art) {
 }
 function setRetryMode(adaptation) {
   answerEnabled = false;
+  einwandModus(false);
   $("btn-answer").disabled = true;
   $("btn-answer").classList.add("hidden");
   $("btn-theory").classList.add("hidden");
@@ -501,6 +506,7 @@ function setRetryMode(adaptation) {
 function setTheoryMode() {
   // Theorie-Schritt: kein Antwortfeld-Zwang, dafür Weiter + Genauer erklären
   answerEnabled = false;
+  einwandModus(false);
   $("btn-answer").disabled = true;
   $("btn-answer").classList.add("hidden");
   $("btn-theory").classList.add("hidden");
@@ -540,6 +546,8 @@ const LEGENDE_WAHL = {
   witz: "«{label}» lockert kurz auf, ohne Einfluss auf deinen Lernstand.",
   widerspruch: "«{label}» lässt den Tutor deine Antwort mit deiner Begründung nochmals prüfen; das zählt nicht als Versuch.",
   neu_bewerten: "«{label}» lässt deine Antwort mit der korrigierten Sicht neu bewerten; das zählt nicht als Versuch.",
+  einwand: "«{label}» lässt den Tutor deine Antwort mit deiner Begründung nochmals prüfen; das zählt nicht als Versuch.",
+  einwand_zurueck: "«{label}» schliesst den Widerspruch, ohne etwas zu senden.",
 };
 const LEGENDE_WEITER = {
   theorie: "«{label}» führt zur nächsten Aufgabe.",
@@ -758,13 +766,23 @@ async function resumeSession(sid) {
     return;
   }
   // Offener Schritt: nur die passenden Buttons, ohne erneuten LLM-Aufruf (AK 4)
+  knoepfeAusZustand(st);
+  if (st.progress && st.progress.niveau_frage_offen)
+    addLevelQuestion("Möchtest du anspruchsvollere Aufgaben?");
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+
+// Buttons passend zum Wartezustand des Servers (Fortsetzen, Zurück nach einem Einwand)
+function knoepfeAusZustand(st) {
+  const t = st.current_task || {};
   if ((st.wahl || []).length) {
     setWaitMode();                           // offene Wahl (T-11, T-12, D-07)
-    renderWahl(st.wahl);
+    renderWahl(st.wahl, st.zusatz);
   } else if (st.wartet_auf === "antwort" && t.typ === "aufgabe") {
     confidenceAsked = !!st.letztes_feedback; // Sicherheit nur vor der ersten Bewertung
     // T-25: nach «Antwort ergänzen» nennt die Legende die gemeinsame Bewertung
     setAnswerMode(true, st.letztes_feedback && st.letztes_feedback.bewertung === "teilweise" ? "ergaenzung" : "antwort");
+    renderWahl([], st.zusatz);
   } else if (t.typ === "theorie") {
     setTheoryMode();
   } else if (st.letztes_feedback) {
@@ -772,16 +790,14 @@ async function resumeSession(sid) {
   } else {
     setRetryMode();
   }
-  if (st.progress && st.progress.niveau_frage_offen)
-    addLevelQuestion("Möchtest du anspruchsvollere Aufgaben?");
-  $("chat").scrollTop = $("chat").scrollHeight;
 }
 
 // ---------- Verlauf im Chat (T-14)
 const WAHL_TEXT = { nochmals_bewerten: "Nochmals bewerten lassen", musterloesung: "Musterlösung ansehen und weiter",
   ohne_bewertung: "Ohne Bewertung weiter", nochmals: "Nochmals versuchen", abschnitt: "Abschnitt aus dem Material",
   naechstes_thema: "Zum nächsten Thema", direkt_aufgabe: "Direkt zur Aufgabe", witz: "Witz zum Thema",
-  ergaenzen: "Antwort ergänzen", loesung: "Lösung ansehen", weiter: "Weiter zur nächsten Aufgabe" };
+  ergaenzen: "Antwort ergänzen", loesung: "Lösung ansehen", weiter: "Weiter zur nächsten Aufgabe",
+  widerspruch: "Ich sehe das anders", neu_bewerten: "Antwort neu bewerten lassen" };
 
 function zeigeVerlauf(eintraege, name) {
   let pausiertAm = null, frage = "";
@@ -804,6 +820,7 @@ function zeigeVerlauf(eintraege, name) {
     else if (e.art === "wahl") addMsg("user wahl", WAHL_TEXT[e.wahl] || e.wahl, "Du (Auswahl)");
     else if (e.art === "witz") addMsg("tutor witz", "😄 " + (e.text || ""), "Tutor");
     else if (e.art === "kopie") addMsg("tutor mid", "✍️ " + (e.text || ""), "Tutor");
+    else if (e.art === "einwand") addMsg("user", e.text || "", "Du (Einwand)");
     else if (e.art === "loesung") zeigeLoesung(e.text, e.elemente);
     else if (e.art === "status") {
       if (e.nach === "pausiert") pausiertAm = e.zeit;
@@ -1045,16 +1062,21 @@ function handleAnswer(d, text) {
     return;
   }
   renderFeedback(d);
+  if (d.neubewertung)
+    addNote(d.neubewertung.geaendert ? "Die Bewertung ist neu. Das zählt nicht als zusätzlicher Versuch."
+                                     : "Die Bewertung bleibt. Das zählt nicht als zusätzlicher Versuch.");
+  if (d.urteil_korrigiert) addNote(d.urteil_korrigiert);
   if (d.niveau_frage) addLevelQuestion(d.niveau_frage);
   if (d.wahl && d.wahl.length) {
     setWaitMode();
-    renderWahl(d.wahl);
+    renderWahl(d.wahl, d.zusatz);
   } else if (d.adaption === "retry") {
     // Aufgabe nochmals einblenden: Der zweite Versuch beantwortet die Aufgabe,
     // nicht den Hinweis (Beobachtung aus dem Testlauf, D-04/D-05).
     if (currentTask && currentTask.frage)
       addMsg("tutor question", "↩️ Ergänze deine Antwort zur Aufgabe: " + currentTask.frage, "Tutor");
     setAnswerMode(true);
+    renderWahl([], d.zusatz);
     $("chat-input").focus();
   } else {
     setContinueMode(d.adaption, d.finished);
@@ -1071,6 +1093,7 @@ function handleAnswer(d, text) {
 // jede Wahl. Während einer laufenden Anfrage sind die Buttons deaktiviert (T-02).
 function setWaitMode() {
   answerEnabled = false;
+  einwandModus(false);
   for (const id of ["btn-answer", "btn-theory", "btn-deeper", "btn-continue"])
     $(id).classList.add("hidden");
   $("btn-answer").disabled = true;
@@ -1082,12 +1105,17 @@ function wahlEntfernen() {
   aktualisiereLegende();
 }
 
-function renderWahl(wahl) {
+// D-15/D-18: «zusatz» sind Möglichkeiten, die den Ablauf nicht blockieren
+// («Ich sehe das anders», «Antwort neu bewerten lassen»); sie stehen in derselben Box.
+let letzteZusatz = [];
+function renderWahl(wahl, zusatz) {
   wahlEntfernen();
-  if (!wahl || !wahl.length) return;
+  letzteZusatz = zusatz || [];
+  const alle = (wahl || []).concat(letzteZusatz);
+  if (!alle.length) return;
   const box = document.createElement("div");
-  box.className = "wahlbox";
-  box.innerHTML = '<div class="btnrow" style="margin-top:0">' + wahl.map(w =>
+  box.className = "wahlbox" + ((wahl || []).length ? "" : " zusatz");
+  box.innerHTML = '<div class="btnrow" style="margin-top:0">' + alle.map(w =>
     `<button class="small action ${w.haupt ? "" : "secondary"}" data-wahl="${esc(w.id)}">${esc(w.label)}</button>`
   ).join("") + "</div>";
   box.onclick = async e => {
@@ -1100,7 +1128,50 @@ function renderWahl(wahl) {
   aktualisiereLegende();
 }
 
+// ---------- Widerspruch gegen eine Bewertung (D-15, Entscheid E5)
+let einwandVorher = null;
+function einwandModus(on) {
+  for (const id of ["btn-einwand", "btn-einwand-zurueck"]) $(id).classList.toggle("hidden", !on);
+}
+function einwandStarten(label) {
+  einwandVorher = { answer: answerEnabled, art: antwortArt };
+  addMsg("user wahl", label, "Du (Auswahl)");
+  addMsg("tutor mid", "Schreib kurz ins Feld, warum du das anders siehst. Ich prüfe deine Antwort dann " +
+    "nochmals, ausdrücklich auch auf andere vertretbare Lösungen. Das zählt nicht als Versuch.", "Tutor");
+  wahlEntfernen();
+  for (const id of ["btn-answer", "btn-theory", "btn-deeper", "btn-continue"]) $(id).classList.add("hidden");
+  answerEnabled = false;
+  einwandModus(true);
+  aktualisiereLegende();
+  $("chat-input").focus();
+}
+async function einwandBeenden() {
+  // Zurück: Buttons wie vor dem Widerspruch, aus dem Zustand des Servers
+  einwandModus(false);
+  const st = await api(`/session/${sessionId}/state`, null, "GET");
+  knoepfeAusZustand(st);
+}
+$("btn-einwand").onclick = async () => {
+  if (busy) return;
+  const text = $("chat-input").value.trim();
+  if (!text) { $("chat-input").focus(); return; }
+  addMsg("user", text, "Du (Einwand)");
+  $("chat-input").value = "";
+  einwandModus(false);
+  setChatBusy(true);
+  try {
+    const d = await api(`/session/${sessionId}/wahl`, { wahl: "widerspruch", text });
+    handleAnswer(d);
+  } catch (e) {
+    addError(e);
+    $("chat-input").value = text;
+    einwandModus(true);
+  } finally { setChatBusy(false); aktualisiereLegende(); }
+};
+$("btn-einwand-zurueck").onclick = () => { if (!busy) einwandBeenden().catch(addError); };
+
 async function waehle(id, label) {
+  if (id === "widerspruch") { einwandStarten(label); return; }
   setChatBusy(true);
   let weiter = false;
   try {
