@@ -1395,6 +1395,8 @@ def teacher_session_detail(sid: str):
                     "testlauf": bool(s.get("testlauf")), "profile": s["profile"],
                     "lesson_id": s["lesson_id"],
                     "lesson_titel": _lesson_titles().get(s["lesson_id"], s["lesson_id"]),
+                    # T-26: Start und letzte Aktivität für den Kopf der Detailansicht
+                    "created_at": s["created_at"], "updated_at": s["updated_at"],
                     "kalibrierung": tutor.kalibrierung(s["profile"])},
         "events": store.get_events(sid),
     }

@@ -15,6 +15,7 @@ Das Skript beendet sich mit Exit-Code 1, wenn eine Prüfung scheitert.
 import contextlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -28,6 +29,7 @@ from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 SCENARIOS: dict = {}
+AKTUELLE_DB: Path | None = None       # Datenbank des zuletzt gestarteten Servers (T-26)
 RESULTS: list[tuple[str, bool, str]] = []
 
 
@@ -53,6 +55,8 @@ def server(extra_lessons: dict | None = None, **env):
     for lid, data in (extra_lessons or {}).items():
         (lessons / f"{lid}.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     port = _free_port()
+    global AKTUELLE_DB
+    AKTUELLE_DB = tmp / "its.db"
     full_env = dict(os.environ)
     full_env.update({
         "LLM_PROVIDER": "mock", "ITS_DB_PATH": str(tmp / "its.db"),
@@ -1201,6 +1205,55 @@ def t25_legende(pw):
         page.click(".wahlbox button[data-wahl='witz']")
         page.wait_for_selector("#waiting", state="detached", timeout=30000)
         legende_pruefen(page, "nach dem Witz")
+
+
+@scenario("t26")
+def t26_zeitstempel(pw):
+    """T-26 AK1-AK4: Startzeit in der Liste, neueste Sequenz oben, Tooltip, Datum beim Tageswechsel."""
+    import sqlite3
+    with server() as base:
+        c = httpx.Client(base_url=base)
+        c.post("/api/learner/login", json={"name": "Zeitreise"})
+        alt = c.post("/api/session/start", json={"lesson_id": "haftungsrecht"}).json()["session_id"]
+        c.post(f"/api/session/{alt}/assess", json={"answers": ["a", "b", "c"]})
+        c.post(f"/api/session/{alt}/next")
+        c.post(f"/api/session/{alt}/abbrechen")
+        neu = c.post("/api/session/start", json={"lesson_id": "haftungsrecht", "neu_beginnen": True}).json()["session_id"]
+        # Die ältere Sequenz begann gestern um 23:58 und lief über Mitternacht
+        with sqlite3.connect(AKTUELLE_DB) as db:
+            jetzt = db.execute("SELECT created_at FROM sessions WHERE id=?", (neu,)).fetchone()[0]
+            import datetime
+            heute = datetime.datetime.fromtimestamp(jetzt).replace(hour=0, minute=0, second=0, microsecond=0)
+            start = (heute - datetime.timedelta(minutes=2)).timestamp()
+            # «Neu beginnen» archiviert die alte Sequenz (T-05); für die Prüfung bleibt sie sichtbar,
+            # wie Testläufe aus der Zeit vor T-05
+            db.execute("UPDATE sessions SET created_at=?, updated_at=?, status='abgebrochen' WHERE id=?",
+                       (start, start + 600, alt))
+            ids = [r[0] for r in db.execute("SELECT id FROM events WHERE session_id=? ORDER BY id", (alt,))]
+            for i, eid in enumerate(ids):
+                db.execute("UPDATE events SET created_at=? WHERE id=?", (start + 60 * i, eid))
+        page = launch(pw).new_page()
+        page.goto(base + "/teacher")
+        eintraege = page.locator(".seq-item")
+        expect(eintraege).to_have_count(2, timeout=10000)
+        texte = eintraege.all_inner_texts()
+        check("T-26 AK1 jeder Eintrag zeigt Startdatum und Startzeit",
+              all(re.search(r"Start \d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}", t) for t in texte), str(texte))
+        check("T-26 AK2 zwei Sequenzen zur selben Lektion unterscheidbar, die neuere oben",
+              texte[0] != texte[1] and page.get_attribute(".seq-item >> nth=0", "data-sid") == neu, str(texte))
+        tip = page.get_attribute(".seq-item >> nth=1", "title") or ""
+        check("T-26 AK3 Tooltip zeigt die letzte Aktivität", tip.startswith("Letzte Aktivität: "), tip)
+        page.locator(".seq-item").nth(1).click()
+        expect(page.locator("#detail-events .event").first).to_be_visible(timeout=10000)
+        zeiten = page.locator("#detail-events .event .t").all_inner_texts()
+        mit_datum = [z for z in zeiten if re.match(r"\d{2}\.\d{2}\.\d{4}, ", z)]
+        check("T-26 AK4 Datum beim ersten Ereignis und beim Tageswechsel", len(mit_datum) == 2, str(zeiten))
+        check("T-26 Kopf der Detailansicht zeigt Start und letzte Aktivität",
+              "Start " in page.inner_text("#detail-kopf") and "letzte Aktivität" in page.inner_text("#detail-kopf"))
+        page.set_viewport_size({"width": 360, "height": 740})
+        page.click("#btn-sidebar")
+        breite = page.evaluate("() => [document.getElementById('sidebar').scrollWidth, document.getElementById('sidebar').clientWidth]")
+        check("T-26 schmaler Bildschirm: Leiste scrollt nicht horizontal", breite[0] <= breite[1], str(breite))
 
 
 def run(names):

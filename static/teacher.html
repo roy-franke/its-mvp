@@ -34,7 +34,7 @@
               border-radius:8px; padding:6px 8px; cursor:pointer; font:inherit; font-size:.82rem; color:inherit; }
   .seq-item:hover { background:#f8fafc; border-color:var(--border); }
   .seq-item.active { background:#eff6ff; border-color:#bfdbfe; }
-  .seq-item .meta { color:var(--muted); font-size:.75rem; }
+  .seq-item .meta { color:var(--muted); font-size:.75rem; overflow-wrap:anywhere; }
   main { padding:20px; min-width:0; }
   .tabs { display:flex; gap:6px; margin-bottom:14px; }
   .tabs button { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 14px;
@@ -211,6 +211,10 @@ const PHASE = { assessment:"Einstufung", learning:"Am Lernen", finished:"Abgesch
 const STATUS = { aktiv:"aktiv", pausiert:"pausiert", abgeschlossen:"abgeschlossen",
                  abgebrochen:"abgebrochen", archiviert:"archiviert" };
 function zeit(t) { return t ? new Date(t * 1000).toLocaleString("de-CH") : ""; }
+// T-26: Zeitangaben zentral im Schweizer Format, Zeitzone des Browsers
+const ZEIT_FORMAT = { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" };
+function zeitpunkt(t) { return t ? new Date(t * 1000).toLocaleString("de-CH", ZEIT_FORMAT) : ""; }
+function tag(t) { return t ? new Date(t * 1000).toLocaleDateString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric" }) : ""; }
 // T-13: Tutor-Texte formatiert und sicher maskiert (static/format.js)
 function fmt(t) { return t ? `<div class="fmt">${ITSFormat.html(t)}</div>` : ""; }
 function esc(s) {
@@ -327,16 +331,20 @@ function renderListe() {
     if (!personen.has(key)) personen.set(key, { name: s.name, seqs: [] });
     personen.get(key).seqs.push(s);
   }
+  // T-26: innerhalb einer Person die neueste Sequenz zuoberst
+  for (const p of personen.values()) p.seqs.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
   $("liste").innerHTML = [...personen.values()]
     .sort((a, b) => a.name.localeCompare(b.name, "de"))
     .map(p => `<div class="person"><div class="person-name">${esc(p.name)}</div>` +
       p.seqs.map(s => `<div class="seq-zeile">
         <input type="checkbox" class="seq-wahl" data-sid="${esc(s.session_id)}" aria-label="Sequenz auswählen"
           ${ausgewaehlt.has(s.session_id) ? "checked" : ""} ${s.status === "archiviert" ? "disabled" : ""}>
-        <button class="seq-item${s.session_id === aktiv ? " active" : ""}" data-sid="${esc(s.session_id)}">
+        <button class="seq-item${s.session_id === aktiv ? " active" : ""}" data-sid="${esc(s.session_id)}"
+          title="Letzte Aktivität: ${esc(zeitpunkt(s.updated_at))}">
           ${esc(s.lesson_titel || s.lesson_id)}${s.testlauf ? ' <span class="pill test">Testlauf</span>' : ""}
           <div class="meta"><span class="pill st-${esc(s.status)}">${esc(STATUS[s.status] || s.status)}</span>
             Schritt ${s.step}/${s.total_steps} · ${LABEL[s.level] || s.level} · ${Math.round(s.correct_rate * 100)} %</div>
+          <div class="meta start">Start ${esc(zeitpunkt(s.created_at))}</div>
         </button></div>`).join("") + "</div>").join("");
   $("btn-archivieren-mehrere").disabled = ausgewaehlt.size === 0;
   $("btn-archivieren-mehrere").textContent = ausgewaehlt.size
@@ -401,8 +409,17 @@ async function loadDetail(sid) {
        <span class="muted">${p.step || 0}/${total}</span></span>` : "") +
     `<span>Niveau ${LABEL[p.level] || p.level || "–"}</span>` +
     `<span>✅ ${p.correct || 0} · 🔶 ${p.partial || 0} · ❌ ${p.wrong || 0}</span>` +
-    kalib(s.kalibrierung);
-  $("detail-events").innerHTML = d.events.map(renderEvent).join("");
+    kalib(s.kalibrierung) +
+    // T-26: welcher Versuch gerade offen ist
+    (s.created_at ? `<span class="muted" id="detail-zeit" title="Letzte Aktivität: ${esc(zeitpunkt(s.updated_at))}">` +
+      `Start ${esc(zeitpunkt(s.created_at))} · letzte Aktivität ${esc(zeitpunkt(s.updated_at))}</span>` : "");
+  // T-26: Beim ersten Ereignis eines neuen Tages steht auch das Datum
+  let letzterTag = null;
+  $("detail-events").innerHTML = d.events.map(ev => {
+    const t = tag(ev.created_at), neu = t !== letzterTag;
+    letzterTag = t;
+    return renderEvent(ev, neu);
+  }).join("");
   if (window.renderMathInElement) {
     try {
       renderMathInElement($("detail-events"), {
@@ -420,9 +437,9 @@ async function loadDetail(sid) {
   $("detail").classList.remove("hidden");
 }
 
-function renderEvent(ev) {
+function renderEvent(ev, mitDatum) {
 
-    const time = new Date(ev.created_at * 1000).toLocaleTimeString("de-CH");
+    const time = (mitDatum ? tag(ev.created_at) + ", " : "") + new Date(ev.created_at * 1000).toLocaleTimeString("de-CH");
     const p = ev.payload;
     let cls = ev.type, body = "";
     if (ev.type === "session_started") body = `Session gestartet – Lektion: ${esc(p.lesson)}`;
