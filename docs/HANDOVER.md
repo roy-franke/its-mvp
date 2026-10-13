@@ -5,8 +5,8 @@ zusammen. Es dient als Kontext für eine neue Claude-Session (z.B. auf einem
 anderen Rechner), damit dort ohne Unterbruch weitergearbeitet werden kann.
 Lies zusätzlich das `README.md` im Projektstamm.
 
-Stand: 11. Oktober 2026 (nachgeführt nach dem Auftrag «Anpassungen ITS-Prototyp nach dem
-zweiten Testdurchlauf», Pakete T-08 bis T-24 und D-07 bis D-12)
+Stand: 13. Oktober 2026 (nachgeführt nach dem Auftrag «Anpassungen ITS-Prototyp nach dem
+dritten Testdurchlauf», Pakete T-25, T-26 und D-13 bis D-18)
 
 ## 1. Projektkontext
 
@@ -114,6 +114,26 @@ Seiten über `/logout` (T-22), Abmelden beim Proxy über `X-Logout-Url` bzw.
 `claude/status-t08-…` bis `claude/status-t24-…`, `claude/status-d07-…` bis
 `claude/status-d12-…` und `claude/status-auftrag-2.md`.
 
+Auftrag 3 (13.10.2026, Feedback von Christian zum Test mit «Haftungsrecht: Unerlaubte
+Handlungen Version 3»): Im Zentrum steht das Prinzip «Verlässlichkeit vor Eloquenz».
+Neue Bewertungslogik: Erwartete Elemente sind Objekte `{dimension, erwartet}` (alte Texte
+gelten als Dimension ohne Inhalt). Element-Status `korrekt`, `vertretbar` (zählt wie korrekt,
+mit `annahme`), `ungenau`, `nicht_beurteilbar` (zählt wie ungenau; nur in Lektionen ohne
+Allgemeinwissen), `falsch` (nur Widerspruch zu Sachverhalt oder Material), `fehlt`; jedes
+Element trägt `begruendung` und `antwort` (Zitat). Nachbesserungen werden als neuester Stand
+bewertet, mit dem Elementstatus der letzten Bewertung im Prompt (D-14). Neue Aufgaben
+nennen `merkmale` mit Fundstelle im Fall, `alternative_loesungen` und werden gegengeprüft
+(`tutor.pruefe_musterloesung`, Schrittarten `MUSTERLOESUNG_PRUEFEN` und
+`MUSTERLOESUNG_VERGLEICHEN`, Feld `musterloesung_pruefung` mit `offene_punkte`, D-13).
+Neubewertungen ohne Versuch über `main._neu_bewerten`: Widerspruch der lernenden Person
+(D-15), Selbstkorrektur des Tutors im Chat (D-18); Urteilskorrektur bei «Lösung ansehen»
+(D-17). Zusätzliche Buttons kommen als `zusatz` neben `wahl` (`tutor.zusatz_wahl`). Neue
+Ereignisse: `musterloesung_geprueft`, `alternative_anerkannt`, `widerspruch_lernende`,
+`tutor_korrektur`, `tutor_neubewertung`, `urteil_korrigiert`, `abschwaechung_warnung`.
+Oberfläche: Legende passend zu den sichtbaren Buttons (T-25), Zeitstempel in der
+Sequenzliste (T-26). Details in `claude/status-t25-…` bis `claude/status-d18-…` und
+`claude/status-auftrag-3.md`.
+
 Prüfwerkzeuge neben pytest: `tests/ui/ui_checks.py` (Playwright gegen eine
 eigens gestartete Instanz) und `tests/eval/eval_didaktik.py` (Evaluation der
 didaktischen Pakete gegen das echte Modell, schreibt einen Bericht nach
@@ -192,6 +212,10 @@ danach lohnt sich der Versuch mit einem kleineren Modell.
 - Ohne `TEACHER_PASSWORD` gilt jede Anfrage als Lehrperson. Nach «Abmelden» verhindert ein Merker-Cookie das sofortige Zurückleiten (T-22); «Anmelden» auf der Login-Seite geht dann ohne Passwort.
 - Angemeldete Lernende erhalten auf Lehrpersonen-Endpunkten seit T-20 den Status 403 (ohne Anmeldung weiterhin 401).
 - Neue Wartezustände in `profile.wartet_auf`: `bewertung_wiederholen`, `wahl_unbewertet`, `wahl_fallback`, `wahl_teilweise` (alte Sessions mit `nochmals` funktionieren weiter).
+- Seit Auftrag 3 kostet eine neue Aufgabe mindestens einen zusätzlichen LLM-Aufruf (Gegenprüfung), bei abweichenden Fachbegriffen zwei, bei einer Abweichung zusätzlich eine Neugenerierung. Das läuft im Vorabruf; klickt jemand sehr schnell auf «Weiter», wird die Wartezeit sichtbar. In der Messübersicht stehen die Zeilen «Musterlösung prüfen» und «Musterlösung vergleichen». Notfalls `ITS_MUSTERLOESUNG_PRUEFEN=false`.
+- Die Bewertung spricht von der «erwarteten Lösung», nicht mehr von der «Musterlösung»; ein Feedback, das die Musterlösung erwähnt, gilt als Regelverstoss (D-14).
+- `profile.antworten_aktuell` enthält seit D-14 auch die Elemente der letzten Bewertung. Neubewertungen (Widerspruch, Selbstkorrektur, Urteilskorrektur) nehmen die Zählung der ersetzten Bewertung zurück (`main._urteil_zuruecknehmen`); sie sind nur bei offener Aufgabe möglich.
+- Der Mock-Provider kennt die neuen Schrittarten. «stimmt doch», «vertretbar» oder «Annahme» in einem Widerspruch lassen ihn das Urteil ändern, «wirklich» in einer Verständnisfrage nach einer Bewertung löst eine Selbstkorrektur aus (für Playwright).
 
 ## 6. Austausch mit Swiss Learning Analytics (LLMTutor)
 
@@ -218,6 +242,7 @@ zusätzliche Routen mit eigenem Port dazu, nicht als zweiter Tunnel.
 Noch offen: gleiches Tunnel-Muster später für RIB-AI-01 im Pilot.
 2. **Anpassungen aus dem ersten Testdurchlauf – Phasen 1 bis 4 UMGESETZT (27./28.9.2026)**: T-01 bis T-07, D-01 bis D-06 und N-01 bis N-05. Evaluation mit qwen3:30b gelaufen (Berichte unter `tests/eval/berichte/`, Befunde in den Statusnotizen D-01 und D-05). Offen: Klassentest mit echtem Modell, Material der Quantenphysik-Lektion überarbeiten (D-06), für die Internetrecherche einen SearXNG-Dienst aufsetzen. Kandidat für später: Bewertungselemente schon bei der Aufgabengenerierung festlegen statt bei jeder Bewertung neu (siehe D-05).
 3. **Anpassungen aus dem zweiten Testdurchlauf – UMGESETZT (11.10.2026)**: T-08 bis T-24, D-07 bis D-12, 495 pytest-Tests und 152 Playwright-Prüfungen grün. Evaluation und Diagnose gegen qwen3:30b am 12.10.2026 auf a9-mega gelaufen: alle Kriterien D-07 bis D-12 erfüllt, 0 Fallbacks und 0 leere Antworten bei rund 200 Aufrufen; Ursache der leeren Antworten belegt, Tokenschätzung kalibriert (3.4 Zeichen pro Token). Offen: Klassentest. Ausblick laut Auftrag: lektionsspezifische Witze im Editor, Wahl auch nach falscher Antwort, automatisches Kürzen oder RAG für grosses Material.
+3b. **Anpassungen aus dem dritten Testdurchlauf – UMGESETZT (13.10.2026)**: T-25, T-26, D-13 bis D-18 nach den Entscheiden E1 bis E6 (Vorschläge), pytest und Playwright grün. Offen: Evaluation mit qwen3:30b auf a9-mega (`tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09`), Auswertung von Christians its.db vom 13.10.2026 und der Lektion «Haftungsrecht Version 3». Ausblick laut Auftrag: Musterlösungen durch die Lehrperson korrigieren, Auswertung pro Lektion nach Widerspruch, Selbstkorrekturen und unsicheren Musterlösungen, geprüfte Fallaufgaben für normative Fächer.
 4. **Prompt-Tuning** mit Roys Praxisbeobachtungen auf Basis der Evaluationsberichte (Vergleich Ollama vs. Cloud als Evaluationsergebnis).
 5. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
 6. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.

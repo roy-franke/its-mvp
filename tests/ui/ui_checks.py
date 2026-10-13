@@ -900,7 +900,8 @@ def d07_teilweise(pw):
         start_lernsequenz(page, base, name="Teilweise")
         zur_aufgabe(page)
         beantworte(page, "Anna haftet, weil Schaden da ist.", 9)
-        knoepfe = page.locator(".wahlbox button")
+        # Seit D-15 steht «Ich sehe das anders» als Zusatz in derselben Box
+        knoepfe = page.locator(".wahlbox button:not([data-wahl='widerspruch'])")
         expect(knoepfe).to_have_count(3, timeout=10000)
         check("D-07 AK1 drei Möglichkeiten",
               knoepfe.all_inner_texts() == ["Antwort ergänzen", "Lösung ansehen", "Weiter zur nächsten Aufgabe"],
@@ -914,7 +915,7 @@ def d07_teilweise(pw):
         p2 = browser.new_context().new_page()
         anmelden(p2, base, "Teilweise")
         p2.click("#seq-list button[data-act='resume']")
-        expect(p2.locator(".wahlbox button")).to_have_count(3, timeout=10000)
+        expect(p2.locator(".wahlbox button:not([data-wahl='widerspruch'])")).to_have_count(3, timeout=10000)
         check("D-07 AK4 nach dem Fortsetzen wieder drei Möglichkeiten", True)
         p2.click(".wahlbox button[data-wahl='ergaenzen']")
         p2.wait_for_selector("#waiting", state="detached", timeout=30000)
@@ -1150,11 +1151,11 @@ def t25_legende(pw):
         check("T-25 Aufgabe offen: wie bisher",
               {"Antwort abschicken", "Frage stellen", "Theorie dazu"} <= set(r["genannt"]), r["text"])
         beantworte(page, "Anna haftet, weil Schaden da ist.", 6)          # teilweise
-        expect(page.locator(".wahlbox button")).to_have_count(3, timeout=10000)
+        expect(page.locator(".wahlbox button")).to_have_count(4, timeout=10000)
         r = legende(page)
         check("T-25 AK1 nach «teilweise» genau die sichtbaren Möglichkeiten",
               set(r["genannt"]) == {"Antwort ergänzen", "Lösung ansehen", "Weiter zur nächsten Aufgabe",
-                                    "Frage stellen"}, r["text"])
+                                    "Ich sehe das anders", "Frage stellen"}, r["text"])
         check("T-25 AK1 weder «Antwort abschicken» noch «Theorie dazu»",
               "Antwort abschicken" not in r["text"] and "Theorie dazu" not in r["text"], r["text"])
         for i in range(3):

@@ -3,14 +3,15 @@
 Läuft NICHT in der normalen Testsuite, sondern von Hand, nachdem ein echtes
 Modell in der .env konfiguriert ist (z.B. LLM_PROVIDER=ollama mit qwen3:30b).
 Das Skript ruft die Tutorlogik direkt auf (ohne Server), prüft die
-Akzeptanzkriterien der Pakete D-01 bis D-12 (Auftrag 2: D-07 bis D-12, T-09) und schreibt einen lesbaren
-Bericht nach tests/eval/berichte/.
+Akzeptanzkriterien der Pakete D-01 bis D-12 (Auftrag 2: D-07 bis D-12, T-09; Auftrag 3: D-13 bis D-18
+mit den Regressionsfällen aus Anhang B) und schreibt einen lesbaren Bericht nach tests/eval/berichte/.
 
     python tests/eval/eval_didaktik.py                  # alle Pakete
     python tests/eval/eval_didaktik.py D-01 D-05        # nur ausgewählte
     python tests/eval/eval_didaktik.py --anzahl 3       # schneller Probelauf
     python tests/eval/eval_didaktik.py --mock           # Rauchtest ohne Modell
     python tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <id-der-version-3>
+    python tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09        # Auftrag 3
 
 Mit qwen3:30b auf a9-mega dauert ein vollständiger Lauf je nach Anzahl
 etwa 30 bis 60 Minuten. Die Anzahl Aufgaben pro Niveau lässt sich mit
@@ -717,6 +718,347 @@ def eval_t09(b: Bericht, anzahl: int):
     b.ak("T-09", "AK 4 Fallbacks (Information)", True, f"{fb} Fallbacks, {leer} leere Antworten bei {gesamt} Aufrufen")
 
 
+# ---------------------------------------------------------------- Auftrag 3: D-13 bis D-18
+#
+# Die Fälle aus Anhang B des Auftrags stehen wörtlich hier, auch mit
+# Tippfehlern. Aufgabe, Musterlösung und Antworten sind fest vorgegeben,
+# damit das Ergebnis nicht von der Aufgabengenerierung abhängt. Wo die
+# damalige Musterlösung nicht bekannt ist (its.db vom 13.10.2026 lag nicht
+# vor), ist die im Feedback sichtbare bzw. eine naheliegende Fassung
+# eingesetzt und im Feld «quelle» vermerkt.
+
+FALL1 = {
+    "typ": "aufgabe", "titel": "Unfall auf dem Spielplatz", "konzept": "Werkeigentümerhaftung",
+    "inhalt": "Ein Kind spielt auf einem Spielplatz. Während des Spiels bricht eine Schaukel ab und das Kind "
+              "verletzt sich. Der Spielplatz wird von einer Stadtverwaltung betrieben.",
+    "frage": "Wer ist für den Schaden verantwortlich und welche Art der Haftung greift hier?",
+    "erwartete_antwort": "Die Stadt ist als Werkeigentümerin verantwortlich; es greift die Werkeigentümerhaftung, "
+                         "eine Kausalhaftung.",
+    "erwartete_elemente": [{"dimension": "verantwortliche Person", "erwartet": "die Stadt als Betreiberin des Spielplatzes"},
+                           {"dimension": "Art der Haftung", "erwartet": "Werkeigentümerhaftung, eine Kausalhaftung"}],
+    "quelle": "Musterlösung eingesetzt (Haftung der Stadt laut Christian wahrscheinlich)",
+}
+FALL1_ANTWORT = "Hersteller der Schaukel Produktehaftpflicht"
+FALL1_NACHFRAGE = "Wieso könnte dies nicht auch ein Fall von Produktehaftpflicht sein?"
+
+FALL2 = {
+    "typ": "aufgabe", "titel": "Tierhalterhaftung im Alltag", "konzept": "Tierhalterhaftung",
+    "inhalt": "Ein Junge spielt mit einem Ball im Park. Der Ball rollt in einen Zaun und zerbricht eine "
+              "Fensterscheibe eines nahegelegenen Hauses. Der Besitzer des Hauses will Schadenersatz von dem "
+              "Jungen verlangen.",
+    "frage": "Wer ist verantwortlich für den Schaden und welche Art der Haftung greift hier?",
+    "erwartete_antwort": "Verantwortlich ist der Junge bzw. seine Eltern; es handelt sich um eine Kausalhaftung.",
+    "erwartete_elemente": [{"dimension": "verantwortliche Person", "erwartet": "der Junge"},
+                           {"dimension": "Art der Haftung", "erwartet": "Kausalhaftung"}],
+    "quelle": "damalige Musterlösung aus der Bewertung im Screenshot abgeleitet («nicht Verschuldenshaftung, "
+              "sondern Kausalhaftung»)",
+}
+FALL2_KORRIGIERT = dict(FALL2, titel="Glasbruch im Park", konzept="Verschuldenshaftung",
+                        erwartete_antwort="Der Junge haftet nach Art. 41 OR (Verschuldenshaftung), wenn er "
+                                          "urteilsfähig ist; die Eltern nur bei verletzter Aufsichtspflicht.",
+                        erwartete_elemente=[{"dimension": "verantwortliche Person", "erwartet": "der Junge"},
+                                            {"dimension": "Art der Haftung", "erwartet": "Verschuldenshaftung nach Art. 41 OR"}])
+FALL2_ANTWORT = "Verschuldenshaftung. Verantwortlich ist der Junge, bzw. bei Minderjährigkeit seine Eltewn."
+FALL2_BEWERTUNG = "Es geht hier nicht um Verschuldenshaftung, sondern um Kausalhaftung."
+FALL2_NACHFRAGE = "Wieso handelt es sich hier um Kausalhaftung?"
+
+FALL3 = {
+    "typ": "aufgabe", "titel": "Schaukel im Vereinsspielplatz", "konzept": "Werkeigentümerhaftung",
+    "inhalt": "Ein Kind spielt auf einem Spielplatz. Während des Spiels bricht ein Teil der Schaukel aus. Das Kind "
+              "verletzt sich leicht. Der Spielplatz gehört einem Verein, der für die Wartung und Sicherheit "
+              "verantwortlich ist.",
+    "frage": "Welche Voraussetzung ist hier am stärksten erkennbar und warum?",
+    "erwartete_antwort": "Die Verantwortung des Vereins für Wartung und Sicherheit; ein mangelhafter Unterhalt der "
+                         "Schaukel ist naheliegend.",
+    "erwartete_elemente": [{"dimension": "Voraussetzung mit Begründung",
+                            "erwartet": "Verantwortung des Spielplatzbetreibers für Wartung und Sicherheit"}],
+    "musterloesung_pruefung": {"ergebnis": "uebereinstimmend",
+                               "offene_punkte": ["ob die Wartung der Schaukel vernachlässigt wurde"]},
+    "quelle": "Musterlösung eingesetzt",
+}
+FALL3_A = ("Verantwortung des Spielplatzbetreibers / weil dieser für Sicherheit und Wartung zuständig ist / "
+           "Vermutlich führte mangelnde Wartung der Schaukel zum Schaden.")
+FALL3_B = ("Verantwortung des Spielplatzbetreibers / weil dieser für Sicherheit und Wartung zuständig ist / "
+           "Mangelnde Wartung der Schaukel verursachte den Schaden.")
+
+FALL4 = {
+    "typ": "aufgabe", "titel": "Zusammenstoss auf dem Schulhof", "konzept": "Kausalhaftung",
+    "inhalt": "Ein Schüler fährt mit seinem Fahrrad auf dem Schulhof. Er biegt plötzlich ab, um einem Ball "
+              "auszuweichen und prallt gegen einen anderen Schüler. Der andere Schüler stürzt und verletzt sich "
+              "leicht. Die Schule ist für die Sicherheit auf dem Schulhof verantwortlich.",
+    "frage": "Nenne die verantwortliche Person und die Art der Haftung, die hier greift.",
+    "erwartete_antwort": "Die Schule ist verantwortlich, weil sie für die Sicherheit auf dem Schulhof sorgt. Es "
+                         "handelt sich um eine Form der Kausalhaftung.",
+    "erwartete_elemente": [{"dimension": "verantwortliche Person",
+                            "erwartet": "die Schule, weil sie für die Sicherheit auf dem Schulhof sorgt"},
+                           {"dimension": "Art der Haftung", "erwartet": "Kausalhaftung"}],
+    "quelle": "Musterlösung aus dem Feedback (sichtbar nach «Lösung ansehen»)",
+}
+FALL4_VERSUCHE = [
+    "Der Schüler bzw. seine Eltern. Motorfahrzeughalterhaftung",
+    "Kausalhaftung, Schule ist für Sicherheit auf dem Schulhof verantwortlich",
+    "Kausalhaftung, Schule ist für Sicherheit auf dem Schulhof verantwortlich und daher haftbar",
+    "Kausalhaftung, Schule ist haftbar",
+    "Kausalhaftung, Schule ist haftbar, weil sie für die Sicherheit verantwortlich ist.",
+]
+
+QUANTEN_SUPER = {
+    "typ": "aufgabe", "titel": "Die unentschiedene Münze", "konzept": "Superposition",
+    "inhalt": "Ein Quantenobjekt kann vor einer Messung in zwei Zuständen zugleich sein, ähnlich einer Münze, die "
+              "sich noch dreht.",
+    "frage": "Was bedeutet Superposition für das Quantenobjekt vor der Messung?",
+    "erwartete_antwort": "Es befindet sich in einer Überlagerung mehrerer Zustände; erst die Messung legt einen fest.",
+    "erwartete_elemente": [{"dimension": "Bedeutung der Superposition",
+                            "erwartet": "Überlagerung mehrerer Zustände bis zur Messung"}]}
+
+# Gegenprobe (D-15 AK 2): klar falsche Antworten, die «falsch» bleiben müssen
+GEGENPROBE = [
+    ("Fall 4, Versuch 1", HAFTUNG, FALL4, FALL4_VERSUCHE[0]),
+    ("Fall 1, Fahrzeug", HAFTUNG, FALL1, "Der Autofahrer haftet aus Motorfahrzeughalterhaftung."),
+    ("Fall 2, Tier", HAFTUNG, FALL2_KORRIGIERT, "Der Hausbesitzer haftet als Tierhalter nach Art. 56 OR."),
+    ("hund, Absicht", HAFTUNG, AUFGABEN_D05["hund"][1],
+     "Frau Meier haftet nur, wenn sie den Hund absichtlich auf den Passanten gehetzt hat."),
+    ("velo, Absicht", HAFTUNG, AUFGABEN_D05["velo"][1],
+     "Nein, weil sie den Fussgänger nicht absichtlich umgestossen hat."),
+    ("ort, Impuls genau", QUANTEN, AUFGABEN_D05["ort"][1], "Dann ist auch der Impuls sehr genau bekannt."),
+    ("ort, Messgerät", QUANTEN, AUFGABEN_D05["ort"][1], "Das Messgerät ist einfach zu ungenau für beides."),
+    ("Superposition, Springen", QUANTEN, QUANTEN_SUPER,
+     "Das Objekt springt sehr schnell zwischen den beiden Zuständen hin und her."),
+    ("Superposition, Ort", QUANTEN, QUANTEN_SUPER, "Superposition heisst, dass das Objekt an einem festen Ort ruht."),
+    ("abhoeren, Lautstärke", QUANTEN, AUFGABEN_D05["abhoeren"][1],
+     "Weil der Angreifer beim Mithören Geräusche macht, die man hört."),
+]
+
+# D-16 AK 2: Paare, die sich nur in der Abschwächung unterscheiden
+VORSICHT_PAARE = [
+    (HAFTUNG, FALL3, FALL3_A, FALL3_B),
+    (HAFTUNG, AUFGABEN_D05["hund"][1],
+     "Frau Meier haftet vermutlich als Halterin nach Art. 56 OR, auch ohne eigenes Verschulden.",
+     "Frau Meier haftet als Halterin nach Art. 56 OR, auch ohne eigenes Verschulden."),
+    (HAFTUNG, AUFGABEN_D05["velo"][1],
+     "Ja, wahrscheinlich: Schaden, Widerrechtlichkeit, Kausalzusammenhang und Fahrlässigkeit liegen vor.",
+     "Ja: Schaden, Widerrechtlichkeit, Kausalzusammenhang und Fahrlässigkeit liegen vor."),
+    (QUANTEN, AUFGABEN_D05["ort"][1],
+     "Der Impuls ist vermutlich nur ungenau bestimmbar, weil Ort und Impuls nach der Unschärferelation nicht "
+     "gleichzeitig genau messbar sind.",
+     "Der Impuls ist nur ungenau bestimmbar, weil Ort und Impuls nach der Unschärferelation nicht gleichzeitig "
+     "genau messbar sind."),
+    (QUANTEN, AUFGABEN_D05["abhoeren"][1],
+     "Wahrscheinlich, weil das Abhören eine Messung ist, die die Verschränkung stört.",
+     "Weil das Abhören eine Messung ist, die die Verschränkung stört."),
+    (QUANTEN, QUANTEN_SUPER,
+     "Es ist vermutlich in einer Überlagerung beider Zustände, bis die Messung einen festlegt.",
+     "Es ist in einer Überlagerung beider Zustände, bis die Messung einen festlegt."),
+]
+
+NACHFRAGEN_D15 = [
+    (FALL1, FALL1_ANTWORT, FALL1_NACHFRAGE),
+    (FALL1, "Die Stadt, Werkeigentümerhaftung", "Was wäre, wenn das Kind die Schaukel selbst beschädigt hätte?"),
+    (FALL3, FALL3_A, "Könnte nicht auch der Hersteller der Schaukel haften?"),
+    (FALL4, FALL4_VERSUCHE[1], "Könnte nicht auch der Schüler auf dem Fahrrad selbst haften?"),
+    (FALL2_KORRIGIERT, FALL2_ANTWORT, "Haften nicht immer die Eltern, wenn ein Kind etwas kaputt macht?"),
+]
+
+
+def _el(r: dict) -> str:
+    return "; ".join(f"{e.get('element')} ({e.get('status')}{', Annahme: ' + e['annahme'] if e.get('annahme') else ''})"
+                     for e in r.get("elemente", [])) or "keine"
+
+
+@paket("D-13")
+def eval_d13(b: Bericht, anzahl: int):
+    """Fall, Titel und Musterlösung stimmen überein; Gegenprüfung mit Übereinstimmungsquote."""
+    from app import didaktik, llm, tutor
+    n = max(20, 2 * anzahl)
+    b.abschnitt("D-13 Stimmige Aufgaben",
+                f"{n} Paare aus Theorie und unmittelbar folgender Aufgabe aus «{HAFTUNG}», jede Aufgabe mit "
+                "Gegenprüfung der Musterlösung. Dazu die festen Regressionsfälle aus Anhang B.")
+    lesson = lektion(HAFTUNG)
+    fach = didaktik.fachvokabular(lesson)
+    zeilen = ["| Theorie | Aufgabe (Titel) | Merkmale im Fall | Titel neutral | Gegenprüfung |", "|---|---|---|---|---|"]
+    ohne_merkmal, titel_verraet, ergebnisse = 0, 0, []
+    start = len(llm.timings())
+    konzepte: list[str] = []
+    for i in range(n):
+        p = dict(tutor.new_profile(), level=tutor.LEVELS[i % 3], covered=list(konzepte), erklaert=list(konzepte))
+        theorie = tutor.generate_theory(lesson, p, [])
+        if theorie.get("_fallback"):
+            continue
+        konzepte.append(theorie.get("konzept", ""))
+        p.update(covered=list(konzepte), erklaert=list(konzepte), last_type="theorie")
+        task = tutor.generate_task(lesson, p, [{"type": "task", "payload": theorie}])
+        if task.get("_fallback"):
+            continue
+        m = didaktik.merkmale_fehlen_im_fall(task, theorie)
+        t = didaktik.loesungswort_in_titel(task, fach)
+        ohne_merkmal += bool(m)
+        titel_verraet += bool(t)
+        erg = (task.get("musterloesung_pruefung") or {}).get("ergebnis", "nicht_geprueft")
+        ergebnisse.append(erg)
+        zeilen.append(f"| {theorie.get('konzept')} ({', '.join(theorie.get('merkmale') or [])}) | {task.get('titel')} | "
+                      f"{'ja' if not m else 'nein'} | {'ja' if not t else 'nein'} | {tutor.GEGENPRUEFUNG_TEXTE.get(erg, erg)} |")
+    b.text("\n".join(zeilen))
+    geprueft = [e for e in ergebnisse if e != "nicht_geprueft"]
+    gut = [e for e in geprueft if e in ("uebereinstimmend", "nach_neugenerierung")]
+    quote = len(gut) / len(geprueft) if geprueft else 0.0
+    b.ak("D-13", "AK 4 jeder Fall enthält die Merkmale seines Konzepts", ohne_merkmal == 0,
+         f"{ohne_merkmal} von {len(ergebnisse)} ohne Merkmal")
+    b.ak("D-13", "AK 4 kein Titel nennt die gesuchte Lösung", titel_verraet == 0, f"{titel_verraet} von {len(ergebnisse)}")
+    b.ak("D-13", "AK 4 Übereinstimmungsquote der Gegenprüfung mindestens 90 Prozent", quote >= 0.9,
+         f"{round(quote * 100)} % ({ergebnisse.count('uebereinstimmend')} direkt, "
+         f"{ergebnisse.count('nach_neugenerierung')} nach Neugenerierung, {ergebnisse.count('unsicher')} unsicher, "
+         f"{ergebnisse.count('nicht_geprueft')} nicht geprüft)")
+    zeiten = [t for t in llm.timings()[start:] if t.get("schritt") in ("MUSTERLOESUNG_PRUEFEN", "MUSTERLOESUNG_VERGLEICHEN")]
+    aufgaben = [t for t in llm.timings()[start:] if t.get("schritt") == "NAECHSTE_AUFGABE"]
+    extra = sum(t.get("sekunden", 0) for t in zeiten) / max(1, len(ergebnisse))
+    b.ak("D-13", "AK 5 zusätzliche Rechenzeit pro Aufgabe (Information)", True,
+         f"{round(extra, 1)} s für {len(zeiten)} Prüfaufrufe, Aufgabe selbst im Mittel "
+         f"{round(sum(t.get('sekunden', 0) for t in aufgaben) / max(1, len(aufgaben)), 1)} s pro Aufruf")
+    # Regressionsfälle aus Anhang B
+    r1 = didaktik.loesungswort_in_titel(dict(FALL1, titel="Kausalhaftung beim Spielplatz",
+                                             schluesselbegriffe=["Kausalhaftung"]), fach)
+    b.ak("D-13", "Fall 1: Titel «Kausalhaftung beim Spielplatz» wird beanstandet", bool(r1), (r1 or "")[:80])
+    theorie_tier = {"konzept": "Tierhalterhaftung", "merkmale": ["Tier", "Halter"]}
+    r2 = didaktik.merkmale_fehlen_im_fall(dict(FALL2, merkmale=[]), theorie_tier)
+    b.ak("D-13", "Fall 2: Fall ohne Tier nach der Tierhalterhaftung wird beanstandet", bool(r2), (r2 or "")[:80])
+    g4 = tutor.pruefe_musterloesung(lesson, FALL4)
+    b.ak("D-13", "Fall 4: Ergebnis der Gegenprüfung (Information, erwartet abweichend)", True,
+         f"{g4['ergebnis']}: {g4.get('loesung', '')[:120]} · offene Punkte: {'; '.join(g4.get('offene_punkte') or [])}")
+    g2 = tutor.pruefe_musterloesung(lesson, FALL2)
+    b.ak("D-13", "Fall 2: Gegenprüfung der damaligen Musterlösung (Information, erwartet abweichend)", True,
+         f"{g2['ergebnis']}: {g2.get('loesung', '')[:120]}")
+
+
+@paket("D-14")
+def eval_d14(b: Bericht, anzahl: int):
+    """Regressionsfall 4: Ab Versuch 2 korrekt, Versuch 1 wirkt nicht nach, Hinweise wiederholen sich nicht."""
+    from app import didaktik, tutor
+    lesson = lektion(HAFTUNG)
+    b.abschnitt("D-14 Faire Bewertung von Nachbesserungen",
+                f"Fall 4 aus Anhang B mit der damaligen Musterlösung ({FALL4['quelle']}), fünf Versuche nacheinander.")
+    vorher, urteile, hinweise = [], [], []
+    for i, text in enumerate(FALL4_VERSUCHE, 1):
+        r = tutor.evaluate_answer(lesson, tutor.new_profile(), FALL4, text, list(vorher))
+        urteile.append(r["bewertung"])
+        hinweise.append(r.get("hinweis", ""))
+        b.text(f"- Versuch {i}: «{text}» → **{r['bewertung']}** · {_el(r)}\n  Feedback: {zitat(r.get('feedback'), 300)[2:]}"
+               + (f"\n  Hinweis: {r.get('hinweis')}" if r.get("hinweis") else ""))
+        vorher.append({"antwort": text, "bewertung": r["bewertung"], "hinweis": r.get("hinweis", ""),
+                       "elemente": r.get("elemente", [])})
+        if r["bewertung"] == "korrekt":
+            break
+    b.ak("D-14", "AK 2 ab Versuch 2 korrekt, Versuch 1 wirkt nicht nach",
+         len(urteile) >= 2 and urteile[1] == "korrekt", " → ".join(urteile))
+    gleich = [i for i in range(1, len(hinweise)) if hinweise[i] and hinweise[i - 1]
+              and didaktik.hinweis_wiederholt(hinweise[i], [hinweise[i - 1]])]
+    b.ak("D-14", "AK 4 keine zwei aufeinanderfolgenden Hinweise fast gleich", not gleich, f"{len(gleich)} Wiederholungen")
+
+
+@paket("D-15")
+def eval_d15(b: Bericht, anzahl: int):
+    """Vertretbare Alternativen, Gegenprobe mit klar falschen Antworten, Nachfragen ohne erfundene Angaben."""
+    from app import tutor
+    b.abschnitt("D-15 Vertretbare Alternativen und Nichtwissen")
+    mit_wissen = dict(lektion(HAFTUNG), einstellungen={"wissensstufen": ["material", "allgemeinwissen"]})
+    nur_material = dict(lektion(HAFTUNG), einstellungen={"wissensstufen": ["material"]})
+    r = tutor.evaluate_answer(mit_wissen, tutor.new_profile(), FALL1, FALL1_ANTWORT)
+    annahme = any(e.get("annahme") for e in r.get("elemente", [])) or any(
+        w in (r.get("feedback") or "").lower() for w in ("wenn ", "falls ", "sofern ", "annahme"))
+    b.text(f"**Fall 1** «{FALL1_ANTWORT}» (Allgemeinwissen erlaubt) → {r['bewertung']} · {_el(r)}\n\n"
+           f"Feedback: {zitat(r.get('feedback'), 500)[2:]}\n")
+    b.ak("D-15", "AK 1 Fall 1 nicht «falsch», Rückmeldung nennt die Annahme",
+         r["bewertung"] != "falsch" and annahme, f"{r['bewertung']}, Annahme genannt: {annahme}")
+    r3 = tutor.evaluate_answer(nur_material, tutor.new_profile(), FALL1, FALL1_ANTWORT)
+    nb = any(e.get("status") == "nicht_beurteilbar" for e in r3.get("elemente", []))
+    b.text(f"**Fall 1 nur Material** → {r3['bewertung']} · {_el(r3)}\n\nFeedback: {zitat(r3.get('feedback'), 400)[2:]}\n")
+    b.ak("D-15", "AK 3 nur Material: «nicht beurteilbar», nie «falsch»", r3["bewertung"] != "falsch" and nb,
+         f"{r3['bewertung']}, nicht beurteilbar: {nb}")
+    zeilen, bleiben = ["| Fall | Antwort | Urteil | Elemente |", "|---|---|---|---|"], 0
+    for name, lid, task, antwort in GEGENPROBE:
+        g = tutor.evaluate_answer(lektion(lid), tutor.new_profile(), dict(task, typ="aufgabe"), antwort)
+        bleiben += g["bewertung"] == "falsch"
+        zeilen.append(f"| {name} | {antwort} | {g['bewertung']} | {_el(g)} |")
+    b.text("\n**Gegenprobe**\n\n" + "\n".join(zeilen))
+    quote = bleiben / len(GEGENPROBE)
+    b.ak("D-15", "AK 2 Gegenprobe: mindestens 90 Prozent der klar falschen Antworten bleiben «falsch»",
+         quote >= 0.9, f"{bleiben} von {len(GEGENPROBE)} ({round(quote * 100)} %)")
+    b.text("\n**Nachfragen (von Hand zu beurteilen: keine erfundenen Angaben zum Sachverhalt?)**\n")
+    for task, antwort, frage in NACHFRAGEN_D15:
+        bew = tutor.evaluate_answer(mit_wissen, tutor.new_profile(), task, antwort)
+        history = [{"type": "task", "payload": task}, {"type": "answer_evaluated", "payload": bew}]
+        a = tutor.answer_question(mit_wissen, dict(tutor.new_profile(), wartet_auf="antwort"), task, frage, history)
+        b.text(f"- Fall «{task['titel']}», Antwort «{antwort}» ({bew['bewertung']}), Nachfrage «{frage}»\n"
+               f"  {zitat(a.get('antwort'), 600)}\n  Beurteilung von Hand: ☐ ohne erfundene Angaben ☐ Alternative ernsthaft geprüft")
+    b.ak("D-15", "AK 6 fünf Nachfragen dokumentiert (Beurteilung von Hand)", True, f"{len(NACHFRAGEN_D15)} Nachfragen")
+
+
+@paket("D-16")
+def eval_d16(b: Bericht, anzahl: int):
+    """Vorsichtige Formulierungen: Paare mit und ohne Abschwächung erhalten dasselbe Urteil."""
+    from app import tutor
+    b.abschnitt("D-16 Vorsichtige Formulierungen", "Fall 3 aus Anhang B und fünf weitere Paare.")
+    zeilen, gleich = ["| Aufgabe | mit Abschwächung | ohne | gleich |", "|---|---|---|---|"], 0
+    for i, (lid, task, a, b_) in enumerate(VORSICHT_PAARE):
+        ra = tutor.evaluate_answer(lektion(lid), tutor.new_profile(), dict(task, typ="aufgabe"), a)
+        rb = tutor.evaluate_answer(lektion(lid), tutor.new_profile(), dict(task, typ="aufgabe"), b_)
+        ok = ra["bewertung"] == rb["bewertung"]
+        gleich += ok
+        zeilen.append(f"| {task.get('titel') or task.get('frage')} | {ra['bewertung']} | {rb['bewertung']} | {'ja' if ok else 'nein'} |")
+        if i == 0:
+            b.ak("D-16", "AK 1 Fall 3: A und B erhalten dasselbe Urteil", ok, f"A {ra['bewertung']}, B {rb['bewertung']}")
+            b.text(f"Fall 3, Feedback zu A: {zitat(ra.get('feedback'), 400)[2:]}\n")
+    b.text("\n".join(zeilen))
+    b.ak("D-16", "AK 2 mindestens sechs Paare mit gleichem Urteil", gleich == len(VORSICHT_PAARE) and gleich >= 6,
+         f"{gleich} von {len(VORSICHT_PAARE)}")
+
+
+@paket("D-17")
+def eval_d17(b: Bericht, anzahl: int):
+    """Regressionsfall 4: Übereinstimmung von Antwort und Lösung wird erkannt."""
+    from app import didaktik
+    b.abschnitt("D-17 Lösung ansehen", "Deterministischer Abgleich der Versuche aus Fall 4 mit den erwarteten Inhalten.")
+    deckt = [didaktik.antwort_deckt_loesung(v, FALL4["erwartete_elemente"]) for v in FALL4_VERSUCHE]
+    b.text("\n".join(f"- Versuch {i}: «{v}» → {'stimmt überein' if d else 'weicht ab'}"
+                     for i, (v, d) in enumerate(zip(FALL4_VERSUCHE, deckt), 1)))
+    b.ak("D-17", "AK 2 Fall 4: Übereinstimmung ab Versuch 2 erkannt, Versuch 1 nicht", deckt[1:] == [True] * 4 and not deckt[0],
+         " ".join("ja" if d else "nein" for d in deckt))
+
+
+@paket("D-18")
+def eval_d18(b: Bericht, anzahl: int):
+    """Regressionsfall 2: Die Chat-Antwort widerspricht der Bewertung nicht stillschweigend."""
+    from app import didaktik, tutor
+    b.abschnitt("D-18 Keine widersprüchlichen Aussagen",
+                "Fall 2 aus Anhang B: Die damalige Bewertung steht als Verlauf vor der Nachfrage.")
+    lesson = lektion(HAFTUNG)
+    bewertung = {"bewertung": "falsch", "feedback": FALL2_BEWERTUNG, "hinweis": "",
+                 "elemente": [{"element": "verantwortliche Person", "status": "ungenau"},
+                              {"element": "Art der Haftung", "status": "falsch"}]}
+    history = [{"type": "task", "payload": FALL2}, {"type": "answer_evaluated", "payload": bewertung}]
+    a = tutor.answer_question(lesson, dict(tutor.new_profile(), wartet_auf="antwort"), FALL2, FALL2_NACHFRAGE, history)
+    still = bool(didaktik.gegensatz_zur_bewertung(FALL2_BEWERTUNG, a.get("antwort", ""))) and not a.get("widerspricht_bewertung")
+    b.text(f"Nachfrage «{FALL2_NACHFRAGE}»\n\n{zitat(a.get('antwort'), 700)}\n\n"
+           f"widerspricht_bewertung: {a.get('widerspricht_bewertung')}, Irrtum benannt: "
+           f"{didaktik.irrtum_benannt(a.get('antwort', ''))}\n")
+    b.ak("D-18", "AK 1 Chat-Antwort konsistent oder Irrtum ausdrücklich gekennzeichnet", not still,
+         "gekennzeichnet" if a.get("widerspricht_bewertung") else "konsistent" if not still else "stiller Widerspruch")
+    r = tutor.evaluate_answer(lesson, tutor.new_profile(), FALL2_KORRIGIERT, FALL2_ANTWORT)
+    art = next((e for e in r.get("elemente", []) if "Haftung" in e.get("element", "")), {})
+    b.ak("D-18", "Fall 2 als fester Testfall: Verschuldenshaftung korrekt, Eltern höchstens ungenau",
+         art.get("status") in ("korrekt", "vertretbar") and r["bewertung"] != "falsch", f"{r['bewertung']} · {_el(r)}")
+
+
+def vergleich_mit_vorlauf(b: Bericht, name: str = "eval_2026-10-12_1613.md") -> None:
+    """Abschluss Auftrag 3: Vergleich mit dem letzten Bericht aus Auftrag 2, sofern er vorliegt."""
+    pfad = ROOT / "tests" / "eval" / "berichte" / name
+    if not pfad.exists():
+        b.abschnitt(f"Vergleich mit {name}", "Der Bericht liegt in diesem Ordner nicht vor (er entstand auf a9-mega).")
+        return
+    zeilen = [z for z in pfad.read_text(encoding="utf-8").splitlines() if z.startswith("| D-") or z.startswith("| T-")]
+    b.abschnitt(f"Vergleich mit {name}", "Kriterien des Vorlaufs (Auftrag 2) zum Vergleich:\n\n"
+                "| Paket | Kriterium | Ergebnis | Detail |\n|---|---|---|---|\n" + "\n".join(zeilen))
+
+
 # ---------------------------------------------------------------- Ablauf
 
 def main():
@@ -749,6 +1091,8 @@ def main():
             sys.exit(2)
         print(f"{name}: {PAKETE[name].__doc__.strip().splitlines()[0]}")
         PAKETE[name](b, args.anzahl)
+    if any(n in wahl for n in ("D-13", "D-14", "D-15", "D-16", "D-17", "D-18")):
+        vergleich_mit_vorlauf(b)
     b.text(f"\n---\nLaufzeit: {round((time.time() - t0) / 60, 1)} Minuten.")
     pfad = b.schreiben()
     ok = all(e[2] for e in b.ergebnisse)
