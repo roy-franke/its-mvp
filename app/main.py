@@ -1022,12 +1022,15 @@ def choose(sid: str, request: Request, req: WahlRequest):
         if req.wahl == "nochmals_bewerten":
             return _antwort_bewerten(sid, lesson, profile, task, offen.get("antwort", ""), offen.get("confidence"))
         loesung = task.get("erwartete_antwort") if req.wahl == "musterloesung" else None
+        extra = {}
         if loesung:
-            store.log_event(sid, "loesung_gezeigt", {"loesung": loesung, "elemente": []})
+            extra = {"gegenueberstellung": didaktik.gegenueberstellung(task.get("erwartete_elemente"), []),
+                     "alternativen": list(task.get("alternative_loesungen") or [])}
+            store.log_event(sid, "loesung_gezeigt", {"loesung": loesung, "elemente": [], **extra})
         profile["ohne_bewertung"] = profile.get("ohne_bewertung", 0) + 1
         finished = _schritt_ohne_wertung(profile, "unbewertet")
         store.update_session(sid, profile=profile)
-        return {"weiter": True, "loesung": loesung, "finished": finished, "progress": _progress(profile)}
+        return {"weiter": True, "loesung": loesung, "finished": finished, "progress": _progress(profile), **extra}
     if wartet in ("wahl_fallback", "nochmals"):
         return _wahl_nach_fallback(sid, lesson, profile, task, req.wahl)
     if wartet == "wahl_teilweise":
@@ -1047,18 +1050,61 @@ def _wahl_nach_teilweise(sid: str, profile: dict, task: dict, wahl: str) -> dict
         bisher = (profile.get("antworten_aktuell") or [{}])[-1].get("antwort", "")
         return {"ergaenzen": True, "antwort": bisher, "frage": task.get("frage", ""),
                 "progress": _progress(profile)}
-    loesung, elemente = None, []
     if wahl == "loesung":
-        loesung = task.get("erwartete_antwort") or ""
-        elemente = didaktik.elemente_bereinigen(task.get("erwartete_elemente"))
-        store.log_event(sid, "loesung_gezeigt", {"loesung": loesung, "elemente": elemente})
-    # «Weiter» bzw. nach der Lösung: bearbeitet, protokolliert als «teilweise»,
+        return _loesung_zeigen(sid, profile, task)
+    # «Weiter»: bearbeitet, protokolliert als «teilweise»,
     # weder Fehler noch richtige Antwort (Entscheid E1)
     finished = _schritt_ohne_wertung(profile, "teilweise")
     store.update_session(sid, profile=profile)
-    if loesung is not None:
-        return {"loesung": loesung, "elemente": elemente, "finished": finished, "progress": _progress(profile)}
     return {"weiter": True, "finished": finished, "progress": _progress(profile)}
+
+
+URTEIL_KORRIGIERT_TEXT = ("Beim Vergleich sehe ich: Deine letzte Antwort stimmt inhaltlich mit der Lösung überein. "
+                          "Ich habe sie vorhin zu streng bewertet und zähle sie jetzt als richtig.")
+
+
+def _loesung_zeigen(sid: str, profile: dict, task: dict) -> dict:
+    """D-17: «Lösung ansehen» mit Gegenüberstellung je Element.
+
+    Pro Element erscheinen Dimension, erwarteter Inhalt, was die lernende
+    Person im letzten Versuch dazu schrieb, Status und Begründung, dazu
+    hinterlegte alternative Lösungen. Stimmt die letzte Antwort inhaltlich mit
+    der Lösung überein, obwohl das Urteil nicht «korrekt» lautete, sagt der
+    Tutor das offen und korrigiert das Urteil (Ereignis urteil_korrigiert).
+    """
+    loesung = task.get("erwartete_antwort") or ""
+    bisher = profile.get("antworten_aktuell") or []
+    letzte = bisher[-1] if bisher else {}
+    gegen = didaktik.gegenueberstellung(task.get("erwartete_elemente"), letzte.get("elemente"))
+    alternativen = list(task.get("alternative_loesungen") or [])
+    payload = {"loesung": loesung, "elemente": didaktik.elemente_bereinigen(task.get("erwartete_elemente")),
+               "gegenueberstellung": gegen, "alternativen": alternativen}
+    stimmt = (letzte and letzte.get("bewertung") != "korrekt"
+              and not any(e.get("status") == "falsch" for e in letzte.get("elemente") or [])
+              and didaktik.antwort_deckt_loesung(letzte.get("antwort", ""), task.get("erwartete_elemente")))
+    if stimmt:
+        vorher = bisher[:-1]
+        _urteil_zuruecknehmen(profile, letzte.get("bewertung"))
+        profile["antworten_aktuell"] = vorher
+        elemente = [dict(e, status="korrekt", begruendung="Stimmt inhaltlich mit dem erwarteten Inhalt überein.")
+                    if e.get("status") not in ("korrekt", "vertretbar") else e for e in letzte.get("elemente") or []]
+        result = {"bewertung": "korrekt", "korrekt": True, "feedback": URTEIL_KORRIGIERT_TEXT, "hinweis": "",
+                  "elemente": elemente}
+        for g in gegen:
+            if g["status"] not in ("korrekt", "vertretbar"):
+                g["status_vorher"], g["status"] = g["status"], "korrekt"
+        store.log_event(sid, "loesung_gezeigt", dict(payload, urteil_korrigiert=True))
+        store.log_event(sid, "urteil_korrigiert", {"urteil_vorher": letzte.get("bewertung"), "urteil_nachher": "korrekt",
+                                                   "antwort": letzte.get("antwort", ""), "meldung": URTEIL_KORRIGIERT_TEXT,
+                                                   "grund": "Antwort und Lösung stimmen inhaltlich überein"})
+        r = _bewertung_anwenden(sid, load_lesson(_session(sid)["lesson_id"]), profile, task,
+                                letzte.get("antwort", ""), None, result, vorher, neubewertung="urteil_korrigiert")
+        return dict(payload, urteil_korrigiert=URTEIL_KORRIGIERT_TEXT, finished=r["finished"],
+                    progress=r["progress"], niveau_frage=r.get("niveau_frage"))
+    store.log_event(sid, "loesung_gezeigt", payload)
+    finished = _schritt_ohne_wertung(profile, "teilweise")
+    store.update_session(sid, profile=profile)
+    return dict(payload, finished=finished, progress=_progress(profile))
 
 
 def _aktuelles_konzept(profile: dict, history: list[dict]) -> str:

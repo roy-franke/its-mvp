@@ -1048,6 +1048,53 @@ def vorsicht_bemaengelt(bewertung: dict, antwort: str, offene_punkte: list[str])
     return None
 
 
+# ---------------------------------------------------------------- D-17
+
+def gegenueberstellung(festgelegt, bewertete: list[dict] | None) -> list[dict]:
+    """Pro Element: Dimension, erwarteter Inhalt, eigene Antwort, Status, Begründung (D-17).
+
+    Grundlage sind die erwarteten Elemente der Aufgabe und die Elemente der
+    letzten Bewertung (Ereignis answer_evaluated); es braucht keinen weiteren
+    Aufruf des Sprachmodells.
+    """
+    soll = elemente_normalisieren(festgelegt)
+    ist = [e for e in bewertete or [] if isinstance(e, dict)]
+    nach_name = {e.get("element"): e for e in ist}
+    out = []
+    if not soll:
+        soll = [{"dimension": e.get("element", ""), "erwartet": e.get("erwartet", "")} for e in ist]
+    for i, f in enumerate(soll):
+        e = nach_name.get(f["dimension"]) or (ist[i] if len(ist) == len(soll) else {})
+        out.append({"dimension": f["dimension"], "erwartet": f["erwartet"] or e.get("erwartet", ""),
+                    "antwort": e.get("antwort", ""), "status": e.get("status", ""),
+                    "begruendung": e.get("begruendung", ""), "annahme": e.get("annahme", "")})
+    return out
+
+
+def antwort_deckt_loesung(antwort: str, festgelegt) -> bool:
+    """D-17: Stimmt die Antwort inhaltlich mit dem erwarteten Inhalt jedes Elements überein?
+
+    Deterministischer Abgleich: Von jedem erwarteten Inhalt muss mindestens
+    die Hälfte der Inhaltswörter (als Stamm) in der Antwort stehen, und die
+    Antwort darf nichts verneinen, was der erwartete Inhalt bejaht. Elemente
+    ohne erwarteten Inhalt (ältere Aufgaben) lassen keinen Abgleich zu.
+    """
+    soll = elemente_normalisieren(festgelegt)
+    a = staemme(antwort)
+    if not soll or not a:
+        return False
+    verneint = re.compile(r"\b(nicht|kein\w*|nie)\b", re.IGNORECASE)
+    for f in soll:
+        teile = [x for x in staemme(f["erwartet"]) if len(x) >= 4]
+        if not teile:
+            return False
+        if sum(_kommt_vor(x, a) for x in teile) / len(teile) < 0.5:
+            return False
+        if verneint.search(antwort) and not verneint.search(f["erwartet"]):
+            return False
+    return True
+
+
 # ---------------------------------------------------------------- D-11
 #
 # Wer die Theorie kopiert und als Antwort abschickt, erbringt keine

@@ -821,7 +821,7 @@ function zeigeVerlauf(eintraege, name) {
     else if (e.art === "witz") addMsg("tutor witz", "😄 " + (e.text || ""), "Tutor");
     else if (e.art === "kopie") addMsg("tutor mid", "✍️ " + (e.text || ""), "Tutor");
     else if (e.art === "einwand") addMsg("user", e.text || "", "Du (Einwand)");
-    else if (e.art === "loesung") zeigeLoesung(e.text, e.elemente);
+    else if (e.art === "loesung") zeigeLoesung(e);
     else if (e.art === "status") {
       if (e.nach === "pausiert") pausiertAm = e.zeit;
       else if (e.nach === "aktiv" && pausiertAm) {
@@ -843,9 +843,33 @@ function addTrenner(text) {
   div.textContent = text;
   $("chat").insertBefore(div, $("waiting"));
 }
-function zeigeLoesung(text, elemente) {
-  addMsg("tutor good", "📘 Musterlösung: " + (text || "") +
-    ((elemente || []).length ? "\n\nDazu gehören:\n" + elemente.map(x => "- " + x).join("\n") : ""), "Tutor");
+// D-17: Lösung mit Gegenüberstellung je Element, als Liste (auch auf dem Handy gut lesbar)
+const STATUS_SYMBOL = { korrekt: "✅", vertretbar: "☑️", ungenau: "🔸", nicht_beurteilbar: "❔", falsch: "❌", fehlt: "◻️" };
+const STATUS_TEXT = { korrekt: "richtig", vertretbar: "vertretbar", ungenau: "ungenau",
+                      nicht_beurteilbar: "nicht beurteilbar", falsch: "falsch", fehlt: "fehlt" };
+function loesungsText(d) {
+  let t = "📘 **Lösung:** " + (d.text ?? d.loesung ?? "");
+  const g = d.gegenueberstellung || [];
+  if (g.length) {
+    t += "\n\n**Vergleich mit deiner letzten Antwort:**\n" + g.map(e => {
+      const st = e.status ? `${STATUS_SYMBOL[e.status] || ""} ` : "";
+      let z = `- ${st}**${e.dimension}**`;
+      if (e.erwartet) z += ` – erwartet: ${e.erwartet}`;
+      z += `; du: ${e.antwort ? "«" + e.antwort + "»" : "nichts dazu"}`;
+      if (e.status) z += ` (${STATUS_TEXT[e.status] || e.status}${e.status_vorher ? ", korrigiert" : ""})`;
+      if (e.annahme) z += `. Gilt unter der Annahme: ${e.annahme}`;
+      if (e.begruendung) z += `. ${e.begruendung}`;
+      return z;
+    }).join("\n");
+  } else if ((d.elemente || []).length) {
+    t += "\n\nDazu gehören:\n" + d.elemente.map(x => "- " + (typeof x === "string" ? x : x.dimension)).join("\n");
+  }
+  if ((d.alternativen || []).length)
+    t += "\n\n**Ebenfalls vertretbar:**\n" + d.alternativen.map(a => "- " + a).join("\n");
+  return t;
+}
+function zeigeLoesung(d) {
+  addMsg("tutor good loesung", loesungsText(d), "Tutor");
 }
 
 // ---------- Einstufung
@@ -1198,7 +1222,9 @@ async function waehle(id, label) {
     }
     if (d.progress) renderProgress(d.progress);
     if (d.loesung) {
-      zeigeLoesung(d.loesung, d.elemente);
+      zeigeLoesung(d);
+      if (d.urteil_korrigiert) addMsg("tutor good", "✅ " + d.urteil_korrigiert, "Tutor");
+      if (d.niveau_frage) addLevelQuestion(d.niveau_frage);
       setContinueMode("next", d.finished);
       prefetchNext();
       return;

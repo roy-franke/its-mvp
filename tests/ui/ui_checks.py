@@ -1313,6 +1313,35 @@ def d15_widerspruch(pw):
         browser.close()
 
 
+@scenario("d17")
+def d17_loesung(pw):
+    """D-17 AK1/AK3: «Lösung ansehen» zeigt je Element Dimension, Erwartetes, eigene Antwort und Status."""
+    with server() as base:
+        browser = launch(pw)
+        page = browser.new_context(viewport={"width": 390, "height": 844}).new_page()   # Handy
+        start_lernsequenz(page, base, name="Loesung")
+        zur_aufgabe(page)
+        beantworte(page, "Anna haftet, weil Schaden da ist.", 5)
+        page.click(".wahlbox button[data-wahl='loesung']")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        msg = page.locator(".msg.tutor.loesung").last
+        expect(msg).to_be_visible(timeout=10000)
+        punkte = msg.locator("li").all_inner_texts()
+        check("D-17 AK1 Vergleich mit der eigenen Antwort", "Vergleich mit deiner letzten Antwort" in msg.inner_text())
+        check("D-17 AK1 pro Element Dimension, Erwartetes, eigene Antwort und Status",
+              len(punkte) == 2 and all("erwartet:" in t and "du:" in t and "(" in t for t in punkte), str(punkte))
+        check("D-17 AK1 eigene Antwort zitiert", "«Anna haftet" in punkte[0] if punkte else False, str(punkte))
+        breite = page.evaluate("() => [document.documentElement.scrollWidth, window.innerWidth]")
+        check("D-17 auf dem Handy als Liste ohne horizontales Scrollen", breite[0] <= breite[1], str(breite))
+        page.screenshot(path=str(Path(tempfile.gettempdir()) / "its_d17_loesung.png"))     # zur Sichtkontrolle
+        page.goto(base + "/teacher")
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-events")).to_contain_text("Lösung angezeigt", timeout=10000)
+        check("D-17 AK3 Lernverlauf zeigt die Gegenüberstellung",
+              "geschrieben: «Anna haftet" in page.inner_text("#detail-events"))
+        browser.close()
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

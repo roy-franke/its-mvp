@@ -501,6 +501,18 @@ function renderEvent(ev, mitDatum) {
     else if (ev.type === "kopie_erkannt") { cls += " regel_verstoss"; body = `✍️ <strong>Kopie erkannt</strong> (D-11): ${Math.round(p.anteil * 100)} % der Antwort wörtlich aus «${esc(p.quelle || "")}», nicht bewertet und nicht als Versuch gezählt`; }
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
+    else if (ev.type === "loesung_gezeigt") {
+      // D-17: dieselbe Gegenüberstellung, die die lernende Person sah
+      body = `📘 Lösung angezeigt: ${esc(p.loesung)}`
+        + ((p.gegenueberstellung || []).length ? `<ul class="elemente">${p.gegenueberstellung.map(e =>
+            `<li>${STATUS_SYMBOL[e.status] || "◻️"} <strong>${esc(e.dimension)}</strong> – erwartet: ${esc(e.erwartet || "–")}; `
+            + `geschrieben: ${e.antwort ? "«" + esc(e.antwort) + "»" : "nichts"} <span class="muted">(${esc(STATUS_TEXT[e.status] || e.status || "–")}`
+            + `${e.status_vorher ? ", vorher " + esc(STATUS_TEXT[e.status_vorher] || e.status_vorher) : ""})</span>`
+            + (e.begruendung ? `<br><span class="muted">${esc(e.begruendung)}</span>` : "") + `</li>`).join("")}</ul>`
+          : ((p.elemente || []).length ? `<br><span class="muted">Elemente: ${p.elemente.map(elementText).join(" · ")}</span>` : ""))
+        + ((p.alternativen || []).length ? `<span class="muted">Ebenfalls vertretbar: ${p.alternativen.map(esc).join(" · ")}</span>` : "")
+        + (p.urteil_korrigiert ? `<br><span class="fb">Urteil nach dem Vergleich korrigiert</span>` : "");
+    }
     else if (ev.type === "alternative_anerkannt") {
       // D-15: vertretbare Alternative oder Antwort ausserhalb des Materials
       cls += " wahl";

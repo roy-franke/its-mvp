@@ -1448,8 +1448,11 @@ def verlauf_fuer_lernende(events: list[dict], fuer_fortsetzen: bool = False) -> 
         elif typ == "urteil_korrigiert":
             eintraege.append({"art": "notiz", "zeit": zeit, "text": p.get("meldung", "")})
         elif typ == "loesung_gezeigt":
+            # D-17: mit Gegenüberstellung; sie zeigt nur, was die lernende Person ohnehin sah
             eintraege.append({"art": "loesung", "zeit": zeit, "text": p.get("loesung", ""),
-                              "elemente": list(p.get("elemente") or [])})
+                              "elemente": list(p.get("elemente") or []),
+                              "gegenueberstellung": list(p.get("gegenueberstellung") or []),
+                              "alternativen": list(p.get("alternativen") or [])})
     return eintraege, list(schwaechen.values())
 
 
