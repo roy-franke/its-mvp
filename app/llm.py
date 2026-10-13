@@ -524,6 +524,12 @@ def _mock_text(system: str, user: str) -> str:
             }, ensure_ascii=False)
         wunsch = re.search(r"Verständnisfrage:\s*(.+)", user)
         frage = (wunsch.group(1) if wunsch else "").lower()
+        if "DEINE LETZTE BEWERTUNG" in user and "wirklich" in frage:
+            # D-18: Der Tutor erkennt im Chat einen Irrtum in seiner Bewertung
+            return json.dumps({"antwort": "Da habe ich mich vorhin geirrt: Deine Antwort trifft den Kern, weil der "
+                                          "Fall diesen Punkt offenlässt. (Mock-Antwort)",
+                               "konzept": "", "ausserhalb_material": False, "widerspricht_bewertung": True},
+                              ensure_ascii=False)
         if "grundniveau" in frage and "bleiben" in frage:
             return json.dumps({"antwort": "Verstanden.", "konzept": "", "ausserhalb_material": False,
                                "niveau_wunsch": "halten", "niveau_ziel": "basic"}, ensure_ascii=False)

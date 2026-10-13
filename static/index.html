@@ -1248,6 +1248,8 @@ async function sendChat(text, art) {
   try {
     const d = await api(`/session/${sessionId}/chat`, { message: text, art: art || "frage" });
     zeigeTutorAntwort(d);
+    // D-18: Der Tutor hat sich korrigiert, «Antwort neu bewerten lassen» kommt dazu
+    if (d.zusatz) renderWahl(d.wahl || [], d.zusatz);
     if (d.angebot === "allgemeinwissen" || d.angebot === "internet") addOffer(d.angebot);
     if (d.progress) { renderProgress(d.progress); pendingNext = null; }
   } catch (e) { addError(e); }

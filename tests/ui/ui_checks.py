@@ -1342,6 +1342,37 @@ def d17_loesung(pw):
         browser.close()
 
 
+@scenario("d18")
+def d18_selbstkorrektur(pw):
+    """D-18 AK2: Nach einer Selbstkorrektur im Chat erscheint «Antwort neu bewerten lassen», ohne neuen Versuch."""
+    with server() as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Korrektur")
+        zur_aufgabe(page)
+        beantworte(page, "Anna haftet, weil Schaden da ist.", 5)
+        page.fill("#chat-input", "Ist das wirklich nur teilweise richtig?")
+        page.click("#btn-ask")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("D-18 Der Tutor benennt den Irrtum ausdrücklich",
+              "Da habe ich mich vorhin geirrt" in page.locator(".msg.tutor").last.inner_text())
+        knopf = page.locator(".wahlbox button[data-wahl='neu_bewerten']")
+        expect(knopf).to_be_visible(timeout=10000)
+        check("D-18 «Antwort neu bewerten lassen» erscheint, die Wahl nach «teilweise» bleibt",
+              page.locator(".wahlbox button[data-wahl='ergaenzen']").count() == 1)
+        legende_pruefen(page, "nach der Selbstkorrektur")
+        check("D-18 Legende erklärt die Neubewertung",
+              "Antwort neu bewerten lassen" in legende(page)["genannt"])
+        knopf.click()
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        check("D-18 Neubewertung zählt nicht als Versuch",
+              "1 richtig" in page.inner_text("#prog-badges") and "teilweise" not in page.inner_text("#prog-badges")
+              and "nicht als zusätzlicher Versuch" in page.inner_text("#chat"))
+        page.goto(base + "/teacher")
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-events")).to_contain_text("korrigiert im Chat", timeout=10000)
+        check("D-18 tutor_korrektur im Lernverlauf", "Neubewertung nach Selbstkorrektur" in page.inner_text("#detail-events"))
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

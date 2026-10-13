@@ -1189,6 +1189,20 @@ def bisherige_erklaerungen(history: list[dict], konzept: str) -> list[str]:
     return [t for t in out if t]
 
 
+WIDERSPRUCH_OFFEN = ("Achtung: Das widerspricht meiner Bewertung von vorhin. Eine der beiden Aussagen stimmt "
+                     "nicht. Lass deine Antwort neu bewerten, dann prüfe ich sie nochmals.")
+
+
+def letzte_bewertung(history: list[dict]) -> dict | None:
+    """D-18: Die letzte Bewertung zur aktuellen Aufgabe (nach dem letzten Aufgabenschritt)."""
+    for ev in reversed(history):
+        if ev["type"] == "task":
+            return None
+        if ev["type"] == "answer_evaluated" and ev["payload"].get("bewertung") in BEWERTUNGEN:
+            return ev["payload"]
+    return None
+
+
 def answer_question(lesson: dict, profile: dict, task: dict | None,
                     question: str, history: list[dict], art: str = "frage",
                     stufe: int | None = None) -> dict:
@@ -1213,6 +1227,24 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
                     f"Aktueller Schritt: {task.get('inhalt', '')}\n"
                     + (f"Aktuelle Frage an den Lernenden: {task.get('frage', '')}\n"
                        if task.get("frage") else ""))
+    # D-18: Der Chat kennt die letzte Bewertung der aktuellen Aufgabe
+    bewertung = letzte_bewertung(history)
+    bewertung_text = ""
+    if bewertung and task and task.get("typ") == "aufgabe":
+        bewertung_text = f"{bewertung.get('feedback', '')} {bewertung.get('hinweis', '')}".strip()
+        offen = profile.get("wartet_auf") in ("antwort", "wahl_teilweise", "bewertung_wiederholen", "wahl_unbewertet")
+        task_ctx += ("DEINE LETZTE BEWERTUNG DIESER AUFGABE:\n"
+                     f"Urteil: {bewertung.get('bewertung', '')}\n"
+                     + "".join(f"- {e.get('element', '')}: {e.get('status', '')}"
+                               + (f" ({e['begruendung']})" if e.get("begruendung") else "") + "\n"
+                               for e in bewertung.get("elemente") or [] if isinstance(e, dict))
+                     + f"Dein Feedback: «{bewertung_text}»\n"
+                     + (f"Erwartete Lösung (nur für dich{', die Aufgabe ist noch offen: nie verraten' if offen else ''}): "
+                        f"{task.get('erwartete_antwort', '')}\n" if task.get("erwartete_antwort") else "")
+                     + "Deine Antwort muss zu dieser Bewertung passen. Kommst du jetzt zu einer anderen "
+                       "Einschätzung, sag das ausdrücklich («Da habe ich mich vorhin geirrt: …»), erkläre die "
+                       "richtige Sicht und setze widerspricht_bewertung auf true. Bleibst du bei der Bewertung, "
+                       "begründe sie aus dem Sachverhalt, nicht mit dem Namen eines Konzepts.\n")
     gezeigt = ""
     if bisherige:
         gezeigt = ("Bereits gezeigt (NICHT wiederholen, auch nicht umformuliert):\n"
@@ -1247,14 +1279,25 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
         + (NIVEAU_EINORDNUNG if art == "frage" else "") +
         'Format: {"antwort": "...", "konzept": "worum es geht, 1-3 Worte", '
         '"ausserhalb_material": false'
+        + (', "widerspricht_bewertung": false' if bewertung_text else "")
         + (', "niveau_wunsch": "keiner|halten|tiefer|hoeher", '
            '"niveau_ziel": "basic|intermediate|advanced|keins"' if art == "frage" else "") + '}',
         fallback=dict(FALLBACK_TEXTE["frage"]),
         check=lambda d: (didaktik.pruefe_felder(d, ("antwort",))
                          or didaktik.defensiver_einstieg(d.get("antwort", ""))
                          or (didaktik.zu_aehnlich(d.get("antwort", ""), bisherige)
-                             if art in ("theorie", "genauer") else None)),
+                             if art in ("theorie", "genauer") else None)
+                         or (didaktik.widerspruch_ungekennzeichnet(bewertung_text, d) if bewertung_text else None)),
     )
+    if bewertung_text and not data.get("_fallback"):
+        data["widerspricht_bewertung"] = data.get("widerspricht_bewertung") is True
+        if not data["widerspricht_bewertung"] and didaktik.gegensatz_zur_bewertung(bewertung_text, data.get("antwort", "")):
+            # Auch nach der Korrektur ein stiller Widerspruch: offen machen statt stehen lassen (D-18 AK 1)
+            data["antwort"] = (data.get("antwort", "") + "\n\n" + WIDERSPRUCH_OFFEN).strip()
+            data["widerspricht_bewertung"] = True
+            data["widerspruch_erkannt"] = "Gegensatz zur Bewertung ohne Kennzeichnung, Hinweis ergänzt"
+        if data["widerspricht_bewertung"]:
+            data["urteil_vorher"] = bewertung.get("bewertung")
     data["konzept"] = konzept or data.get("konzept") or ""
     data["ausserhalb_material"] = bool(data.get("ausserhalb_material")) or art == "allgemeinwissen"
     data["stufe"] = stufe if art in ("theorie", "genauer") else None
@@ -2039,8 +2082,11 @@ def _recent_history(history: list[dict], n: int = 5) -> str:
             kind = "Theorie" if ev["payload"].get("typ") == "theorie" else "Aufgabe"
             items.append(f"{kind}: {ev['payload'].get('titel', '')}")
         elif ev["type"] == "answer_evaluated":
-            ok = "richtig" if ev["payload"].get("korrekt") else "falsch"
-            items.append(f"Antwort {ok}")
+            # D-18: Urteil und gekürztes Feedback statt nur «richtig» oder «falsch»
+            p = ev["payload"]
+            urteil = p.get("bewertung") or ("korrekt" if p.get("korrekt") else "falsch")
+            fb = " ".join(str(p.get("feedback") or "").split())[:120]
+            items.append(f"Bewertung {urteil}" + (f": {fb}" if fb else ""))
         elif ev["type"] == "chat_question":
             items.append(f"Verständnisfrage: {ev['payload'].get('frage', '')[:80]}")
         elif ev["type"] == "chat_reply":

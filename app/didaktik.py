@@ -1095,6 +1095,51 @@ def antwort_deckt_loesung(antwort: str, festgelegt) -> bool:
     return True
 
 
+# ---------------------------------------------------------------- D-18
+#
+# Die Bewertung sagte «nicht Verschuldenshaftung, sondern Kausalhaftung», der
+# Chat danach «nicht Kausalhaftung, sondern Verschuldenshaftung», ohne den
+# Widerspruch zu erwähnen. Klare Gegensätze nach diesem Muster erkennt der
+# Code; fehlt die Kennzeichnung widerspricht_bewertung, wird die Chat-Antwort
+# mit Korrekturhinweis neu erzeugt.
+
+_ART = r"(?:um\s+)?(?:(?:eine[nmrs]?|die|den|das|der|dem)\s+)?(?:(?:form|fall)\s+(?:der|von)\s+)?"
+_GEGENSATZ = re.compile(r"\bnicht\s+" + _ART + r"([A-Za-zÄÖÜäöüß][\w-]{3,})[^.;!?]{0,60}?\bsondern\s+" + _ART
+                        + r"([A-Za-zÄÖÜäöüß][\w-]{3,})", re.IGNORECASE)
+_IRRTUM = re.compile(r"\b(geirrt|irrtum|irrte|korrigier\w*|falsch bewertet|zu streng bewertet|"
+                     r"vorhin (falsch|nicht richtig)|habe ich (mich )?(vertan|getäuscht))\b", re.IGNORECASE)
+
+
+def gegensaetze(text: str) -> list[tuple[str, str]]:
+    return [(stamm(a), stamm(b)) for a, b in _GEGENSATZ.findall(text or "")]
+
+
+def gegensatz_zur_bewertung(bewertung: str, antwort: str) -> tuple[str, str] | None:
+    """Sagt die Chat-Antwort «nicht Y, sondern X», wo die Bewertung «nicht X, sondern Y» sagte?"""
+    for x, y in gegensaetze(bewertung):
+        for x2, y2 in gegensaetze(antwort):
+            if gleicher_stamm(x, y2) and gleicher_stamm(y, x2):
+                return x, y
+    return None
+
+
+def irrtum_benannt(text: str) -> bool:
+    return bool(_IRRTUM.search(text or ""))
+
+
+def widerspruch_ungekennzeichnet(bewertung: str, data: dict) -> str | None:
+    """D-18: Ein Widerspruch zur eigenen Bewertung muss ausdrücklich als Irrtum benannt sein."""
+    antwort = str(data.get("antwort") or "")
+    if data.get("widerspricht_bewertung") is True and not irrtum_benannt(antwort):
+        return ("Du weichst von deiner Bewertung ab. Sag das ausdrücklich, etwa «Da habe ich mich vorhin geirrt: …», "
+                "und erkläre die richtige Sicht.")
+    if bewertung and data.get("widerspricht_bewertung") is not True and gegensatz_zur_bewertung(bewertung, antwort):
+        return ("Deine Antwort sagt das Gegenteil deiner Bewertung von vorhin, ohne es zu erwähnen. Hast du dich "
+                "vorhin geirrt, sag das ausdrücklich («Da habe ich mich vorhin geirrt: …») und setze "
+                "widerspricht_bewertung auf true. Sonst bleib bei der Bewertung und begründe sie aus dem Sachverhalt.")
+    return None
+
+
 # ---------------------------------------------------------------- D-11
 #
 # Wer die Theorie kopiert und als Antwort abschickt, erbringt keine
@@ -1235,7 +1280,8 @@ STRUKTUR: dict[str, dict[str, tuple[str, bool]]] = {
                          "alternative_loesungen": ("liste", False)},
     "ANTWORT_BEWERTEN": {"elemente": ("liste_objekt", False), "bewertung": ("text", False),
                          "feedback": ("text", True), "hinweis": ("text", False)},
-    "FRAGE_BEANTWORTEN": {"antwort": ("text", True), "konzept": ("text", False)},
+    "FRAGE_BEANTWORTEN": {"antwort": ("text", True), "konzept": ("text", False),
+                          "widerspricht_bewertung": ("bool", False)},
     "ABSCHLUSS": {"zusammenfassung": ("text", True), "erreichte_lernziele": ("liste_text", False),
                   "empfehlung": ("text", False)},
     "LERNZIELE_VORSCHLAGEN": {"lernziele": ("liste_text", True)},

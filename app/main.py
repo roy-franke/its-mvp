@@ -1207,6 +1207,20 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
             antwort = (antwort + "\n\n" if antwort else "") + bestaetigung
             niveau = _progress(profile)
     ausserhalb = bool(result.get("ausserhalb_material")) and not result.get("_fallback")
+    zusatz = None
+    if result.get("widerspricht_bewertung"):
+        # D-18, Entscheid E4: Der Tutor korrigiert sich; neu bewerten zählt nicht als Versuch
+        profile = store.get_session(sid)["profile"]
+        offen_fuer_neubewertung = bool(profile.get("antworten_aktuell")) and profile.get("wartet_auf") in (
+            "antwort", "wahl_teilweise")
+        if offen_fuer_neubewertung:
+            profile["neubewertung_offen"] = {"antwort": antwort}
+            store.update_session(sid, profile=profile)
+        store.log_event(sid, "tutor_korrektur", {"frage": message, "antwort": antwort,
+                                                 "urteil_vorher": result.get("urteil_vorher"),
+                                                 "neubewertung_angeboten": offen_fuer_neubewertung,
+                                                 "erkannt": result.get("widerspruch_erkannt", "")})
+        zusatz = tutor.zusatz_wahl(profile)
     store.log_event(sid, "chat_reply", {
         "antwort": antwort, "art": art, "stufe": stufe, "konzept": result.get("konzept", ""),
         "ausserhalb_material": ausserhalb, "angebot": result.get("angebot"),
@@ -1216,10 +1230,14 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
             antwort, tutor.bisherige_erklaerungen(history, result.get("konzept", ""))), 2)
         if art in ("theorie", "genauer") and stufe and stufe < 3 else None,
     })
-    return {"antwort": antwort, "ausserhalb_material": ausserhalb,
-            "internet": bool(result.get("internet")), "links": result.get("links") or [],
-            "hinweis": result.get("hinweis"), "nochmals_anders": bool(result.get("nochmals_anders")),
-            "angebot": result.get("angebot"), "stufe": stufe, "progress": niveau}
+    out = {"antwort": antwort, "ausserhalb_material": ausserhalb,
+           "internet": bool(result.get("internet")), "links": result.get("links") or [],
+           "hinweis": result.get("hinweis"), "nochmals_anders": bool(result.get("nochmals_anders")),
+           "angebot": result.get("angebot"), "stufe": stufe, "progress": niveau}
+    if zusatz is not None:
+        out.update(widerspricht_bewertung=True, zusatz=zusatz,
+                   wahl=tutor.offene_wahl(store.get_session(sid)["profile"]))
+    return out
 
 
 class NiveauRequest(BaseModel):
