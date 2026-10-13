@@ -984,6 +984,70 @@ def hinweis_wiederholt(neu: str, frueher: list[str]) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- D-16
+#
+# «Vermutlich führte mangelnde Wartung zum Schaden» galt als teilweise
+# richtig, dieselbe Antwort ohne «vermutlich» als richtig, obwohl der Fall
+# offenlässt, ob die Wartung vernachlässigt wurde. Vorsicht ist dort die
+# genauere Antwort. Die Regel steht im Benutzerteil der Bewertung; hier
+# liegen die Wörter und die Prüfungen dazu.
+
+ABSCHWAECHUNG = ("vermutlich", "wahrscheinlich", "möglicherweise", "eventuell", "vielleicht", "wohl",
+                 "falls", "sofern", "womöglich", "mutmasslich", "anscheinend", "dürfte", "könnte", "könnten")
+_ABSCHWAECHUNG = re.compile(r"\b(" + "|".join(ABSCHWAECHUNG) + r")\b", re.IGNORECASE)
+_VORSICHT_BEMAENGELT = re.compile(
+    r"\b(vage|unbestimmt\w*|zu vorsichtig|zu unsicher|unsicher formuliert|nur vermute\w*|vermutung|"
+    r"nicht eindeutig formuliert|bestimmter|klarer formulier\w*|deutlicher formulier\w*|nur angedeutet|"
+    r"eindeutig(er)? (sagen|festlegen|formulieren)|ohne (vermutlich|wahrscheinlich))\b", re.IGNORECASE)
+
+
+def abschwaechungen(text: str) -> list[str]:
+    return [m.group(0).lower() for m in _ABSCHWAECHUNG.finditer(text or "")]
+
+
+def ohne_abschwaechung(text: str) -> str:
+    return re.sub(r"\s+", " ", _ABSCHWAECHUNG.sub(" ", text or "")).strip()
+
+
+def nur_abschwaechung_verschieden(a: str, b: str, schwelle: float = 0.85) -> bool:
+    """Unterscheiden sich zwei Antworten im Wesentlichen nur durch vorsichtige Formulierungen?"""
+    if sorted(abschwaechungen(a)) == sorted(abschwaechungen(b)):
+        return False
+    oa, ob = ohne_abschwaechung(a), ohne_abschwaechung(b)
+    if oa.lower() == ob.lower():
+        return True
+    if len(staemme(oa)) < 3 or len(staemme(ob)) < 3:
+        return False
+    return ueberschneidung(oa, ob)[0] >= schwelle and ueberschneidung(ob, oa)[0] >= schwelle
+
+
+def vorsicht_bemaengelt(bewertung: dict, antwort: str, offene_punkte: list[str]) -> str | None:
+    """D-16: Bemängelt die Bewertung eine vorsichtige Formulierung zu einem Punkt, den der Fall offenlässt?
+
+    Gemeldet wird nur der klare Fall: Die Antwort formuliert vorsichtig, der
+    vorsichtig formulierte Satz betrifft einen offenen Punkt aus der
+    Gegenprüfung (D-13), und Feedback, Hinweis oder eine Elementbegründung
+    nennen die Vorsicht als Mangel.
+    """
+    if not offene_punkte or not abschwaechungen(antwort):
+        return None
+    saetze = [t for t in re.split(r"(?<=[.!?/;])\s+|\s+/\s+", antwort or "") if _ABSCHWAECHUNG.search(t)]
+    offen = staemme(" ".join(offene_punkte))
+    betroffen = [t for t in saetze if any(len(x) >= 4 and _kommt_vor(x, offen) for x in staemme(t))]
+    if not betroffen:
+        return None
+    texte = [str(bewertung.get("feedback") or ""), str(bewertung.get("hinweis") or "")]
+    texte += [str(e.get("begruendung") or "") for e in bewertung.get("elemente") or [] if isinstance(e, dict)
+              and e.get("status") in ("ungenau", "fehlt", "falsch")]
+    for t in texte:
+        m = _VORSICHT_BEMAENGELT.search(t)
+        if m:
+            return (f"Die Bewertung bemängelt eine vorsichtige Formulierung («{m.group(0)}»), obwohl der Fall diesen "
+                    f"Punkt offenlässt ({'; '.join(offene_punkte[:3])}). Dort ist Vorsicht die genauere Antwort und "
+                    "kein Mangel. Bewerte das Element danach und bemängle die Vorsicht nicht.")
+    return None
+
+
 # ---------------------------------------------------------------- D-11
 #
 # Wer die Theorie kopiert und als Antwort abschickt, erbringt keine

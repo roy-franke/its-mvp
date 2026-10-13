@@ -811,6 +811,16 @@ def _bewertung_anwenden(sid: str, lesson: dict, profile: dict, task: dict, text:
         **({"neubewertung": neubewertung} if neubewertung else {}),
     })
     _alternativen_protokollieren(sid, result, text)
+    if vorher and not neubewertung:
+        # D-16: gleiche Antwort bis auf eine vorsichtige Formulierung, aber anderes Urteil
+        frueher = vorher[-1]
+        if (frueher.get("bewertung") != result["bewertung"]
+                and didaktik.nur_abschwaechung_verschieden(frueher.get("antwort", ""), text)):
+            store.log_event(sid, "abschwaechung_warnung", {
+                "urteil_vorher": frueher.get("bewertung"), "urteil_nachher": result["bewertung"],
+                "woerter": sorted(set(didaktik.abschwaechungen(frueher.get("antwort", "")))
+                                  ^ set(didaktik.abschwaechungen(text))),
+                "antwort_vorher": frueher.get("antwort", ""), "antwort": text})
     offen = action in ("retry", "wahl_teilweise")
     if offen:
         # D-14: Der Elementstatus geht an die nächste Bewertung (neuester Stand zählt)

@@ -920,13 +920,20 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                     "Beurteile nur, was der Lernende darüber hinaus selbst formuliert oder angewendet hat.\n\n")
     if zweite_sicht:
         kontext += _ZWEITE_SICHT.get(zweite_sicht.get("art"), "").format(text=zweite_sicht.get("text", "")) + "\n"
+    # D-16: vorsichtige Formulierungen bei offenem Sachverhalt
+    offene_punkte = list((task.get("musterloesung_pruefung") or {}).get("offene_punkte") or [])
+    kontext += VORSICHT_REGEL
+    if offene_punkte:
+        kontext += "Offene Punkte des Sachverhalts (der Fall legt sie nicht fest): " + "; ".join(offene_punkte) + "\n"
+    kontext += "\n"
 
     def pruefen(d: dict) -> str | None:
         return (didaktik.pruefe_felder(d, ("feedback", "hinweis"))
                 or didaktik.elemente_anzahl_passt(d, dimensionen)
                 or didaktik.urteil_widerspricht_text(d)
                 or didaktik.musterloesung_erwaehnt(f"{d.get('feedback', '')} {d.get('hinweis', '')}")
-                or didaktik.hinweis_wiederholt(d.get("hinweis", ""), frueher_hinweise))
+                or didaktik.hinweis_wiederholt(d.get("hinweis", ""), frueher_hinweise)
+                or didaktik.vorsicht_bemaengelt(d, answer, offene_punkte))
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: ANTWORT_BEWERTEN\n"
@@ -1018,6 +1025,15 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         data["bewertung"] = urteil
     data["korrekt"] = data["bewertung"] == "korrekt"
     return data
+
+
+# D-16: fachneutral formuliert, gilt für jedes Fach
+VORSICHT_REGEL = (
+    "Vorsichtige Formulierungen («vermutlich», «wahrscheinlich», «falls», «sofern») sind kein Mangel, wenn der "
+    "Sachverhalt den Punkt offenlässt; dann sind sie die genauere Antwort, und das Feedback darf das "
+    "anerkennen. Legt der Sachverhalt den Punkt eindeutig fest, darfst du freundlich darauf hinweisen, dass "
+    "man es bestimmt sagen kann; das allein macht ein Element nicht ungenau. Der Hinweis verlangt nichts, "
+    "was der Lernende schon geschrieben hat.\n")
 
 
 # D-15, Entscheid E2: Umgang mit Antworten, die über das Material hinausgehen.
