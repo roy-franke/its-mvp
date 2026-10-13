@@ -681,6 +681,15 @@ def _commit_step(sid: str, profile: dict, step_type: str, task: dict) -> dict:
         store.log_event(sid, "theorie_eingeschoben", {"grund": e["grund"], "konzept": e["konzept"]})
     if task.get("_theorie_uebersprungen"):
         store.log_event(sid, "theorie_uebersprungen", task["_theorie_uebersprungen"])   # D-08
+    if task.get("musterloesung_pruefung"):
+        # D-13: Ergebnis der Gegenprüfung, für die Lehrperson im Lernverlauf
+        mp = task["musterloesung_pruefung"]
+        store.log_event(sid, "musterloesung_geprueft", {
+            "ergebnis": mp.get("ergebnis"), "titel": task.get("titel", ""),
+            "loesung_gegenpruefung": mp.get("loesung", ""), "unterschied": mp.get("unterschied", ""),
+            "offene_punkte": mp.get("offene_punkte") or [], "alternative_loesungen": task.get("alternative_loesungen") or [],
+            "verworfene_aufgabe": mp.get("verworfene_aufgabe"), "erste_pruefung": mp.get("erste_pruefung"),
+            "grund": mp.get("grund", "")})
     if step_type == "theorie":
         profile["theory_steps"] = profile.get("theory_steps", 0) + 1
         profile["aufgaben_seit_theorie"] = 0

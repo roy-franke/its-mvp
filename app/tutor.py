@@ -23,6 +23,12 @@ LEVEL_LABELS = {
 }
 
 
+# D-05: Mit der Standardtemperatur bewertete das Modell dieselbe Antwort je nach
+# Durchlauf unterschiedlich. Die Bewertung soll reproduzierbar sein. Gilt auch
+# für die Gegenprüfung der Musterlösung (D-13).
+BEWERTUNG_TEMPERATUR = float(os.getenv("ITS_BEWERTUNG_TEMPERATUR", "0"))
+
+
 def total_steps() -> int:
     return int(os.getenv("ITS_TOTAL_STEPS", "8"))
 
@@ -458,7 +464,9 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         'Format: {"titel": "kurzer Titel", '
         '"inhalt": "die Erklärung ohne das Beispiel", '
         '"beispiel": "das Beispiel mit kurzer Begründung", '
-        '"konzept": "behandeltes Konzept in 1-3 Worten"'
+        '"konzept": "behandeltes Konzept in 1-3 Worten", '
+        # D-13: Merkmale, an denen man das Konzept in einem Fall erkennt
+        '"merkmale": ["1-3 Merkmale, an denen man das Konzept in einem Fall erkennt, je 1-3 Wörter"]'
         + (', "quelle": "Name der verwendeten Quelle"' if quellen else "") + "}"
     )
     vorher_text = didaktik.theorietext(vorher)
@@ -473,6 +481,7 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
     if data.get("_fallback"):
         return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"
+    data["merkmale"] = didaktik.merkmale_bereinigen(data.get("merkmale"))
     if adaptation == "simplify" and vorher:
         data["nochmals_anders"] = True     # D-08: erlaubte Ausnahme, gekennzeichnet
     _quelle_setzen(data, lesson)
@@ -509,14 +518,137 @@ def _quelle_setzen(data: dict, lesson: dict) -> None:
         data["quelle_verworfen"] = str(angabe)[:200]
 
 
+def musterloesung_pruefen_aktiv() -> bool:
+    """D-13, Entscheid E3: Gegenprüfung der Musterlösung, abschaltbar."""
+    return os.getenv("ITS_MUSTERLOESUNG_PRUEFEN", "true").strip().lower() not in ("false", "0", "nein", "no", "off")
+
+
 def generate_task(lesson: dict, profile: dict, history: list[dict],
                   adaptation: str | None = None, ohne_erklaerpruefung: bool = False) -> dict:
-    """Erzeugt die nächste Aufgabe basierend auf Profil, Verlauf und Adaption.
+    """Erzeugt die nächste Aufgabe und prüft ihre Musterlösung gegen (D-13).
+
+    Ablauf nach Entscheid E3: Ein eigener Aufruf löst den Fall, ohne die
+    Musterlösung zu kennen. Weicht das Ergebnis ab, wird die Aufgabe einmal
+    neu erzeugt, mit dem Unterschied als Korrekturhinweis. Weicht es erneut
+    ab, gilt die Musterlösung als unsicher, und die abweichende Lösung wird
+    als vertretbare Alternative hinterlegt. Das Ergebnis steht im internen
+    Feld musterloesung_pruefung und landet als Ereignis im Lernverlauf.
+    """
+    task = _aufgabe_erzeugen(lesson, profile, history, adaptation, ohne_erklaerpruefung)
+    if (task.get("_fallback") or task.get("typ") != "aufgabe" or not musterloesung_pruefen_aktiv()
+            or task.get("aufgabentyp") == "multiple_choice" or not task.get("erwartete_antwort")):
+        return task
+    pruefung = pruefe_musterloesung(lesson, task, letzte_theorie(history)
+                                    if profile.get("last_type") == "theorie" else None)
+    if pruefung["ergebnis"] != "abweichend":
+        task["musterloesung_pruefung"] = pruefung
+        return task
+    korrektur = ("Ein unabhängiger Löser kam bei deiner letzten Aufgabe zu einem anderen Ergebnis als deine "
+                 f"Musterlösung: {pruefung.get('unterschied') or pruefung.get('loesung')}. Erzeuge eine neue Aufgabe, "
+                 "deren Sachverhalt alle Angaben enthält, die für die Musterlösung nötig sind, und deren "
+                 "Musterlösung aus dem Sachverhalt folgt, nicht aus dem Namen des Konzepts.")
+    neu = _aufgabe_erzeugen(lesson, profile, history, adaptation, ohne_erklaerpruefung, korrektur)
+    verworfen = {k: task.get(k) for k in ("titel", "inhalt", "frage", "erwartete_antwort")}
+    if neu.get("_fallback"):
+        # Die erste Aufgabe bleibt, gilt aber als unsicher
+        neu, zweite = task, pruefung
+    else:
+        zweite = pruefe_musterloesung(lesson, neu, letzte_theorie(history)
+                                      if profile.get("last_type") == "theorie" else None)
+    if zweite["ergebnis"] == "abweichend":
+        zweite["ergebnis"] = "unsicher"
+        if zweite.get("loesung"):
+            neu["alternative_loesungen"] = list(dict.fromkeys(
+                (neu.get("alternative_loesungen") or []) + [zweite["loesung"]]))[:4]
+    elif zweite["ergebnis"] == "uebereinstimmend":
+        zweite["ergebnis"] = "nach_neugenerierung"
+    zweite["erste_pruefung"] = {k: pruefung.get(k) for k in ("loesung", "unterschied")}
+    if neu is not task:
+        zweite["verworfene_aufgabe"] = verworfen
+    neu["musterloesung_pruefung"] = zweite
+    return neu
+
+
+GEGENPRUEFUNG_TEXTE = {
+    "uebereinstimmend": "übereinstimmend",
+    "nach_neugenerierung": "nach Neugenerierung übereinstimmend",
+    "unsicher": "unsicher",
+    "nicht_geprueft": "nicht geprüft",
+}
+
+
+def pruefe_musterloesung(lesson: dict, task: dict, theorie: dict | None = None) -> dict:
+    """D-13: Löst den Fall unabhängig, nur mit Material und Sachverhalt.
+
+    Eigene Schrittart MUSTERLOESUNG_PRUEFEN mit demselben Systemprompt
+    (Prompt-Cache); der Benutzerteil enthält nur Fall, Frage und die Merkmale
+    des Konzepts, nicht die Musterlösung. Der Vergleich ist zweistufig: Stimmen
+    die Fachbegriffe beider Lösungen überein, gilt die Musterlösung ohne
+    weiteren Aufruf als bestätigt. Sonst entscheidet ein zweiter, kurzer
+    Aufruf (MUSTERLOESUNG_VERGLEICHEN), ob die beiden Lösungen im Ergebnis
+    übereinstimmen. Ein eigener Vergleichsaufruf statt eines kombinierten
+    verhindert, dass sich das Modell beim Lösen an der Musterlösung orientiert.
+    Rückgabe: ergebnis (uebereinstimmend, abweichend, nicht_geprueft),
+    loesung, offene_punkte, unterschied, merkmale_im_fall.
+    """
+    merkmale = (didaktik.merkmale_bereinigen((theorie or {}).get("merkmale"))
+                or didaktik.merkmale_bereinigen(task.get("merkmale")))
+    elemente = didaktik.elemente_bereinigen(task.get("erwartete_elemente"))
+    konzept = (task.get("konzept") or "").strip()
+    data = llm.chat_json(
+        _system_prompt(lesson),
+        "AUFGABE: MUSTERLOESUNG_PRUEFEN\n"
+        "Löse die folgende Aufgabe selbst, nur mit dem Lektionsmaterial und dem Sachverhalt. Eine "
+        "Musterlösung kennst du nicht. Stütze dich nur auf Angaben, die im Sachverhalt stehen; erfinde "
+        "keine. Fehlt eine Angabe, um eindeutig zu entscheiden, nenne sie in offene_punkte, und lassen "
+        "sich deshalb mehrere Lösungen vertreten, setze mehrere_loesungen auf true.\n"
+        f"Sachverhalt: {task.get('inhalt', '')}\nFrage: {task.get('frage', '')}\n"
+        + (f"Gesuchte Teile der Antwort: {'; '.join(elemente)}\n" if elemente else "")
+        + (f"Prüfe zusätzlich, ob der Sachverhalt die Merkmale von «{konzept}» enthält: "
+           + ", ".join(merkmale) + ".\n" if merkmale else "")
+        + '\nFormat: {"loesung": "deine Lösung in 1-3 Sätzen", "offene_punkte": ["fehlende Angabe", "..."], '
+          '"mehrere_loesungen": false'
+        + (', "merkmale_im_fall": true' if merkmale else "") + "}",
+        fallback={}, temperature=BEWERTUNG_TEMPERATUR)
+    if data.get("_fallback"):
+        return {"ergebnis": "nicht_geprueft", "grund": data.get("_fehler", ""), "offene_punkte": []}
+    out = {"loesung": str(data.get("loesung") or "").strip(),
+           "offene_punkte": didaktik.liste_texte(data.get("offene_punkte"), 5),
+           "mehrere_loesungen": bool(data.get("mehrere_loesungen"))}
+    if merkmale:
+        out["merkmale_im_fall"] = data.get("merkmale_im_fall") is not False
+    if merkmale and not out["merkmale_im_fall"]:
+        return dict(out, ergebnis="abweichend",
+                    unterschied=f"Der Sachverhalt enthält die Merkmale von «{konzept}» nicht ({', '.join(merkmale)}).")
+    if didaktik.loesungen_stimmen_ueberein(task.get("erwartete_antwort", ""), out["loesung"], lesson):
+        return dict(out, ergebnis="uebereinstimmend", vergleich="fachbegriffe")
+    vergleich = llm.chat_json(
+        _system_prompt(lesson),
+        "AUFGABE: MUSTERLOESUNG_VERGLEICHEN\n"
+        "Zwei Lösungen zum selben Fall. Stimmen sie im Ergebnis überein (dieselbe Antwort auf die Frage, auch "
+        "wenn anders formuliert)? Ergänzt die eine die andere nur, gilt das als übereinstimmend.\n"
+        f"Sachverhalt: {task.get('inhalt', '')}\nFrage: {task.get('frage', '')}\n"
+        f"Lösung A: {task.get('erwartete_antwort', '')}\nLösung B: {out['loesung']}\n\n"
+        'Format: {"uebereinstimmend": true, "unterschied": "bei Abweichung in einem Satz, worin, sonst leer"}',
+        fallback={}, temperature=BEWERTUNG_TEMPERATUR)
+    if vergleich.get("_fallback"):
+        return dict(out, ergebnis="nicht_geprueft", grund=vergleich.get("_fehler", ""))
+    if vergleich.get("uebereinstimmend") is True:
+        return dict(out, ergebnis="uebereinstimmend", vergleich="modell")
+    return dict(out, ergebnis="abweichend", vergleich="modell",
+                unterschied=str(vergleich.get("unterschied") or "").strip())
+
+
+def _aufgabe_erzeugen(lesson: dict, profile: dict, history: list[dict],
+                      adaptation: str | None = None, ohne_erklaerpruefung: bool = False,
+                      korrektur: str | None = None) -> dict:
+    """Erzeugt eine Aufgabe basierend auf Profil, Verlauf und Adaption.
 
     D-01: Die Aufgabe verlangt Eigenleistung. Nach der Generierung prüft
-    didaktik.pruefe_aufgabe, ob das Lösungswort in der Frage steht, ob das
-    Beispiel der Theorie wiederverwendet wird oder ob die Antwort direkt aus
-    der Theorie abschreibbar ist. Bei einem Treffer wird einmal neu generiert.
+    didaktik.pruefe_aufgabe, ob das Lösungswort in der Frage oder im Titel
+    steht, ob das Beispiel der Theorie wiederverwendet wird oder ob die
+    Antwort direkt aus der Theorie abschreibbar ist. Bei einem Treffer wird
+    neu generiert. D-13: Der Fall muss die Merkmale des Konzepts enthalten.
     """
     covered = ", ".join(profile["covered"]) or "noch keine"
     recent = _recent_history(history)
@@ -584,9 +716,16 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
             f"Gegenstand): {beispiel}\n"
         )
         verboten = didaktik.fallwoerter(theorie, didaktik.themenwoerter(lesson))
+        merkmale = didaktik.merkmale_bereinigen(theorie.get("merkmale")) if direkt_nach_theorie else []
         if verboten:
-            instruction += ("Diese Wörter aus dem Beispiel und verwandte Wörter dürfen in deinem "
-                            "Fall NICHT vorkommen: " + ", ".join(verboten) + ".\n")
+            # D-13: früher «und verwandte Wörter»; das Modell mied dann das prägende Merkmal ganz
+            instruction += ("Diese Wörter aus dem Beispiel dürfen in deinem Fall NICHT vorkommen (wähle "
+                            "andere Beteiligte, einen anderen Ort und einen anderen Gegenstand): "
+                            + ", ".join(verboten) + ".\n")
+        if merkmale:
+            instruction += ("Der Fall MUSS die Merkmale des Konzepts enthalten, an denen man es erkennt, in "
+                            "neuer Form: " + ", ".join(merkmale) + ". Ohne diese Merkmale passt der Fall "
+                            "nicht zum Konzept.\n")
     instruction += (
         "Die Frage darf weder die gesuchten Begriffe noch die anzuwendende Methode oder "
         "Rechenoperation nennen (nicht «Addiere die Brüche …», sondern «Wie viel Mehl "
@@ -601,7 +740,14 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         "«Nenne die verantwortliche Person und die Art der Haftung», nicht «Wer ist verantwortlich?», "
         "wenn auch die Art der Haftung erwartet wird). Verlangt die Frage sprachlich genau eine Sache "
         "(«Welche Voraussetzung ist hier am stärksten erkennbar?»), gibt es genau ein Element.\n"
-        'Format: {"titel": "kurzer Titel", '
+        # D-13: Fall, Titel und Musterlösung stimmen überein
+        "Die Musterlösung folgt aus dem Sachverhalt, nicht aus dem Namen des Konzepts. Der Sachverhalt "
+        "enthält alle Angaben, die für die Musterlösung nötig sind (zum Beispiel, ob etwas fehlerhaft "
+        "hergestellt oder schlecht unterhalten war). Lässt der Sachverhalt bewusst mehrere Lösungen zu, "
+        "nenne die weiteren in alternative_loesungen, sonst bleibt die Liste leer. Gib in merkmale an, "
+        "an welcher Stelle des Falls man das Konzept erkennt. Der Titel beschreibt nur die Situation "
+        "(«Unfall auf dem Spielplatz») und nennt weder das gesuchte Ergebnis noch das gesuchte Konzept.\n"
+        'Format: {"titel": "kurzer, neutraler Titel ohne Lösung", '
         '"inhalt": "Fallbeschreibung oder Situation (2-5 Sätze), ohne die Lösung", '
         '"frage": "eine konkrete Frage an den Lernenden", '
         '"aufgabentyp": "anwenden|begruenden|vergleichen|vorhersagen|fehler_finden|erklaeren|multiple_choice", '
@@ -609,14 +755,19 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
         '"erwartete_antwort": "kurze Musterlösung in 1-2 Sätzen (wird nicht angezeigt)", '
         '"schluesselbegriffe": ["1-4 Begriffe, die eine richtige Antwort enthalten muss"], '
         '"erwartete_elemente": ["1-4 Teile der Antwort, die die Frage ausdrücklich verlangt"], '
+        '"merkmale": [{"merkmal": "Merkmal des Konzepts", "im_fall": "Wort oder Satzteil aus dem Fall"}], '
+        '"alternative_loesungen": ["weitere vertretbare Lösung, nur wenn der Fall sie bewusst zulässt"], '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
     )
+    if korrektur:
+        instruction += "\n\nKORREKTUR: " + korrektur
     texte = erklaerte_texte(history)
 
     def pruefen(d: dict) -> str | None:
         if direkt_nach_theorie:
             didaktik.konzept_ergaenzen(d, theorie)
         return (didaktik.pruefe_aufgabe(d, theorie, direkt_nach_theorie, lesson)
+                or didaktik.merkmale_fehlen_im_fall(d, theorie if direkt_nach_theorie else None)
                 or didaktik.elemente_passen_zur_frage(d)
                 or (didaktik.aufgabe_passt_zur_theorie(d, theorie) if direkt_nach_theorie else None)
                 or (didaktik.begriff_nicht_erklaert(d, texte, lesson) if direkt_nach_theorie else None)
@@ -634,6 +785,8 @@ def generate_task(lesson: dict, profile: dict, history: list[dict],
     if not data["erwartete_elemente"] and data.get("erwartete_antwort"):
         # D-10 AK 1: Jede Aufgabe hat gespeicherte Elemente, notfalls die Musterlösung als eines
         data["erwartete_elemente"] = [str(data["erwartete_antwort"]).strip()]
+    data["merkmale"] = didaktik.merkmale_der_aufgabe(data.get("merkmale"))
+    data["alternative_loesungen"] = didaktik.liste_texte(data.get("alternative_loesungen"), 4)
     data["typ"] = "aufgabe"
     return data
 
@@ -668,7 +821,8 @@ def unerklaert(task: dict, erklaert: list[str], texte: str) -> str | None:
 
 # Felder, die nur der Server und die Lehrperson sehen (nie die Lernenden):
 # Die Musterlösung würde die Aufgabe verraten.
-INTERNE_FELDER = ("erwartete_antwort", "schluesselbegriffe", "quelle_verworfen", "erwartete_elemente")
+INTERNE_FELDER = ("erwartete_antwort", "schluesselbegriffe", "quelle_verworfen", "erwartete_elemente",
+                  "merkmale", "alternative_loesungen", "musterloesung_pruefung")
 
 
 def fuer_lernende(task: dict | None) -> dict | None:
@@ -678,11 +832,6 @@ def fuer_lernende(task: dict | None) -> dict | None:
 
 
 BEWERTUNGEN = ("korrekt", "teilweise", "falsch")
-
-
-# D-05: Mit der Standardtemperatur bewertete das Modell dieselbe Antwort je nach
-# Durchlauf unterschiedlich. Die Bewertung soll reproduzierbar sein.
-BEWERTUNG_TEMPERATUR = float(os.getenv("ITS_BEWERTUNG_TEMPERATUR", "0"))
 
 
 def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,

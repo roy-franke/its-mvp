@@ -405,6 +405,7 @@ def _mock_text(system: str, user: str) -> str:
             "inhalt": "Wer einem anderen widerrechtlich Schaden zufügt, muss ihn ersetzen (Art. 41 OR). Damit jemand haftet, braucht es vier Voraussetzungen: einen Schaden, Widerrechtlichkeit, einen Kausalzusammenhang und ein Verschulden. Fehlt eine davon, entfällt die Haftung, weil das Gesetz alle vier verlangt. (Mock-Theorie – für echten Lerninhalt LLM-Provider konfigurieren.)",
             "beispiel": "Du spielst im Hof Fussball und schiesst eine Fensterscheibe ein. Der Schaden ist die kaputte Scheibe, widerrechtlich ist die Verletzung fremden Eigentums, dein Schuss ist die Ursache, und fahrlässig gehandelt hast du auch. Also haftest du.",
             "konzept": "Verschuldenshaftung",
+            "merkmale": ["Schaden"],
             **_mock_quelle(user),
         }, ensure_ascii=False)
     if "NAECHSTE_AUFGABE" in user:
@@ -418,8 +419,25 @@ def _mock_text(system: str, user: str) -> str:
             "schluesselbegriffe": ["fahrlässig", "Widerrechtlichkeit"],
             "erwartete_elemente": ["Entscheid, ob Anna zahlen muss",
                                    "Begründung mit den Voraussetzungen der Verschuldenshaftung"],
+            "merkmale": [{"merkmal": "Schaden", "im_fall": "beschädigt es beim Sturz"}],
+            "alternative_loesungen": [],
             "konzept": "Verschuldenshaftung",
         }, ensure_ascii=False)
+    if "MUSTERLOESUNG_PRUEFEN" in user:
+        # D-13: ITS_MOCK_GEGENPRUEFUNG=abweichend simuliert eine abweichende Lösung
+        if os.getenv("ITS_MOCK_GEGENPRUEFUNG") == "abweichend":
+            return json.dumps({"loesung": "Anna muss nicht zahlen, weil die Freundin das Risiko trägt.",
+                               "offene_punkte": ["ob Anna sorgfältig gefahren ist"], "mehrere_loesungen": True,
+                               "merkmale_im_fall": True}, ensure_ascii=False)
+        return json.dumps({"loesung": "Anna muss zahlen, weil sie fahrlässig einen Schaden verursacht hat und "
+                                      "die vier Voraussetzungen erfüllt sind.",
+                           "offene_punkte": ["ob Anna beim Sturz unvorsichtig war"], "mehrere_loesungen": False,
+                           "merkmale_im_fall": True}, ensure_ascii=False)
+    if "MUSTERLOESUNG_VERGLEICHEN" in user:
+        gleich = os.getenv("ITS_MOCK_GEGENPRUEFUNG") != "abweichend"
+        return json.dumps({"uebereinstimmend": gleich,
+                           "unterschied": "" if gleich else "B verneint die Haftung, A bejaht sie."},
+                          ensure_ascii=False)
     if "ANTWORT_BEWERTEN" in user:
         # Heuristik statt fester Antwort, damit die Adaption auch ohne LLM
         # sichtbar wird: lange Antworten korrekt, mittlere teilweise, kurze falsch.

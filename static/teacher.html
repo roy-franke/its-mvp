@@ -449,7 +449,10 @@ function renderEvent(ev, mitDatum) {
     else if (ev.type === "task" && p.typ === "theorie") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}${p.nochmals_anders ? '<span class="pill">Nochmals anders erklärt</span> ' : ""}📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<div class="muted">${fmt(p.inhalt)}</div>${p.beispiel ? `<div class="muted">${fmt("💡 " + p.beispiel)}</div>` : ""}${p.quelle ? `<br><span class="muted">Quelle: ${esc(p.quelle)}</span>` : ""}${p.quelle_verworfen ? `<br><span class="fb">Quelle verworfen (nicht in der Lektion): ${esc(p.quelle_verworfen)}</span>` : ""}`;
     else if (ev.type === "task") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}📝 Aufgabe: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)}${p.aufgabentyp ? ", " + esc(p.aufgabentyp) : ""})<div class="muted">${fmt(p.inhalt)}</div>${fmt("❓ " + (p.frage || ""))}`
       + (p.erwartete_antwort ? `<br><span class="muted">Erwartet: ${esc(p.erwartete_antwort)}${(p.schluesselbegriffe || []).length ? " · Schlüsselbegriffe: " + p.schluesselbegriffe.map(esc).join(", ") : ""}</span>` : "")
-      + ((p.erwartete_elemente || []).length ? `<br><span class="muted">Erwartete Elemente (D-10): ${p.erwartete_elemente.map((e, i) => `${i + 1}) ${esc(e)}`).join(" · ")}</span>` : "");
+      + ((p.erwartete_elemente || []).length ? `<br><span class="muted">Erwartete Elemente: ${p.erwartete_elemente.map((e, i) => `${i + 1}) ${elementText(e)}`).join(" · ")}</span>` : "")
+      + ((p.merkmale || []).length ? `<br><span class="muted">Merkmale im Fall (D-13): ${p.merkmale.map(m => typeof m === "string" ? esc(m) : `${esc(m.merkmal)}${m.im_fall ? " → «" + esc(m.im_fall) + "»" : ""}`).join(" · ")}</span>` : "")
+      + ((p.alternative_loesungen || []).length ? `<br><span class="muted">Alternative Lösungen: ${p.alternative_loesungen.map(esc).join(" · ")}</span>` : "")
+      + (p.musterloesung_pruefung ? `<br><span class="${p.musterloesung_pruefung.ergebnis === "unsicher" ? "fb" : "muted"}">Gegenprüfung: ${esc(GEGENPRUEFUNG[p.musterloesung_pruefung.ergebnis] || p.musterloesung_pruefung.ergebnis)}</span>` : "");
     else if (ev.type === "answer_submitted") body = `💬 Antwort${p.confidence ? ` <span class="muted">(Sicherheit: ${p.confidence}/10)</span>` : ""}: <pre>${esc(p.answer)}</pre>`;
     else if (ev.type === "answer_evaluated") {
       const bew = p.bewertung || (p.korrekt ? "korrekt" : "falsch");
@@ -489,6 +492,17 @@ function renderEvent(ev, mitDatum) {
     else if (ev.type === "kopie_erkannt") { cls += " regel_verstoss"; body = `✍️ <strong>Kopie erkannt</strong> (D-11): ${Math.round(p.anteil * 100)} % der Antwort wörtlich aus «${esc(p.quelle || "")}», nicht bewertet und nicht als Versuch gezählt`; }
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
+    else if (ev.type === "musterloesung_geprueft") {
+      // D-13: Ergebnis der Gegenprüfung der Musterlösung
+      if (p.ergebnis === "unsicher") cls += " regel_verstoss";
+      body = `🔍 Gegenprüfung der Musterlösung: <strong>${esc(GEGENPRUEFUNG[p.ergebnis] || p.ergebnis)}</strong>`
+        + (p.loesung_gegenpruefung ? `<br><span class="muted">Unabhängige Lösung: ${esc(p.loesung_gegenpruefung)}</span>` : "")
+        + (p.unterschied ? `<br><span class="muted">Unterschied: ${esc(p.unterschied)}</span>` : "")
+        + (p.verworfene_aufgabe ? `<br><span class="muted">Verworfen: «${esc(p.verworfene_aufgabe.titel)}» – ${esc(p.verworfene_aufgabe.erwartete_antwort)}</span>` : "")
+        + ((p.offene_punkte || []).length ? `<br><span class="muted">Offene Punkte im Sachverhalt: ${p.offene_punkte.map(esc).join(" · ")}</span>` : "")
+        + ((p.alternative_loesungen || []).length ? `<br><span class="muted">Alternative Lösungen: ${p.alternative_loesungen.map(esc).join(" · ")}</span>` : "")
+        + (p.grund ? `<br><span class="muted">Grund: ${esc(p.grund)}</span>` : "");
+    }
     else body = esc(JSON.stringify(p));
     return `<div class="event ${cls}"><span class="t">${time}</span><br>${body}</div>`;
 }
@@ -500,7 +514,16 @@ const SCHRITT = {
   ANTWORT_BEWERTEN: "Antwort bewerten", FRAGE_BEANTWORTEN: "Verständnisfrage",
   ABSCHLUSS: "Abschluss", LERNZIELE_VORSCHLAGEN: "Lernziele vorschlagen",
   MATERIAL_PRUEFEN: "Material prüfen", WITZ: "Witz zum Thema",
+  MUSTERLOESUNG_PRUEFEN: "Musterlösung prüfen", MUSTERLOESUNG_VERGLEICHEN: "Musterlösung vergleichen",
 };
+// D-13: Ergebnis der Gegenprüfung
+const GEGENPRUEFUNG = { uebereinstimmend: "übereinstimmend", nach_neugenerierung: "nach Neugenerierung übereinstimmend",
+                        unsicher: "unsicher", nicht_geprueft: "nicht geprüft" };
+// D-14: Element als Dimension mit erwartetem Inhalt (alte Aufgaben: nur Text)
+function elementText(e) {
+  if (typeof e === "string") return esc(e);
+  return esc(e.dimension || "") + (e.erwartet ? ` <span class="muted">(erwartet: ${esc(e.erwartet)})</span>` : "");
+}
 
 // T-11, T-12, D-07: Wahl der lernenden Person
 const WAHL_EVENT = { wahl_nach_bewertungsfehler: "Wahl nach gescheiterter Bewertung",

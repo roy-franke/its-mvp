@@ -333,6 +333,41 @@ def ohne_vergleich(frage: str) -> str:
     return _VERGLEICH.sub(" ", frage)
 
 
+def loesungswort_in_titel(task: dict, fachwoerter: set[str] | None = None) -> str | None:
+    """D-13: Verrät der Titel die gesuchte Lösung?
+
+    «Kausalhaftung beim Spielplatz» über der Frage, welche Art der Haftung
+    greift, nimmt die Antwort vorweg. Geprüft werden die Lösungsbegriffe wie
+    bei der Frage, dazu das Konzept der Aufgabe, wenn die erwartete Antwort es
+    verlangt. Angaben aus dem Fall und Themenwörter der Lektion sind erlaubt.
+    """
+    titel = (task.get("titel") or "").strip()
+    if not titel or (task.get("aufgabentyp") or "").lower() in ("multiple_choice", "multiple-choice", "mc"):
+        return None
+    titel_staemme = staemme(titel)
+    fall_staemme = staemme(task.get("inhalt") or "")
+    begriffe = list(schluesselbegriffe(task))
+    erwartet = " ".join([str(task.get("erwartete_antwort") or "")]
+                        + [e["erwartet"] for e in elemente_normalisieren(task.get("erwartete_elemente"))])
+    konzept = (task.get("konzept") or "").strip()
+    if konzept and staemme(konzept) and all(_kommt_vor(t, staemme(erwartet)) for t in staemme(konzept)):
+        begriffe.append(konzept)
+    for begriff in begriffe:
+        if re.search(r"\d", begriff):
+            continue
+        teile = staemme(begriff)
+        if not teile or all(_kommt_vor(t, fall_staemme) for t in teile):
+            continue
+        if fachwoerter is not None and all(any(t.startswith(w) for w in themenwurzeln(fachwoerter)) for t in teile):
+            continue
+        if fachwoerter is not None and not all(_kommt_vor(t, fachwoerter) for t in teile):
+            continue
+        if all(_kommt_vor(t, titel_staemme) for t in teile):
+            return (f"Der Titel «{titel}» verrät die Lösung («{begriff}»). Wähle einen neutralen Titel, der "
+                    "nur die Situation beschreibt (zum Beispiel «Unfall auf dem Spielplatz»), nicht das Ergebnis.")
+    return None
+
+
 def loesungswort_in_aufgabe(task: dict, fachwoerter: set[str] | None = None) -> str | None:
     """Kommt ein Lösungsbegriff (oder sein Wortstamm) in der Frage vor?
 
@@ -453,10 +488,15 @@ def fallwoerter(theorie: dict | None, themen: set[str] | None = None, n: int = 1
     Sie gehen vorab als ausdrückliche Verbotsliste an das Modell: Eine konkrete
     Liste («Hund, Passant, beissen») befolgt es zuverlässiger als die
     allgemeine Anweisung, einen anderen Fall zu wählen.
+
+    D-13: Die Merkmale des Konzepts (Feld merkmale der Theorie) landen nie auf
+    der Liste. Gesucht ist ein neuer Fall, nicht ein Fall ohne das prägende
+    Merkmal.
     """
     if not theorie or not (theorie.get("beispiel") or "").strip():
         return []
-    ausnahmen = staemme(" ".join([theorie.get("konzept") or "", theorie.get("inhalt") or ""])) | (themen or set())
+    ausnahmen = staemme(" ".join([theorie.get("konzept") or "", theorie.get("inhalt") or ""]
+                                 + merkmale_bereinigen(theorie.get("merkmale")))) | (themen or set())
     out, gesehen = [], set()
     for w in woerter(theorie["beispiel"]):
         st = stamm(w)
@@ -538,6 +578,7 @@ def pruefe_aufgabe(task: dict, theorie: dict | None, direkt_nach_theorie: bool,
             or (thema_verfehlt(f"{task.get('inhalt', '')} {task.get('frage', '')}", lesson)
                 if lesson else None)
             or loesungswort_in_aufgabe(task, fach)
+            or loesungswort_in_titel(task, fach)
             or beispiel_wiederverwendet(task, theorie, themen)
             or (abschreibbar(task, theorie) if direkt_nach_theorie else None))
 
@@ -715,12 +756,133 @@ def begriff_nicht_erklaert(task: dict, erklaerte_texte: str, lesson: dict | None
     return None
 
 
-# ---------------------------------------------------------------- D-10
+# ---------------------------------------------------------------- D-13
+#
+# Nach einer Theorie zur Tierhalterhaftung entstand ein Fall ohne Tier (Ball
+# zerbricht Fensterscheibe), und die Musterlösung folgte dem Etikett statt dem
+# Sachverhalt. Theorie und Aufgabe nennen deshalb die Merkmale, an denen man
+# das Konzept in einem Fall erkennt; die Aufgabe gibt zu jedem Merkmal an, wo
+# es im Fall steht. Klare Fälle prüft dieser Code, die übrigen die
+# Gegenprüfung der Musterlösung (tutor.pruefe_musterloesung).
 
-def elemente_bereinigen(roh) -> list[str]:
+def merkmale_bereinigen(roh) -> list[str]:
+    """Merkmale als kurze Texte (Theorie: Liste von Texten, Aufgabe: auch Objekte)."""
     if not isinstance(roh, list):
         return []
-    return [str(e).strip() for e in roh if isinstance(e, str) and str(e).strip()][:4]
+    out = []
+    for m in roh:
+        text = m.get("merkmal") if isinstance(m, dict) else m
+        if isinstance(text, str) and text.strip():
+            out.append(text.strip())
+    return out[:3]
+
+
+def merkmale_der_aufgabe(roh) -> list[dict]:
+    """[{merkmal, im_fall}] aus dem Feld merkmale einer Aufgabe; alte Texte ohne Fundstelle."""
+    if not isinstance(roh, list):
+        return []
+    out = []
+    for m in roh:
+        if isinstance(m, dict) and str(m.get("merkmal") or "").strip():
+            out.append({"merkmal": str(m["merkmal"]).strip(), "im_fall": str(m.get("im_fall") or "").strip()})
+        elif isinstance(m, str) and m.strip():
+            out.append({"merkmal": m.strip(), "im_fall": ""})
+    return out[:3]
+
+
+def _steht_im_fall(text: str, fall_staemme: set[str]) -> bool:
+    teile = [t for t in staemme(text) if len(t) >= 3] or [stamm(w) for w in re.findall(r"[A-Za-zÄÖÜäöü]{3,}", text)]
+    return bool(teile) and any(_kommt_vor(t, fall_staemme) for t in teile)
+
+
+def merkmale_fehlen_im_fall(task: dict, theorie: dict | None = None) -> str | None:
+    """D-13: Enthält der Fall die Merkmale seines Konzepts?
+
+    Verlangt sind die Merkmale der unmittelbar vorangehenden Theorie, sonst
+    die der Aufgabe selbst. Ein Merkmal gilt als vorhanden, wenn es selbst im
+    Fall steht oder die Aufgabe eine Fundstelle nennt, die wirklich im Fall
+    steht («Tier» → «Hund»). Ob die Fundstelle das Merkmal inhaltlich trägt,
+    prüft die Gegenprüfung.
+    """
+    fall = staemme(task.get("inhalt") or "")
+    eintraege = merkmale_der_aufgabe(task.get("merkmale"))
+    verlangt = merkmale_bereinigen((theorie or {}).get("merkmale")) or [e["merkmal"] for e in eintraege]
+    if not verlangt:
+        return None                       # alte Theorien und Aufgaben ohne Merkmale
+    konzept = (task.get("konzept") or (theorie or {}).get("konzept") or "dem Konzept").strip()
+    fehlend = []
+    for merkmal in verlangt:
+        if _steht_im_fall(merkmal, fall):
+            continue
+        m_staemme = staemme(merkmal) or {stamm(merkmal)}
+        treffer = [e for e in eintraege
+                   if any(gleicher_stamm(a, b) for a in m_staemme for b in (staemme(e["merkmal"]) or {stamm(e["merkmal"])}))]
+        if any(e["im_fall"] and _steht_im_fall(e["im_fall"], fall) for e in treffer):
+            continue
+        fehlend.append(merkmal)
+    if fehlend:
+        return (f"Der Fall enthält das prägende Merkmal von «{konzept}» nicht: " + ", ".join(f"«{m}»" for m in fehlend)
+                + ". Erfinde einen neuen Fall, in dem dieses Merkmal vorkommt (in neuer Form, nicht wie im Beispiel "
+                  "der Theorie), und gib im Feld merkmale an, wo es im Fall steht.")
+    return None
+
+
+def loesungen_stimmen_ueberein(a: str, b: str, lesson: dict | None = None) -> bool:
+    """D-13: Klarer Fall einer Übereinstimmung zweier Lösungen.
+
+    Verglichen werden die Fachbegriffe (Stämme ab fünf Zeichen, die im
+    Vokabular der Lektion vorkommen). Nennen beide Lösungen dieselben
+    Fachbegriffe und keine verneint, was die andere bejaht, gilt das als
+    Übereinstimmung. Alles andere entscheidet das Modell; dieser Vergleich
+    meldet nie eine Abweichung.
+    """
+    if not a.strip() or not b.strip():
+        return False
+    fach = fachvokabular(lesson) if lesson else None
+
+    def kern(text: str) -> set[str]:
+        return {t for t in staemme(text) if len(t) >= 5 and (fach is None or _kommt_vor(t, fach))}
+    ka, kb = kern(a), kern(b)
+    if not ka or not kb:
+        return False
+    verneint = re.compile(r"\b(nicht|kein\w*)\b", re.IGNORECASE)
+    if bool(verneint.search(a)) != bool(verneint.search(b)):
+        return False
+    return all(_kommt_vor(t, kb) for t in ka) and all(_kommt_vor(t, ka) for t in kb)
+
+
+def liste_texte(roh, n: int = 3) -> list[str]:
+    if not isinstance(roh, list):
+        return []
+    return [str(x).strip() for x in roh if isinstance(x, (str, int, float)) and str(x).strip()][:n]
+
+
+# ---------------------------------------------------------------- D-10
+
+def elemente_normalisieren(roh) -> list[dict]:
+    """D-14: Erwartete Elemente als [{dimension, erwartet}].
+
+    Neue Aufgaben speichern zu jeder Dimension den erwarteten Inhalt. Ältere
+    Aufgaben haben nur Texte; sie gelten als Dimension ohne Inhalt und werden
+    wie bisher bewertet.
+    """
+    if not isinstance(roh, list):
+        return []
+    out = []
+    for e in roh:
+        if isinstance(e, dict):
+            dim = str(e.get("dimension") or e.get("element") or "").strip()
+            erwartet = str(e.get("erwartet") or e.get("inhalt") or "").strip()
+            if dim or erwartet:
+                out.append({"dimension": dim or erwartet, "erwartet": erwartet})
+        elif isinstance(e, str) and e.strip():
+            out.append({"dimension": e.strip(), "erwartet": ""})
+    return out[:4]
+
+
+def elemente_bereinigen(roh) -> list[str]:
+    """Die Dimensionen der erwarteten Elemente (beide Formate, D-10 und D-14)."""
+    return [e["dimension"] for e in elemente_normalisieren(roh)]
 
 
 _MEHRTEILIG = re.compile(r"\b(und|sowie|sind|alle|beiden?|jeweils|mehrere|warum|weshalb|wieso|begründe|"
@@ -903,11 +1065,12 @@ STRUKTUR_PRAEFIX = "Falsche Struktur:"
 STRUKTUR: dict[str, dict[str, tuple[str, bool]]] = {
     "EINSTUFUNG_BEWERTEN": {"level": ("text", True), "begruendung": ("text", False)},
     "THEORIE_SCHRITT": {"titel": ("text", False), "inhalt": ("text", True), "beispiel": ("text", False),
-                        "konzept": ("text", False), "quelle": ("text", False)},
+                        "konzept": ("text", False), "quelle": ("text", False), "merkmale": ("liste", False)},
     "NAECHSTE_AUFGABE": {"titel": ("text", False), "inhalt": ("text", False), "frage": ("text", True),
                          "konzept": ("text", False), "erwartete_antwort": ("text", False),
                          "schluesselbegriffe": ("liste_text", False), "optionen": ("liste", False),
-                         "erwartete_elemente": ("liste_text", False)},
+                         "erwartete_elemente": ("liste", False), "merkmale": ("liste", False),
+                         "alternative_loesungen": ("liste", False)},
     "ANTWORT_BEWERTEN": {"elemente": ("liste_objekt", False), "bewertung": ("text", False),
                          "feedback": ("text", True), "hinweis": ("text", False)},
     "FRAGE_BEANTWORTEN": {"antwort": ("text", True), "konzept": ("text", False)},
@@ -916,6 +1079,10 @@ STRUKTUR: dict[str, dict[str, tuple[str, bool]]] = {
     "LERNZIELE_VORSCHLAGEN": {"lernziele": ("liste_text", True)},
     "MATERIAL_PRUEFEN": {"ziele": ("liste_objekt", True), "gesamt": ("text", False)},
     "WITZ": {"witz": ("text", True)},
+    # D-13: Gegenprüfung der Musterlösung
+    "MUSTERLOESUNG_PRUEFEN": {"loesung": ("text", True), "offene_punkte": ("liste", False),
+                              "merkmale_im_fall": ("bool", False)},
+    "MUSTERLOESUNG_VERGLEICHEN": {"uebereinstimmend": ("bool", True), "unterschied": ("text", False)},
 }
 
 _TYPNAME = {"text": "ein Text", "liste_text": "eine Liste von Texten",
