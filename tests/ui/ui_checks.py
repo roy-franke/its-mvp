@@ -164,9 +164,38 @@ def t01_button_nochmals_versuchen(pw):
 AKTIONEN = ["#btn-answer", "#btn-ask", "#btn-theory", "#btn-deeper", "#btn-continue"]
 
 
+# T-25 AK3: Die Legende nennt nie einen Button, der nicht sichtbar ist. Die
+# Prüfung läuft in allen Szenarien bei jedem Schritt mit (zur_aufgabe, beantworte).
+LEGENDE_JS = r"""() => {
+  const leg = document.getElementById("legende");
+  if (!leg || leg.classList.contains("hidden") || leg.closest(".hidden")) return {genannt: [], fehlt: []};
+  const sicht = el => !el.classList.contains("hidden") && !el.closest(".hidden");
+  const labels = [...document.querySelectorAll("#view-learn .btnrow button, #chat .wahlbox button")]
+    .filter(sicht).map(b => b.textContent.replace(/[^\p{L}\p{N} ,.!?-]/gu, "").replace(/\s+/g, " ").trim());
+  const genannt = [...leg.textContent.matchAll(/«([^»]+)»/g)].map(m => m[1].trim());
+  return {genannt, fehlt: genannt.filter(n => !labels.includes(n)), text: leg.textContent};
+}"""
+LEGENDE_FEHLER: list[str] = []
+
+
+def legende(page) -> dict:
+    return page.evaluate(LEGENDE_JS)
+
+
+def legende_pruefen(page, wo: str = ""):
+    """Sammelt Abweichungen; jedes Szenario meldet sie am Ende (siehe run)."""
+    try:
+        r = legende(page)
+    except Exception:          # Seite gerade im Wechsel oder geschlossen
+        return
+    if r["fehlt"]:
+        LEGENDE_FEHLER.append(f"{wo}: nennt {r['fehlt']} – «{r.get('text', '')}»")
+
+
 def zur_aufgabe(page):
     """Klickt sich durch Theorie-Schritte bis zu einer Aufgabe."""
     for _ in range(4):
+        legende_pruefen(page, "zur_aufgabe")
         if page.locator("#btn-answer").is_visible() and page.locator("#btn-answer").is_enabled():
             return
         page.click("#btn-continue")
@@ -420,11 +449,13 @@ def t07_lektionen(pw):
 
 
 def beantworte(page, text: str, sicherheit: int | None = 7):
+    legende_pruefen(page, "vor der Antwort")
     page.fill("#chat-input", text)
     page.click("#btn-answer")
     if sicherheit and page.locator("#confidence-box").is_visible():
         page.click(f"#confidence-buttons button[data-v='{sicherheit}']")
     page.wait_for_selector("#waiting", state="detached", timeout=30000)
+    legende_pruefen(page, "nach der Bewertung")
 
 
 GUT = "Anna haftet, weil Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden vorliegen."
@@ -1098,14 +1129,91 @@ def t23_abmelden_header(pw):
         browser.close()
 
 
+# ---------------------------------------------------------------- Auftrag 3
+
+@scenario("t25")
+def t25_legende(pw):
+    """T-25 AK1-AK4: Die Legende passt in jedem Zustand zu den sichtbaren Buttons."""
+    with server() as base:
+        browser = launch(pw)
+        page = browser.new_context().new_page()
+        start_lernsequenz(page, base, name="Legende")
+        r = legende(page)
+        check("T-25 Theorie: «Verstanden, weiter» erklärt, keine Antwort",
+              "Verstanden, weiter" in r["genannt"] and "Antwort abschicken" not in r["genannt"], r["text"])
+        zur_aufgabe(page)
+        r = legende(page)
+        check("T-25 Aufgabe offen: wie bisher",
+              {"Antwort abschicken", "Frage stellen", "Theorie dazu"} <= set(r["genannt"]), r["text"])
+        beantworte(page, "Anna haftet, weil Schaden da ist.", 6)          # teilweise
+        expect(page.locator(".wahlbox button")).to_have_count(3, timeout=10000)
+        r = legende(page)
+        check("T-25 AK1 nach «teilweise» genau die sichtbaren Möglichkeiten",
+              set(r["genannt"]) == {"Antwort ergänzen", "Lösung ansehen", "Weiter zur nächsten Aufgabe",
+                                    "Frage stellen"}, r["text"])
+        check("T-25 AK1 weder «Antwort abschicken» noch «Theorie dazu»",
+              "Antwort abschicken" not in r["text"] and "Theorie dazu" not in r["text"], r["text"])
+        for i in range(3):
+            page.click(".wahlbox button[data-wahl='ergaenzen']")
+            page.wait_for_selector("#waiting", state="detached", timeout=30000)
+            if i == 0:
+                check("T-25 nach «Antwort ergänzen» nennt die Legende die gemeinsame Bewertung",
+                      "zusammen mit deiner bisherigen Antwort" in legende(page)["text"], legende(page)["text"])
+            beantworte(page, "Anna haftet, weil Schaden da ist.", None)
+        r = legende(page)
+        check("T-25 AK2 nach dem dritten Ergänzungsversuch kein «Antwort ergänzen»",
+              "Antwort ergänzen" not in r["text"] and page.locator(".wahlbox button[data-wahl='ergaenzen']").count() == 0,
+              r["text"])
+        vorher = r["text"]
+        page.click("#btn-pause")
+        expect(page.locator("#home-banner")).to_be_visible(timeout=10000)
+        p2 = browser.new_context().new_page()
+        anmelden(p2, base, "Legende")
+        p2.click("#seq-list button[data-act='resume']")
+        expect(p2.locator(".wahlbox button").first).to_be_visible(timeout=10000)
+        r2 = legende(p2)
+        check("T-25 AK4 nach Pausieren und Fortsetzen stimmen Legende und Buttons",
+              not r2["fehlt"] and r2["text"] == vorher, f"{r2['text']} | vorher: {vorher}")
+        p2.click(".wahlbox button[data-wahl='weiter']")
+        p2.wait_for_selector("#waiting", state="detached", timeout=30000)
+        legende_pruefen(p2, "nach «Weiter»")
+        browser.close()
+    with server(ITS_MOCK_FAIL="ANTWORT_BEWERTEN") as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Legende2")
+        zur_aufgabe(page)
+        beantworte(page, GUT, 5)
+        r = legende(page)
+        check("T-25 nach gescheiterter Bewertung: passender Satz",
+              r["genannt"][:1] == ["Nochmals bewerten lassen"] and not r["fehlt"], r["text"])
+        page.click(".wahlbox button[data-wahl='nochmals_bewerten']")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        r = legende(page)
+        check("T-25 nach zweiter gescheiterter Bewertung: alle Wahlmöglichkeiten erklärt",
+              {"Nochmals versuchen", "Ohne Bewertung weiter"} <= set(r["genannt"]) and not r["fehlt"], r["text"])
+    with server(ITS_MOCK_FAIL="THEORIE_SCHRITT") as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Legende3")
+        expect(page.locator(".wahlbox button").first).to_be_visible(timeout=30000)
+        r = legende(page)
+        check("T-25 nach einem Fallback: jede Möglichkeit mit kurzem Satz",
+              {"Nochmals versuchen", "Witz zum Thema"} <= set(r["genannt"]) and not r["fehlt"], r["text"])
+        page.click(".wahlbox button[data-wahl='witz']")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        legende_pruefen(page, "nach dem Witz")
+
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:
             print(f"Szenario {name}: {SCENARIOS[name].__doc__.strip().splitlines()[0]}")
+            LEGENDE_FEHLER.clear()
             try:
                 SCENARIOS[name](pw)
             except Exception as e:   # Szenario abgebrochen = Fehler
                 check(f"{name} lief durch", False, f"{type(e).__name__}: {e}")
+            check(f"T-25 AK3 Legende nennt in «{name}» nur sichtbare Buttons", not LEGENDE_FEHLER,
+                  "; ".join(LEGENDE_FEHLER[:3]))
     failed = [r for r in RESULTS if not r[1]]
     print(f"\n{len(RESULTS) - len(failed)} von {len(RESULTS)} Prüfungen bestanden.")
     return 1 if failed else 0

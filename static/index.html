@@ -275,7 +275,8 @@
           <button id="btn-deeper" class="secondary action hidden">📖 Genauer erklären</button>
           <button id="btn-continue" class="action hidden">Weiter</button>
         </div>
-        <div class="hint">«Antwort abschicken» beantwortet die Aufgabe und wird bewertet.
+        <!-- T-25: Die Legende beschreibt genau die sichtbaren Buttons (aktualisiereLegende) -->
+        <div class="hint" id="legende" aria-live="polite">«Antwort abschicken» beantwortet die Aufgabe und wird bewertet.
           «Frage stellen» und «Theorie dazu» sind für dich, ohne Bewertung.</div>
       </div>
     </div>
@@ -475,13 +476,15 @@ function addError(e) {
     (e && e.message ? e.message : ""), "Tutor");
 }
 
-function setAnswerMode(on) {
+function setAnswerMode(on, art) {
   answerEnabled = on;
+  antwortArt = on ? (art || "antwort") : "antwort";
   $("btn-answer").disabled = !on;
   $("btn-answer").classList.toggle("hidden", !on);
   $("btn-theory").classList.toggle("hidden", !on);
   $("btn-deeper").classList.add("hidden");
   $("btn-continue").classList.toggle("hidden", on);
+  aktualisiereLegende();
 }
 function setRetryMode(adaptation) {
   answerEnabled = false;
@@ -491,7 +494,9 @@ function setRetryMode(adaptation) {
   $("btn-deeper").classList.add("hidden");
   $("btn-continue").classList.remove("hidden");
   $("btn-continue").textContent = "🔄 Nochmals versuchen";
+  $("btn-continue").dataset.legende = "nochmals";
   $("btn-continue").dataset.adaptation = adaptation || "";
+  aktualisiereLegende();
 }
 function setTheoryMode() {
   // Theorie-Schritt: kein Antwortfeld-Zwang, dafür Weiter + Genauer erklären
@@ -502,13 +507,81 @@ function setTheoryMode() {
   $("btn-deeper").classList.remove("hidden");
   $("btn-continue").classList.remove("hidden");
   $("btn-continue").textContent = "Verstanden, weiter";
+  $("btn-continue").dataset.legende = "theorie";
   $("btn-continue").dataset.adaptation = "";
+  aktualisiereLegende();
 }
 function setContinueMode(adaption, finished) {
   setAnswerMode(false);
   $("btn-continue").textContent = finished ? "Zum Abschluss" : "Weiter";
+  $("btn-continue").dataset.legende = finished ? "abschluss" : "weiter";
   $("btn-continue").dataset.adaptation =
     ["simplify", "advance", "explain"].includes(adaption) ? adaption : "";
+  aktualisiereLegende();
+}
+
+// ---------- Legende unter dem Eingabefeld (T-25)
+//
+// Die Legende entsteht aus einer einzigen Zuordnung von Buttons und Wahl-IDs
+// zu Texten und beschreibt genau die Buttons, die gerade sichtbar sind. Für
+// eine unbekannte Wahl-ID erscheint kein Text statt eines falschen. {label}
+// ist die Beschriftung des Buttons, wie sie die lernende Person sieht.
+const LEGENDE_WAHL = {
+  ergaenzen: "«{label}» erlaubt eine Nachbesserung, die bewertet wird.",
+  loesung: "«{label}» zeigt die Lösung.",
+  weiter: "«{label}» lässt die Aufgabe als teilweise gelöst stehen.",
+  nochmals_bewerten: "«{label}» schickt deine gespeicherte Antwort nochmals zur Bewertung.",
+  musterloesung: "«{label}» zeigt die Lösung und geht ohne Bewertung weiter.",
+  ohne_bewertung: "«{label}» geht weiter; die Aufgabe zählt weder als richtig noch als falsch.",
+  nochmals: "«{label}» lässt den Tutor den Schritt nochmals erzeugen.",
+  abschnitt: "«{label}» zeigt einen passenden Abschnitt aus dem Lektionsmaterial.",
+  naechstes_thema: "«{label}» lässt das aktuelle Thema aus.",
+  direkt_aufgabe: "«{label}» stellt gleich eine Aufgabe, ohne Erklärung.",
+  witz: "«{label}» lockert kurz auf, ohne Einfluss auf deinen Lernstand.",
+  widerspruch: "«{label}» lässt den Tutor deine Antwort mit deiner Begründung nochmals prüfen; das zählt nicht als Versuch.",
+  neu_bewerten: "«{label}» lässt deine Antwort mit der korrigierten Sicht neu bewerten; das zählt nicht als Versuch.",
+};
+const LEGENDE_WEITER = {
+  theorie: "«{label}» führt zur nächsten Aufgabe.",
+  weiter: "«{label}» führt zum nächsten Schritt.",
+  abschluss: "«{label}» zeigt deine Abschlussbilanz.",
+  nochmals: "«{label}» fordert den Schritt nochmals an.",
+};
+const LEGENDE_FREI = { "btn-ask": "Frage stellen", "btn-theory": "Theorie dazu", "btn-deeper": "Genauer erklären" };
+let antwortArt = "antwort";        // «ergaenzung» nach «Antwort ergänzen» (T-25)
+
+function sichtbar(el) {
+  return !!el && !el.classList.contains("hidden") && !el.closest(".hidden");
+}
+function knopfText(el) {
+  return el.textContent.replace(/[^\p{L}\p{N} ,.!?-]/gu, "").replace(/\s+/g, " ").trim();
+}
+function aktualisiereLegende() {
+  const leg = $("legende");
+  if (!leg) return;
+  const saetze = [];
+  if (sichtbar($("btn-answer")))
+    saetze.push(antwortArt === "ergaenzung"
+      ? "«Antwort abschicken» schickt deine Ergänzung. Sie wird zusammen mit deiner bisherigen Antwort bewertet."
+      : "«Antwort abschicken» beantwortet die Aufgabe und wird bewertet.");
+  for (const id of ["btn-einwand", "btn-einwand-zurueck"]) {
+    const b = $(id);
+    if (b && sichtbar(b) && LEGENDE_WAHL[b.dataset.legende])
+      saetze.push(LEGENDE_WAHL[b.dataset.legende].replace("{label}", knopfText(b)));
+  }
+  const c = $("btn-continue");
+  if (sichtbar(c) && LEGENDE_WEITER[c.dataset.legende])
+    saetze.push(LEGENDE_WEITER[c.dataset.legende].replace("{label}", knopfText(c)));
+  for (const b of document.querySelectorAll("#chat .wahlbox button[data-wahl]")) {
+    const t = LEGENDE_WAHL[b.dataset.wahl];
+    if (t && sichtbar(b)) saetze.push(t.replace("{label}", knopfText(b)));
+  }
+  const frei = Object.keys(LEGENDE_FREI).filter(id => sichtbar($(id))).map(id => `«${LEGENDE_FREI[id]}»`);
+  if (frei.length === 1) saetze.push(`${frei[0]} ist für dich, ohne Bewertung.`);
+  else if (frei.length > 1)
+    saetze.push(`${frei.slice(0, -1).join(", ")} und ${frei[frei.length - 1]} sind für dich, ohne Bewertung.`);
+  leg.textContent = saetze.join(" ");
+  leg.classList.toggle("hidden", !saetze.length);
 }
 
 // ---------- Anmeldung und Übersicht (T-04, T-05)
@@ -690,7 +763,8 @@ async function resumeSession(sid) {
     renderWahl(st.wahl);
   } else if (st.wartet_auf === "antwort" && t.typ === "aufgabe") {
     confidenceAsked = !!st.letztes_feedback; // Sicherheit nur vor der ersten Bewertung
-    setAnswerMode(true);
+    // T-25: nach «Antwort ergänzen» nennt die Legende die gemeinsame Bewertung
+    setAnswerMode(true, st.letztes_feedback && st.letztes_feedback.bewertung === "teilweise" ? "ergaenzung" : "antwort");
   } else if (t.typ === "theorie") {
     setTheoryMode();
   } else if (st.letztes_feedback) {
@@ -1000,10 +1074,16 @@ function setWaitMode() {
   for (const id of ["btn-answer", "btn-theory", "btn-deeper", "btn-continue"])
     $(id).classList.add("hidden");
   $("btn-answer").disabled = true;
+  aktualisiereLegende();
+}
+
+function wahlEntfernen() {
+  document.querySelectorAll("#chat .wahlbox").forEach(b => b.remove());
+  aktualisiereLegende();
 }
 
 function renderWahl(wahl) {
-  document.querySelectorAll("#chat .wahlbox").forEach(b => b.remove());
+  wahlEntfernen();
   if (!wahl || !wahl.length) return;
   const box = document.createElement("div");
   box.className = "wahlbox";
@@ -1017,6 +1097,7 @@ function renderWahl(wahl) {
   };
   $("chat").insertBefore(box, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
+  aktualisiereLegende();
 }
 
 async function waehle(id, label) {
@@ -1024,7 +1105,7 @@ async function waehle(id, label) {
   let weiter = false;
   try {
     const d = await api(`/session/${sessionId}/wahl`, { wahl: id });
-    document.querySelectorAll("#chat .wahlbox").forEach(b => b.remove());
+    wahlEntfernen();
     addMsg("user wahl", label, "Du (Auswahl)");
     if (d.bewertung) { handleAnswer(d); return; }
     if (d.witz) { addMsg("tutor witz", "😄 " + d.witz, "Tutor"); renderWahl(d.wahl); return; }
@@ -1039,7 +1120,7 @@ async function waehle(id, label) {
       const frage = d.frage || (currentTask && currentTask.frage);
       if (frage) addMsg("tutor question", "↩️ Ergänze deine Antwort zur Aufgabe: " + frage, "Tutor");
       $("chat-input").value = d.antwort || "";
-      setAnswerMode(true);
+      setAnswerMode(true, "ergaenzung");
       confidenceAsked = true;          // Sicherheit wurde für diese Aufgabe schon erfasst
       $("chat-input").focus();
       return;
