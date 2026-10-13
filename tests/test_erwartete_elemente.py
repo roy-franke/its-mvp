@@ -13,8 +13,10 @@ LESSON = json.loads(open("app/lessons/haftungsrecht.json", encoding="utf-8").rea
 
 def test_ak1_jede_neue_aufgabe_hat_gespeicherte_elemente():
     t = tutor.generate_task(LESSON, dict(tutor.new_profile(), level="advanced"), [])
-    assert t["erwartete_elemente"] == ["Entscheid, ob Anna zahlen muss",
-                                       "Begründung mit den Voraussetzungen der Verschuldenshaftung"]
+    # D-14: Dimension und erwarteter Inhalt
+    assert [e["dimension"] for e in t["erwartete_elemente"]] == [
+        "Entscheid, ob Anna zahlen muss", "Begründung mit den Voraussetzungen der Verschuldenshaftung"]
+    assert all(e["erwartet"] for e in t["erwartete_elemente"])
     assert "erwartete_elemente" not in tutor.fuer_lernende(t)      # intern, wie die Musterlösung
 
 
@@ -23,7 +25,7 @@ def test_ak1_ohne_elemente_vom_modell_gilt_die_musterloesung(monkeypatch):
     aufgabe.pop("erwartete_elemente")
     monkeypatch.setitem(llm._PROVIDERS, "mock", lambda s, u, json_mode=False: (json.dumps(aufgabe), {}))
     t = tutor.generate_task(LESSON, dict(tutor.new_profile(), level="advanced"), [])
-    assert t["erwartete_elemente"] == [aufgabe["erwartete_antwort"]]
+    assert t["erwartete_elemente"] == [{"dimension": "Kern der Antwort", "erwartet": aufgabe["erwartete_antwort"]}]
     assert any("erwartete_elemente" in v for v in t["_verstoesse"])
 
 

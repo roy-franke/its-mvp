@@ -459,9 +459,18 @@ function renderEvent(ev, mitDatum) {
       cls += bew === "korrekt" ? " ok" : bew === "teilweise" ? "" : " nok";
       const label = bew === "korrekt" ? "✅ richtig" : bew === "teilweise" ? "🔶 teilweise richtig"
         : bew === "unbewertet" ? '<span class="fb">⚠️ nicht bewertet (technischer Fehler)</span>' : "❌ falsch";
-      body = `${label}${p.versuch > 1 ? ` <span class="muted">(Versuch ${p.versuch}, zusammen mit den früheren bewertet)</span>` : ""}${fmt(p.feedback)}`
+      body = `${label}${p.versuch > 1 ? ` <span class="muted">(Versuch ${p.versuch}, neuester Stand bewertet)</span>` : ""}`
+        + (p.neubewertung ? ` <span class="pill">${esc(NEUBEWERTUNG[p.neubewertung] || p.neubewertung)}</span>` : "")
+        + fmt(p.feedback)
+        // D-14: pro Element Status, Begründung, erwarteter Inhalt und was die lernende Person schrieb
         + ((p.elemente || []).length ? `<ul class="elemente">${p.elemente.map(e =>
-            `<li class="el-${esc(e.status)}">${e.status === "korrekt" ? "✅" : e.status === "falsch" ? "❌" : e.status === "ungenau" ? "🔸" : "◻️"} ${esc(e.element)} <span class="muted">(${esc(e.status)})</span></li>`).join("")}</ul>` : "")
+            `<li class="el-${esc(e.status)}">${STATUS_SYMBOL[e.status] || "◻️"} ${esc(e.element)} <span class="muted">(${esc(STATUS_TEXT[e.status] || e.status)}${e.aus_frueherem_versuch ? ", aus früherem Versuch" : ""}${e.ausserhalb_material ? ", ausserhalb des Materials" : ""})</span>`
+            + (e.begruendung ? `<br><span class="muted">Begründung: ${esc(e.begruendung)}</span>` : "")
+            + (e.antwort ? `<br><span class="muted">Antwort dazu: «${esc(e.antwort)}»</span>` : "")
+            + (e.erwartet ? `<br><span class="muted">Erwartet: ${esc(e.erwartet)}</span>` : "")
+            + (e.annahme ? `<br><span class="muted">Annahme: ${esc(e.annahme)}</span>` : "")
+            + `</li>`).join("")}</ul>` : "")
+        + (p.hinweis ? `<span class="muted">💡 Hinweis: ${esc(p.hinweis)}${p.hinweis_ersetzt ? " (ersetzt, weil das Modell den früheren Hinweis wiederholte)" : ""}</span><br>` : "")
         + (p.teilkopie ? `<span class="muted">✍️ ${Math.round(p.teilkopie * 100)} % wörtlich übernommen; bewertet wurde nur die Eigenleistung (D-11).</span><br>` : "")
         + (p.bewertung_modell ? `<span class="muted">Urteil aus den Elementen abgeleitet; das Modell hatte «${esc(p.bewertung_modell)}» vorgeschlagen.</span><br>` : "")
         + (p.adaption_begruendung ? `<br><span class="muted">🧭 Adaption (${esc(p.adaption)}): ${esc(p.adaption_begruendung)}</span>` : "")
@@ -493,7 +502,13 @@ function renderEvent(ev, mitDatum) {
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
     else if (ev.type === "musterloesung_geprueft") {
-      // D-13: Ergebnis der Gegenprüfung der Musterlösung
+      // D-14/D-15: Status der Elemente
+const STATUS_SYMBOL = { korrekt: "✅", vertretbar: "☑️", ungenau: "🔸", nicht_beurteilbar: "❔", falsch: "❌", fehlt: "◻️" };
+const STATUS_TEXT = { korrekt: "korrekt", vertretbar: "vertretbar", ungenau: "ungenau",
+                      nicht_beurteilbar: "nicht beurteilbar", falsch: "falsch", fehlt: "fehlt" };
+const NEUBEWERTUNG = { widerspruch: "Neubewertung nach Widerspruch", tutor_korrektur: "Neubewertung nach Selbstkorrektur",
+                       urteil_korrigiert: "Urteil korrigiert" };
+// D-13: Ergebnis der Gegenprüfung der Musterlösung
       if (p.ergebnis === "unsicher") cls += " regel_verstoss";
       body = `🔍 Gegenprüfung der Musterlösung: <strong>${esc(GEGENPRUEFUNG[p.ergebnis] || p.ergebnis)}</strong>`
         + (p.loesung_gegenpruefung ? `<br><span class="muted">Unabhängige Lösung: ${esc(p.loesung_gegenpruefung)}</span>` : "")
@@ -516,6 +531,12 @@ const SCHRITT = {
   MATERIAL_PRUEFEN: "Material prüfen", WITZ: "Witz zum Thema",
   MUSTERLOESUNG_PRUEFEN: "Musterlösung prüfen", MUSTERLOESUNG_VERGLEICHEN: "Musterlösung vergleichen",
 };
+// D-14/D-15: Status der Elemente
+const STATUS_SYMBOL = { korrekt: "✅", vertretbar: "☑️", ungenau: "🔸", nicht_beurteilbar: "❔", falsch: "❌", fehlt: "◻️" };
+const STATUS_TEXT = { korrekt: "korrekt", vertretbar: "vertretbar", ungenau: "ungenau",
+                      nicht_beurteilbar: "nicht beurteilbar", falsch: "falsch", fehlt: "fehlt" };
+const NEUBEWERTUNG = { widerspruch: "Neubewertung nach Widerspruch", tutor_korrektur: "Neubewertung nach Selbstkorrektur",
+                       urteil_korrigiert: "Urteil korrigiert" };
 // D-13: Ergebnis der Gegenprüfung
 const GEGENPRUEFUNG = { uebereinstimmend: "übereinstimmend", nach_neugenerierung: "nach Neugenerierung übereinstimmend",
                         unsicher: "unsicher", nicht_geprueft: "nicht geprüft" };

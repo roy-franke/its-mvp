@@ -50,7 +50,8 @@ def test_screenshot4_oberbegriff_ist_teilweise(monkeypatch):
     assert r["bewertung"] == "teilweise" and r["bewertung_modell"] == "korrekt"
     assert not r["korrekt"] and len(r["elemente"]) == 2
     user = prompts[0][1]
-    assert "Musterlösung (nur für dich, nie verraten): Tierhalterhaftung" in user
+    # D-14: «erwartete Lösung», damit das Feedback nicht von der Musterlösung spricht
+    assert "Erwartete Lösung (nur für dich, nie verraten" in user and "Tierhalterhaftung" in user
     assert "zwei Schritten" in user
 
 
@@ -83,7 +84,8 @@ def test_standardstrenge_ausgewogen():
     assert "BEWERTUNGSSTRENGE: ausgewogen" in tutor._system_prompt(LESSON)
 
 
-def test_nachbesserung_wird_mit_erstem_versuch_bewertet(monkeypatch):
+def test_nachbesserung_wird_als_neuester_stand_bewertet(monkeypatch):
+    """D-14 (Auftrag 3): früher Gesamtantwort aus allen Versuchen, jetzt neuester Stand mit Elementstatus."""
     prompts = []
 
     def spy(system, user, json_mode=False):
@@ -102,8 +104,8 @@ def test_nachbesserung_wird_mit_erstem_versuch_bewertet(monkeypatch):
     a2 = c.post(f"/api/session/{sid}/answer",
                 json={"answer": "Dazu kommen Widerrechtlichkeit, Kausalzusammenhang und Verschulden."}).json()
     bewerten = [p for p in prompts if "ANTWORT_BEWERTEN" in p]
-    assert "Versuch 1 des Lernenden: Anna haftet, weil Schaden da ist." in bewerten[1]
-    assert "GESAMTANTWORT" in bewerten[1]
+    assert "Bisheriger Versuch des Lernenden: Anna haftet, weil Schaden da ist." in bewerten[1]
+    assert "NEUESTEN STAND" in bewerten[1] and "Stand nach deiner letzten Bewertung je Element" in bewerten[1]
     assert a2["bewertung"] == "korrekt"
     events = c.get(f"/api/teacher/sessions/{sid}").json()["events"]
     ev = [e["payload"] for e in events if e["type"] == "answer_evaluated"]
@@ -147,5 +149,5 @@ def test_prompt_kennt_ungenau_und_widerspruch(monkeypatch):
         "feedback": "Stimmt.", "hinweis": ""}, prompts))
     tutor.evaluate_answer(LESSON, tutor.new_profile(), HUND, "Tierhalterhaftung")
     user = prompts[0][1]
-    assert "ungenau" in user and "anderen Ergebnis als die Musterlösung" in user
+    assert "ungenau" in user and "anderen Ergebnis als die erwartete Lösung" in user
     assert "nur was die Frage tatsächlich verlangt" in user

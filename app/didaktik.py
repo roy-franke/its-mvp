@@ -922,14 +922,51 @@ def elemente_passen_zur_frage(task: dict) -> str | None:
     return None
 
 
-def elemente_anzahl_passt(bewertung: dict, festgelegt: list[str]) -> str | None:
+def elemente_anzahl_passt(bewertung: dict, festgelegt: list) -> str | None:
     """D-10: Die Bewertung prüft genau die bei der Aufgabe festgelegten Elemente."""
     if not festgelegt:
         return None
+    festgelegt = elemente_bereinigen(festgelegt)
     n = len([e for e in bewertung.get("elemente") or [] if isinstance(e, dict)])
     if n != len(festgelegt):
         return (f"Prüfe genau die {len(festgelegt)} festgelegten Elemente (du hast {n} zurückgegeben): "
                 + "; ".join(festgelegt) + ".")
+    return None
+
+
+# ---------------------------------------------------------------- D-14
+
+_MUSTERLOESUNG = re.compile(r"\bmusterl(ö|oe|o)sung", re.IGNORECASE)
+
+
+def musterloesung_erwaehnt(text: str) -> str | None:
+    """D-14: Das Feedback spricht nicht von der Musterlösung, die die lernende Person nicht kennt."""
+    if _MUSTERLOESUNG.search(text or ""):
+        return ("Das Feedback spricht von der «Musterlösung», die der Lernende nicht kennt. Begründe aus dem "
+                "Fall, was stimmt und was fehlt.")
+    return None
+
+
+HINWEIS_AEHNLICH = 0.75
+
+
+def hinweis_wiederholt(neu: str, frueher: list[str]) -> str | None:
+    """D-14: Ein Hinweis wiederholt keinen früheren Hinweis zur selben Aufgabe (fast) wörtlich."""
+    neu = (neu or "").strip()
+    if not neu or not frueher:
+        return None
+    norm = re.sub(r"\W+", " ", neu.lower()).strip()
+    for alt in frueher:
+        alt_norm = re.sub(r"\W+", " ", (alt or "").lower()).strip()
+        if not alt_norm:
+            continue
+        gleich = norm == alt_norm
+        if not gleich and len(staemme(neu)) >= 3:
+            gleich = ueberschneidung(neu, alt)[0] >= HINWEIS_AEHNLICH and ueberschneidung(alt, neu)[0] >= HINWEIS_AEHNLICH
+        if gleich:
+            return ("Der Hinweis wiederholt fast wörtlich einen früheren Hinweis zu dieser Aufgabe. Beziehe ihn "
+                    "auf die Nachbesserung: Nenne konkret, was sie zum ungenügenden Element sagt und warum es "
+                    "noch nicht genügt.")
     return None
 
 

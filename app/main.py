@@ -788,14 +788,17 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
         "elemente": result.get("elemente", []),
         "bewertung_modell": result.get("bewertung_modell"),
         "teilkopie": result.get("teilkopie"),
+        "hinweis_ersetzt": result.get("hinweis_ersetzt"),
         "versuch": len(vorher) + 1,
         "confidence": confidence,
         "selbsteinschaetzung": selbsteinschaetzung,
     })
     offen = action in ("retry", "wahl_teilweise")
     if offen:
+        # D-14: Der Elementstatus geht an die nächste Bewertung (neuester Stand zählt)
         profile["antworten_aktuell"] = vorher + [{"antwort": text, "bewertung": result["bewertung"],
-                                                  "hinweis": result.get("hinweis", "")}]
+                                                  "hinweis": result.get("hinweis", ""),
+                                                  "elemente": result.get("elemente", [])}]
     else:
         profile["antworten_aktuell"] = []
     finished = profile["step"] >= tutor.total_steps() and not offen
@@ -922,7 +925,7 @@ def _wahl_nach_teilweise(sid: str, profile: dict, task: dict, wahl: str) -> dict
     loesung, elemente = None, []
     if wahl == "loesung":
         loesung = task.get("erwartete_antwort") or ""
-        elemente = [str(e) for e in task.get("erwartete_elemente") or []]
+        elemente = didaktik.elemente_bereinigen(task.get("erwartete_elemente"))
         store.log_event(sid, "loesung_gezeigt", {"loesung": loesung, "elemente": elemente})
     # «Weiter» bzw. nach der Lösung: bearbeitet, protokolliert als «teilweise»,
     # weder Fehler noch richtige Antwort (Entscheid E1)

@@ -417,8 +417,10 @@ def _mock_text(system: str, user: str) -> str:
             "optionen": [],
             "erwartete_antwort": "Anna muss zahlen, weil sie fahrlässig einen Schaden verursacht hat und alle vier Voraussetzungen erfüllt sind.",
             "schluesselbegriffe": ["fahrlässig", "Widerrechtlichkeit"],
-            "erwartete_elemente": ["Entscheid, ob Anna zahlen muss",
-                                   "Begründung mit den Voraussetzungen der Verschuldenshaftung"],
+            "erwartete_elemente": [
+                {"dimension": "Entscheid, ob Anna zahlen muss", "erwartet": "Ja, Anna muss zahlen"},
+                {"dimension": "Begründung mit den Voraussetzungen der Verschuldenshaftung",
+                 "erwartet": "Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden (Fahrlässigkeit)"}],
             "merkmale": [{"merkmal": "Schaden", "im_fall": "beschädigt es beim Sturz"}],
             "alternative_loesungen": [],
             "konzept": "Verschuldenshaftung",
@@ -444,10 +446,13 @@ def _mock_text(system: str, user: str) -> str:
         m = (re.search(r"Nachbesserung des Lernenden:\s*(.+)", user)
              or re.search(r"Antwort des Lernenden:\s*(.+)", user))
         ans = (m.group(1).strip() if m else "")
+        zitat = ans[:60]
         if len(ans) >= 40:
             return json.dumps({
-                "elemente": [{"element": "Voraussetzungen genannt", "status": "korrekt"},
-                             {"element": "auf den Fall angewendet", "status": "korrekt"}],
+                "elemente": [{"element": "Voraussetzungen genannt", "status": "korrekt",
+                              "begruendung": "Der Entscheid passt zum Fall.", "antwort": zitat},
+                             {"element": "auf den Fall angewendet", "status": "korrekt",
+                              "begruendung": "Die Voraussetzungen sind genannt.", "antwort": zitat}],
                 "sachlicher_widerspruch": False,
                 "bewertung": "korrekt",
                 "feedback": "Richtig: Es braucht Schaden, Widerrechtlichkeit, Kausalzusammenhang und Verschulden. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
@@ -455,16 +460,21 @@ def _mock_text(system: str, user: str) -> str:
             }, ensure_ascii=False)
         if len(ans) >= 15:
             return json.dumps({
-                "elemente": [{"element": "Schaden erkannt", "status": "korrekt"},
-                             {"element": "übrige Voraussetzungen", "status": "fehlt"}],
+                "elemente": [{"element": "Schaden erkannt", "status": "korrekt",
+                              "begruendung": "Der Schaden am Snowboard ist erkannt.", "antwort": zitat},
+                             {"element": "übrige Voraussetzungen", "status": "fehlt",
+                              "begruendung": "Widerrechtlichkeit, Kausalzusammenhang und Verschulden fehlen.",
+                              "antwort": ""}],
                 "sachlicher_widerspruch": False,
                 "bewertung": "teilweise",
                 "feedback": "Der Ansatz stimmt, aber es fehlen wesentliche Voraussetzungen der Haftung. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",
                 "hinweis": "Welche vier Voraussetzungen verlangt Art. 41 OR?",
             }, ensure_ascii=False)
         return json.dumps({
-            "elemente": [{"element": "Voraussetzungen genannt", "status": "fehlt"},
-                         {"element": "auf den Fall angewendet", "status": "fehlt"}],
+            "elemente": [{"element": "Voraussetzungen genannt", "status": "fehlt",
+                          "begruendung": "Die Antwort nennt keine Voraussetzung.", "antwort": ""},
+                         {"element": "auf den Fall angewendet", "status": "fehlt",
+                          "begruendung": "Der Fall wird nicht beurteilt.", "antwort": ""}],
             "sachlicher_widerspruch": False,
             "bewertung": "falsch",
             "feedback": "Das ist noch zu knapp. Nenne die vier Voraussetzungen der Verschuldenshaftung und wende sie auf den Fall an. (Mock-Bewertung – für echte Beurteilung LLM-Provider konfigurieren.)",

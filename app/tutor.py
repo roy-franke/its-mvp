@@ -735,7 +735,9 @@ def _aufgabe_erzeugen(lesson: dict, profile: dict, history: list[dict],
         "die der Lernende selbst nennen oder anwenden muss (z.B. «Tierhalterhaftung», «Nenner»), "
         "keine Personen, Alltagswörter oder Zahlen aus dem Fall. Sprich den Lernenden mit «du» an.\n"
         # D-10: Die erwarteten Elemente entstehen mit der Aufgabe, nicht erst bei der Bewertung
-        "Lege fest, welche Teile die Antwort enthalten soll: 1 bis 4 erwartete Elemente. Die Frage "
+        "Lege fest, welche Teile die Antwort enthalten soll: 1 bis 4 erwartete Elemente, jedes mit der "
+        "Dimension (wie die Frage sie nennt) und dem erwarteten Inhalt (was eine richtige Antwort dazu "
+        "sagt, passend zur Musterlösung). Die Frage "
         "nennt jeden dieser Teile ausdrücklich als gesuchte Dimension, nicht als Lösung (zum Beispiel "
         "«Nenne die verantwortliche Person und die Art der Haftung», nicht «Wer ist verantwortlich?», "
         "wenn auch die Art der Haftung erwartet wird). Verlangt die Frage sprachlich genau eine Sache "
@@ -754,7 +756,8 @@ def _aufgabe_erzeugen(lesson: dict, profile: dict, history: list[dict],
         '"optionen": ["nur bei multiple_choice, sonst leere Liste"], '
         '"erwartete_antwort": "kurze Musterlösung in 1-2 Sätzen (wird nicht angezeigt)", '
         '"schluesselbegriffe": ["1-4 Begriffe, die eine richtige Antwort enthalten muss"], '
-        '"erwartete_elemente": ["1-4 Teile der Antwort, die die Frage ausdrücklich verlangt"], '
+        '"erwartete_elemente": [{"dimension": "Teil der Antwort, den die Frage ausdrücklich verlangt", '
+        '"erwartet": "erwarteter Inhalt zu diesem Teil"}], '
         '"merkmale": [{"merkmal": "Merkmal des Konzepts", "im_fall": "Wort oder Satzteil aus dem Fall"}], '
         '"alternative_loesungen": ["weitere vertretbare Lösung, nur wenn der Fall sie bewusst zulässt"], '
         '"konzept": "behandeltes Konzept in 1-3 Worten"}'
@@ -781,10 +784,12 @@ def _aufgabe_erzeugen(lesson: dict, profile: dict, history: list[dict],
         return task_fallback(lesson, profile, adaptation, data)
     if not isinstance(data.get("optionen"), list) or data.get("aufgabentyp") != "multiple_choice":
         data["optionen"] = []
-    data["erwartete_elemente"] = didaktik.elemente_bereinigen(data.get("erwartete_elemente"))
+    # D-14: Elemente als {dimension, erwartet}; ältere Texte gelten als Dimension ohne Inhalt
+    data["erwartete_elemente"] = didaktik.elemente_normalisieren(data.get("erwartete_elemente"))
     if not data["erwartete_elemente"] and data.get("erwartete_antwort"):
         # D-10 AK 1: Jede Aufgabe hat gespeicherte Elemente, notfalls die Musterlösung als eines
-        data["erwartete_elemente"] = [str(data["erwartete_antwort"]).strip()]
+        data["erwartete_elemente"] = [{"dimension": "Kern der Antwort",
+                                       "erwartet": str(data["erwartete_antwort"]).strip()}]
     data["merkmale"] = didaktik.merkmale_der_aufgabe(data.get("merkmale"))
     data["alternative_loesungen"] = didaktik.liste_texte(data.get("alternative_loesungen"), 4)
     data["typ"] = "aufgabe"
@@ -835,17 +840,28 @@ BEWERTUNGEN = ("korrekt", "teilweise", "falsch")
 
 
 def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
-                    vorher: list[dict] | None = None, uebernommen: list[str] | None = None) -> dict:
+                    vorher: list[dict] | None = None, uebernommen: list[str] | None = None,
+                    zweite_sicht: dict | None = None) -> dict:
     """Bewertet eine Antwort dreistufig und liefert KI-Feedback.
 
-    D-05: Die Bewertung läuft in zwei Schritten. Das Modell bestimmt die
-    zentralen Elemente einer vollständigen Antwort und prüft jedes einzeln
-    (korrekt, falsch, fehlt). Das Urteil leitet der Code daraus ab
+    D-05: Die Bewertung läuft in zwei Schritten. Das Modell prüft jedes
+    erwartete Element einzeln, das Urteil leitet der Code daraus ab
     (didaktik.urteil_aus_elementen). Die Elemente landen im Lernverlauf.
 
-    `vorher` enthält die früheren Versuche zur selben Aufgabe. Eine
-    Nachbesserung wird zusammen mit dem ersten Versuch bewertet; zuvor wurde
-    sie allein bewertet, sodass eine knappe Ergänzung als falsch galt.
+    D-14: Die Elemente tragen ihren erwarteten Inhalt, die Bewertung prüft
+    dagegen und legt Dimensionen sinngemäss aus. Bei einer Nachbesserung gilt
+    der neueste Stand: Das Modell erhält den Status jedes Elements aus der
+    letzten Bewertung und aktualisiert ihn anhand des neuen Versuchs, statt
+    alle Versuche als Gesamtantwort zu lesen. Der falsche erste Versuch wirkt
+    so nicht nach. Ein früher korrektes Element fällt nicht auf «fehlt»
+    zurück, nur weil es nicht wiederholt wurde (stellt der Code sicher). Der
+    Hinweis wiederholt keinen früheren Hinweis und spricht nicht von der
+    Musterlösung, die die lernende Person nicht kennt.
+
+    `vorher`: frühere Versuche zur selben Aufgabe ({antwort, bewertung,
+    hinweis, elemente}). `zweite_sicht`: zusätzliche Sicht bei einer
+    Neubewertung (Widerspruch der lernenden Person, D-15, oder Selbstkorrektur
+    des Tutors im Chat, D-18), {art, text}.
 
     Kategorien und Feedback-Regeln nach dem Vorbild des LLMTutor-Projekts von
     Swiss Learning Analytics.
@@ -858,17 +874,38 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         kontext += "Antwortoptionen: " + " | ".join(
             f"{'ABCDEFGH'[i]}) {o}" for i, o in enumerate(optionen)) + "\n"
     if task.get("erwartete_antwort"):
-        kontext += (f"Musterlösung (nur für dich, nie verraten): {task['erwartete_antwort']}\n")
+        kontext += (f"Erwartete Lösung (nur für dich, nie verraten und nie «Musterlösung» nennen): "
+                    f"{task['erwartete_antwort']}\n")
     if task.get("schluesselbegriffe"):
         kontext += "Schlüsselbegriffe der Lösung: " + ", ".join(task["schluesselbegriffe"]) + "\n"
-    festgelegt = didaktik.elemente_bereinigen(task.get("erwartete_elemente"))
-    if vorher:
-        for i, v in enumerate(vorher, 1):
-            kontext += (f"Versuch {i} des Lernenden: {v.get('antwort', '')}\n"
-                        f"Dein Hinweis dazu: {v.get('hinweis', '')}\n")
+    festgelegt = didaktik.elemente_normalisieren(task.get("erwartete_elemente"))
+    dimensionen = [e["dimension"] for e in festgelegt]
+    letzte = vorher[-1] if vorher else None
+    alte_elemente = [e for e in (letzte or {}).get("elemente") or [] if isinstance(e, dict)]
+    frueher_hinweise = [v.get("hinweis", "") for v in vorher if v.get("hinweis")]
+    if letzte:
+        kontext += (f"Bisheriger Versuch des Lernenden: {letzte.get('antwort', '')}\n"
+                    + (f"Dein Hinweis dazu: {letzte.get('hinweis', '')}\n" if letzte.get("hinweis") else ""))
+        if alte_elemente:
+            kontext += ("Stand nach deiner letzten Bewertung je Element:\n" + "\n".join(
+                f"   - {e.get('element', '')}: {e.get('status', '')}"
+                + (f" ({e['begruendung']})" if e.get("begruendung") else "") for e in alte_elemente) + "\n")
         kontext += (f"Nachbesserung des Lernenden: {answer}\n"
-                    "Bewerte die GESAMTANTWORT aus allen Versuchen zusammen. Eine Nachbesserung "
-                    "ergänzt den ersten Versuch; sie muss nicht alles wiederholen.\n\n")
+                    "Bewerte den NEUESTEN STAND und aktualisiere den Status jedes Elements anhand der "
+                    "Nachbesserung: Was die Nachbesserung korrigiert, gilt als korrigiert; ein falscher Teil "
+                    "aus einem früheren Versuch zählt nicht mehr, wenn die Nachbesserung ihn ersetzt. Was "
+                    "früher korrekt war und nicht wiederholt wird, bleibt korrekt. Feedback und Hinweis beziehen "
+                    "sich auf die Nachbesserung.\n")
+        ungenuegend = [e.get("element", "") for e in alte_elemente
+                       if e.get("status") not in ("korrekt", "vertretbar")]
+        if ungenuegend:
+            kontext += ("Schon beim letzten Versuch ungenügend: " + ", ".join(ungenuegend) + ". Ist ein solches "
+                        "Element wieder ungenügend, nenne im Hinweis konkret, was die Nachbesserung dazu sagt "
+                        "und warum das noch nicht genügt.\n")
+        if frueher_hinweise:
+            kontext += ("Deine bisherigen Hinweise zu dieser Aufgabe (nicht wiederholen, auch nicht "
+                        "umformuliert): " + " | ".join(f"«{h}»" for h in frueher_hinweise) + "\n")
+        kontext += "\n"
     else:
         kontext += f"Antwort des Lernenden: {answer}\n\n"
     if uebernommen:
@@ -876,31 +913,45 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         kontext += ("Wörtlich aus angezeigten Texten übernommen (zählt nicht als Eigenleistung): "
                     + " | ".join(f"«{u}»" for u in uebernommen[:5]) + "\n"
                     "Beurteile nur, was der Lernende darüber hinaus selbst formuliert oder angewendet hat.\n\n")
+    if zweite_sicht:
+        kontext += _ZWEITE_SICHT.get(zweite_sicht.get("art"), "").format(text=zweite_sicht.get("text", "")) + "\n"
+
+    def pruefen(d: dict) -> str | None:
+        return (didaktik.pruefe_felder(d, ("feedback", "hinweis"))
+                or didaktik.elemente_anzahl_passt(d, dimensionen)
+                or didaktik.urteil_widerspricht_text(d)
+                or didaktik.musterloesung_erwaehnt(f"{d.get('feedback', '')} {d.get('hinweis', '')}")
+                or didaktik.hinweis_wiederholt(d.get("hinweis", ""), frueher_hinweise))
     data = llm.chat_json(
         _system_prompt(lesson),
         "AUFGABE: ANTWORT_BEWERTEN\n"
         + kontext +
         "Gehe in zwei Schritten vor:\n"
         + (ELEMENTE_FESTGELEGT.format(n=len(festgelegt), liste="\n".join(
-            f"   {i}) {e}" for i, e in enumerate(festgelegt, 1))) if festgelegt else
+            f"   {i}) {e['dimension']}" + (f" – erwartet: {e['erwartet']}" if e["erwartet"] else "")
+            for i, e in enumerate(festgelegt, 1))) if festgelegt else
            "1. Bestimme 2-4 zentrale Elemente einer vollständigen Antwort. Leite sie aus der "
-           "Frage und der Musterlösung ab: nur was die Frage tatsächlich verlangt. Fragt sie "
+           "Frage und der erwarteten Lösung ab: nur was die Frage tatsächlich verlangt. Fragt sie "
            "nicht nach einer Begründung oder einem Gesetzesartikel, sind diese kein Element.\n") +
+        "   Lege jede Dimension sinngemäss aus, nicht wörtlich: Eine «Person» kann auch eine Organisation, "
+        "eine Behörde oder ein Verein sein, ein «Wert» auch ein Bruch oder ein Ausdruck.\n"
         "2. Prüfe für jedes Element den Status:\n"
         "   korrekt = sachlich richtig vorhanden (gemäss der Bewertungsstrenge);\n"
         "   ungenau = sachlich zutreffend, aber zu allgemein, nur umschrieben oder ohne den "
         "verlangten Fachbegriff;\n"
-        "   falsch = widerspricht der Musterlösung (anderes Ergebnis, anderes Ja/Nein, "
+        "   falsch = widerspricht der erwarteten Lösung (anderes Ergebnis, anderes Ja/Nein, "
         "vertauschte Bedeutung zweier Begriffe);\n"
         "   fehlt = kommt nicht vor.\n"
-        "Kommt die Antwort zu einem anderen Ergebnis als die Musterlösung, setze "
+        "   Begründe jeden Status in einem Satz aus dem Fall (begruendung) und gib in antwort kurz wieder, "
+        "was der Lernende im neuesten Versuch zu diesem Element schreibt (leer, wenn nichts).\n"
+        "Kommt die Antwort zu einem anderen Ergebnis als die erwartete Lösung, setze "
         "sachlicher_widerspruch auf true, auch wenn einzelne Wörter stimmen.\n"
         "Urteil: 'korrekt' = alle Elemente korrekt. 'teilweise' = mindestens ein Element "
         "korrekt oder ungenau und keines falsch. 'falsch' = nichts Zutreffendes oder ein "
         "sachlicher Widerspruch.\n\n"
         "Feedback-Regeln:\n"
         "- Beziehe dich ausdrücklich auf das, was der Lernende geschrieben hat: bestätige die "
-        "korrekten Teile und korrigiere genau die fehlenden oder falschen.\n"
+        "korrekten Teile und korrigiere genau die fehlenden oder falschen. Begründe aus dem Fall.\n"
         "- korrekt: kurz und präzis bestätigen (max. 1 Satz), dann knapp ergänzen, was "
         "noch dazugehört.\n"
         "- teilweise: benennen, was stimmt und was fehlt; im Hinweis einen Denkanstoss zur "
@@ -908,16 +959,16 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "- falsch: knapp erklären, was nicht stimmt, ohne die richtige Antwort zu nennen; im "
         "Hinweis einen gezielten Denkanstoss geben. Keine positiven Floskeln.\n"
         "Formuliere den Hinweis als Anstoss, nicht als neue Frage, die statt der Aufgabe "
-        "beantwortet werden soll. Verrate die Lösung nie, auch nicht implizit.\n\n"
-        'Format: {"elemente": [{"element": "zentrales Element", "status": "korrekt|ungenau|falsch|fehlt"}], '
+        "beantwortet werden soll. Verrate die Lösung nie, auch nicht implizit, und sprich nie von "
+        "der «Musterlösung»: Der Lernende kennt sie nicht.\n\n"
+        'Format: {"elemente": [{"element": "zentrales Element", "status": "korrekt|ungenau|falsch|fehlt", '
+        '"begruendung": "ein Satz", "antwort": "was der Lernende dazu schreibt"}], '
         '"sachlicher_widerspruch": false, '
         '"bewertung": "korrekt|teilweise|falsch", '
         '"feedback": "2-4 Sätze direkt an den Lernenden", '
         '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
         fallback=dict(FALLBACK_TEXTE["bewertung"]),
-        check=lambda d: (didaktik.pruefe_felder(d, ("feedback", "hinweis"))
-                         or didaktik.elemente_anzahl_passt(d, festgelegt)
-                         or didaktik.urteil_widerspricht_text(d)),
+        check=pruefen,
         temperature=BEWERTUNG_TEMPERATUR,
     )
     if data.get("_fallback"):
@@ -928,22 +979,92 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
     if data.get("bewertung") not in BEWERTUNGEN:
         # Rückwärtskompatibilität: alte Antworten mit korrekt=true/false
         data["bewertung"] = "korrekt" if data.get("korrekt") else "falsch"
-    elemente = [
-        {"element": str(e.get("element", "")).strip(), "status": str(e.get("status", "")).strip().lower()}
-        for e in (data.get("elemente") or []) if isinstance(e, dict)
-    ]
-    data["elemente"] = [e for e in elemente if e["status"] in didaktik.ELEMENT_STATUS]
+    data["elemente"] = _elemente_lesen(data.get("elemente"))
     if festgelegt and len(data["elemente"]) == len(festgelegt):
         # D-10: Die Bewertung verwendet genau die bei der Aufgabe gespeicherten Elemente
-        for e, name in zip(data["elemente"], festgelegt):
-            e["element"] = name
+        for e, f in zip(data["elemente"], festgelegt):
+            e["element"] = f["dimension"]
+            if f["erwartet"]:
+                e["erwartet"] = f["erwartet"]
         data["elemente_quelle"] = "aufgabe"
+    _kein_rueckfall(data["elemente"], alte_elemente)
+    if data.get("_verstoss_offen") and didaktik.hinweis_wiederholt(data.get("hinweis", ""), frueher_hinweise):
+        # D-14 AK 4: Auch nach der Korrektur fast derselbe Hinweis: ein konkreter Ersatz aus den Elementen
+        data["hinweis"] = hinweis_aus_elementen(data["elemente"]) or data.get("hinweis", "")
+        data["hinweis_ersetzt"] = True
     urteil = didaktik.urteil_aus_elementen(data["elemente"], bool(data.get("sachlicher_widerspruch")))
     if urteil and urteil != data["bewertung"]:
         data["bewertung_modell"] = data["bewertung"]
         data["bewertung"] = urteil
     data["korrekt"] = data["bewertung"] == "korrekt"
     return data
+
+
+# D-15/D-18: zusätzliche Sicht bei einer Neubewertung, die nicht als Versuch zählt
+_ZWEITE_SICHT = {
+    "widerspruch": "WIDERSPRUCH DES LERNENDEN gegen deine letzte Bewertung: «{text}»\n"
+                   "Prüfe die Antwort erneut, ausdrücklich auf vertretbare Alternativen. Bleib bei deinem "
+                   "Urteil und begründe es aus dem Sachverhalt, oder korrigiere es, wenn der Einwand zutrifft. "
+                   "Beginne das Feedback mit einem Satz, ob du bei deiner Bewertung bleibst oder sie änderst.",
+    "tutor_korrektur": "SELBSTKORREKTUR: Im Gespräch hast du deine letzte Bewertung als Irrtum erkannt: «{text}»\n"
+                       "Bewerte die Antwort mit dieser korrigierten Sicht neu. Beginne das Feedback mit einem "
+                       "Satz, dass du die Antwort neu bewertet hast.",
+}
+
+
+def _elemente_lesen(roh) -> list[dict]:
+    out = []
+    for e in roh or []:
+        if not isinstance(e, dict):
+            continue
+        status = str(e.get("status", "")).strip().lower().replace(" ", "_")
+        if status not in didaktik.ELEMENT_STATUS:
+            continue
+        el = {"element": str(e.get("element", "")).strip(), "status": status}
+        for feld in ("begruendung", "antwort", "annahme"):
+            if str(e.get(feld) or "").strip():
+                el[feld] = str(e[feld]).strip()
+        if e.get("ausserhalb_material") is True:
+            el["ausserhalb_material"] = True
+        out.append(el)
+    return out
+
+
+GELTEN_ALS_RICHTIG = ("korrekt", "vertretbar")
+
+
+def _kein_rueckfall(neu: list[dict], alt: list[dict]) -> None:
+    """D-14: Ein früher korrektes Element fällt nicht auf «fehlt» zurück.
+
+    Eine Nachbesserung muss nicht alles wiederholen. Zugeordnet wird über den
+    Namen des Elements, sonst über die Reihenfolge.
+    """
+    if not alt:
+        return
+    nach_name = {e.get("element"): e for e in alt}
+    for i, e in enumerate(neu):
+        frueher = nach_name.get(e["element"]) or (alt[i] if len(alt) == len(neu) else None)
+        if frueher and frueher.get("status") in GELTEN_ALS_RICHTIG and e["status"] == "fehlt":
+            e["status"] = frueher["status"]
+            for feld in ("begruendung", "antwort", "annahme"):
+                if frueher.get(feld):
+                    e[feld] = frueher[feld]
+            e["aus_frueherem_versuch"] = True
+
+
+def hinweis_aus_elementen(elemente: list[dict]) -> str:
+    """Konkreter Ersatzhinweis, wenn das Modell denselben Hinweis wiederholt (D-14)."""
+    offen = [e for e in elemente if e.get("status") not in GELTEN_ALS_RICHTIG]
+    if not offen:
+        return ""
+    e = offen[0]
+    if e.get("antwort"):
+        satz = (f"Zu «{e['element']}» schreibst du: «{e['antwort']}». "
+                + (e.get("begruendung") or "Das genügt hier noch nicht.") + " Überleg, was der Fall dazu genau sagt.")
+    else:
+        satz = (f"Zu «{e['element']}» steht in deiner Antwort noch nichts. "
+                "Lies den Fall nochmals und überleg, was er dazu hergibt.")
+    return satz
 
 
 ELEMENTE_FESTGELEGT = (
