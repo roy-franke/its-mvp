@@ -648,7 +648,7 @@ def eval_d10(b: Bericht, anzahl: int):
         task = tutor.generate_task(dict(lesson, einstellungen={"einsatzart": "vertiefung"}), p, [])
         if task.get("_fallback"):
             continue
-        el = task.get("erwartete_elemente") or []
+        el = didaktik.elemente_bereinigen(task.get("erwartete_elemente"))   # seit D-14 Objekte {dimension, erwartet}
         ohne += not el
         einteilig += bool(didaktik.elemente_passen_zur_frage(task))
         r = tutor.evaluate_answer(lesson, p, task, _halbe_antwort(task, []))

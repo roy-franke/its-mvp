@@ -27,8 +27,14 @@ plus Lehrpersonen-Monitoring light. Der komplette Lernverlauf wird protokolliert
 - **Lernsequenzen pro Person**: Eine Lernsequenz gehört einer Person (Benutzername, Gross-/Kleinschreibung egal) und einer Lektion. Nach der Anmeldung zeigt die Startseite die eigenen Sequenzen mit Lektion, Fortschritt, Niveau, Status und letzter Aktivität, jeweils mit «Fortsetzen» und «Neu beginnen». Fortsetzen klappt auch auf einem anderen Gerät an genau derselben Stelle; der ganze bisherige Dialog mit den eigenen Antworten steht wieder im Chat, eine Trennlinie markiert Pause und Fortsetzung (T-14). Pro Person und Lektion gibt es höchstens eine offene Sequenz; «Neu beginnen» archiviert die bisherige nach einer Bestätigung. Status: aktiv, pausiert, abgeschlossen, abgebrochen, archiviert; jeder Wechsel landet im Event-Log. Wer beim ersten Start eine PIN setzt, schützt den Namen vor fremdem Weiterlernen. In der Lernansicht gibt es oben «Pausieren und später weiterfahren» und «Lektion abbrechen» (mit Bestätigung); eine abgebrochene Sequenz bleibt für die Lehrperson mit Zeitpunkt sichtbar.
 - **Lehrpersonen-Sicht** (`/teacher`): Links eine Seitenleiste mit Lernenden und ihren Sequenzen (neueste zuoberst, mit Startdatum und -zeit, die letzte Aktivität als Tooltip, T-26), filterbar nach Name, Lektion, Status und Testläufen von Lehrpersonen (die Filter wirken sofort). Ein Klick zeigt den vollständigen Lernverlauf als Zeitleiste in der Mitte, ohne Seitenwechsel. Sequenzen lassen sich einzeln oder gemeinsam archivieren und wiederherstellen; archivierte sind standardmässig ausgeblendet und über den Statusfilter sichtbar (T-20). Angemeldete Lernende erhalten auf Lehrpersonen-Endpunkten 403. Die Antwortzeiten des Sprachmodells liegen in einem eigenen Bereich. Auf schmalen Bildschirmen klappt die Seitenleiste ein.
 - **Lektionen verwalten** (`/teacher/lessons`): Liste aller Lektionen mit Anzahl Lernziele und Quellen, letzter Änderung und Anzahl Sequenzen. «Ansehen» zeigt Lernziele, Quellen, Material, Hinweise und Tutor-Einstellungen. «Bearbeiten» öffnet den Editor mit allen Werten inklusive Quellenliste; beim Speichern werden Version und Änderungsdatum nachgeführt, laufende Sequenzen arbeiten ab dem nächsten Schritt mit dem neuen Material. «Archivieren» (früher «Löschen») nimmt die Lektion aus der Auswahl, Lernverläufe bleiben lesbar; «Wiederherstellen» holt sie zurück, «Duplizieren» legt eine Kopie an (T-17, T-20).
-- **Tutor-Einstellungen pro Lektion** (Editor, Abschnitt 4; im JSON unter `einstellungen`, fehlende Werte = Standard): Einsatzart (Einführung/Vertiefung), Niveauanpassung (automatisch/nur nach unten/fix), Bewertungsstrenge (nachsichtig/ausgewogen/streng), Wissensquellen (Material, optional gekennzeichnetes Allgemeinwissen).
+- **Tutor-Einstellungen pro Lektion** (Editor, Abschnitt 4; im JSON unter `einstellungen`, fehlende Werte = Standard): Einsatzart (Einführung/Vertiefung), Niveauanpassung (automatisch/nur nach unten/fix), Bewertungsstrenge (nachsichtig/ausgewogen/streng), Materialzugriff (automatisch/immer Auszüge/immer ganz, T-30), Wissensquellen (Material, optional gekennzeichnetes Allgemeinwissen).
 - **Material prüfen** (Editor, Abschnitt 5): Die KI gleicht das Material mit den Lernzielen ab und zeigt pro Lernziel, ob Erklärung, Beispiel und Begründung vorhanden sind, dazu einen Hinweis bei sehr kurzem Material. Das ist eine Empfehlung und verhindert das Speichern nicht.
+- **Lernmaterialien global ablegen** (`/teacher/materialien`, L-01, Auftrag 4): Jede hochgeladene Datei (PDF, Word, Text, Markdown, Bilder) wird ein Lernmaterial, das alle Lektionen verwenden können. Beim Hochladen ergänzt die Lehrperson Name, mögliche Fächer, Niveau (Schätzung), Beschreibung (höchstens 128 Zeichen) und Tags; bestehende Werte erscheinen als Vorschläge, eine abweichende Schreibweise («tiere») übernimmt die bestehende («Tiere»), ähnliche Werte («Tier» neben «Tiere») meldet die Oberfläche. Automatisch erfasst werden Dateiname, Grösse, Format, Seitenzahl, letzte Änderung der Datei, Upload-Datum und Lehrperson (bei Header-Anmeldung der angemeldete Name, sonst das Feld «Hochgeladen von»). Die Originaldatei und der seitenweise extrahierte Text liegen mit filedepot im Dateisystem (`ITS_MATERIAL_DIR`), nie in der Datenbank; der Katalog steht in der SQLite-Tabelle `materialien`. Dieselbe Datei wird erkannt. Bilder werden per OCR gelesen, wenn Tesseract installiert ist. Die Seite zeigt alle Materialien mit Filtern, Details mit Textvorschau, Download und nachträglich änderbaren Metadaten.
+- **Lernmaterialien in Lektionen wählen** (L-02): Im Lektionseditor öffnet «Aus der Ablage wählen» eine Tabelle mit Filtern nach Metadaten und Datei-Metadaten (Suche, Fach, Niveau, Tag, Format, Lehrperson, Upload-Zeitraum); gewählt werden ganze Lernmaterialien. Neue Dateien gehen über denselben Dialog in die Ablage. Die Lektion speichert Verweise (`materialien`) und den zusammengesetzten Text als Momentaufnahme; ältere, lektionsinterne Quellen bleiben und lassen sich mit «In die Ablage übernehmen» global ablegen.
+- **Lernmaterialien archivieren** (L-03): «Archivieren» entspricht dem Löschen und geht nur, wenn keine aktive Lektion das Material verwendet (die Meldung nennt sie). Datei, Text und Embeddings bleiben erhalten, «Wiederherstellen» holt das Material zurück. Wird eine Lektion wiederhergestellt, deren Material inzwischen archiviert ist, kommt das Material mit.
+- **Vektordatenbank und RAG** (T-29, T-30): Ist `ITS_VEKTOR_DB_URL` gesetzt, zerlegt der Server jedes Lernmaterial nach dem Upload im Hintergrund in Chunks (bis 1200 Zeichen an Absatz- und Satzgrenzen, Overlap 300 Zeichen innerhalb eines Abschnitts, Seite und Abschnitt pro Chunk), bettet sie beim Anbieter des Chat-Modells ein (Ollama: `qwen3-embedding:0.6b`) und legt sie in ChromaDB ab, einem eigenen Dienst. Pro Material sind Modell, Parameter, Anzahl Chunks und Zeitpunkt gespeichert; ein Modellwechsel erscheint als «anderes Modell» mit «Neu indexieren». Ist das Material einer Lektion gross (Standard ab 4000 Tokens) oder steht die Einstellung «Materialzugriff» auf «Immer Auszüge», bekommt der Tutor pro Schritt nur die passenden Auszüge: Theorie und Einstufung suchen nach den Lernzielen oder dem Konzept, Aufgaben nach der vorangehenden Theorie, die Bewertung nach Aufgabe und Antwort, der Chat nach der Frage. Der Systemprompt nennt dann nur die Quellen und bleibt pro Lektion gleich. Unter Theorieschritten und Chat-Antworten steht die Fundstelle mit Seite («OR Haftpflicht, S. 3, Art. 56»), im Lernverlauf sieht die Lehrperson jede Abfrage mit Treffern und Ähnlichkeit. Ohne Vektordatenbank oder bei einem Ausfall arbeitet der Tutor wie bisher mit dem ganzen Material.
+- **Bearbeitung stoppen** (T-28): Solange der Tutor an einer Antwort, Verständnisfrage, Erklärung, einem Einwand oder der Einstufung arbeitet, zeigt die Warteanzeige «Stoppen». Der Server bricht die Generierung ab (bei Ollama wirklich, damit die nächste Anfrage nicht wartet) und verwirft ein nachträglich eintreffendes Ergebnis; gestoppt zählt nicht als Versuch. Die Nachricht steht danach wieder im Eingabefeld. Im Lernverlauf der Lehrperson steht «Bearbeitung gestoppt».
+- **Version und Favicon** (T-31, T-27): Der Fuss jeder Seite zeigt die semantische Version und den Commit (`0.5.0+abc1234`), ebenso `/api/version` und das Log beim Start. Regeln zum Hochzählen in `CHANGELOG.md` und `app/version.py`. Alle Seiten haben ein Favicon.
 - **Lektionen erstellen** (`/teacher/lessons/new`): Lehrpersonen erstellen Lektionen direkt im Browser. Material als Text einfügen oder als Datei hochladen (PDF, Word, Text/Markdown), den Titel selbst festlegen (Pflichtfeld) und auf dieser Grundlage Lernziele von der KI vorschlagen lassen (als «experimentell» gekennzeichnet, T-18), optional Hinweise ans Tutorverhalten («Arbeite mit Alltagsbeispielen», «Sei streng bei Fachbegriffen»). Nach dem Speichern erscheint die Lektion in der Auswahl auf der Lernenden-Startseite.
 - **Rollen und Zugangsschutz**: Es gibt die Rollen «lernend» und «lehrperson», durchgesetzt auf dem Server. Alle Seiten unter `/teacher` und alle Endpunkte unter `/api/teacher` hängen an einer zentralen Rollenprüfung (`app/auth.py`); ohne Login gibt es 401 bzw. eine Weiterleitung auf `/teacher/login`. Lernende sehen keine Elemente für Lehrpersonen. Lehrpersonen melden sich mit `TEACHER_PASSWORD` an, Lernende mit Pseudonym plus Zugangscode (`CLASS_CODE`). In der Kopfzeile aller Seiten, auch in der laufenden Lernansicht, steht «Abmelden» (T-22): Es löscht die Cookies und die ITS-Einträge im localStorage, pausiert eine laufende Sequenz und führt zur leeren Anmeldemaske bzw. Login-Seite; das wirkt auch ohne `TEACHER_PASSWORD`. Beides lässt sich für die lokale Entwicklung deaktivieren, indem die Variablen leer bleiben. Optional übernimmt das ITS Name und Rolle aus Headern eines Proxys wie Cloudflare Access (`ITS_TRUST_PROXY_HEADERS`, siehe `docs/DEPLOYMENT-CLOUDFLARE.md`). Lernsequenzen, die eine Lehrperson startet, sind Testläufe und erscheinen im Monitoring nur mit dem Filter «Testläufe von Lehrpersonen anzeigen» (T-21).
 - **Deployment-Paket**: Dockerfile und docker-compose mit Caddy-Reverse-Proxy – HTTPS inklusive automatischem Let's-Encrypt-Zertifikat. Schritt-für-Schritt-Anleitung für einen VPS in `docs/DEPLOYMENT.md`; Alternative ohne eigenen Server: lokaler Betrieb mit Cloudflare Tunnel, siehe `docs/DEPLOYMENT-CLOUDFLARE.md`.
@@ -71,13 +77,18 @@ OLLAMA_MODEL=llama3.1:8b
 ## Architektur
 
 ```
-Browser (static/index.html, teacher.html)
+Browser (static/*.html, materialien.js, version.js)
    │  REST/JSON
 FastAPI (app/main.py)
-   ├─ tutor.py   ITS-Kernlogik: Einstufung, Profil, Adaption, Prompts
-   ├─ llm.py     Provider-Abstraktion: anthropic | openai | ollama | mock
-   ├─ store.py   SQLite: Sessions + vollständiges Event-Log
-   └─ lessons/   Lektionen als JSON (materialgebunden, austauschbar)
+   ├─ tutor.py        ITS-Kernlogik: Einstufung, Profil, Adaption, Prompts
+   ├─ rag.py          RAG: Modus, Retrieval pro Schrittart, Auszüge, Fundstellen (T-30)
+   ├─ llm.py          Provider-Abstraktion: anthropic | openai | ollama | mock
+   ├─ abbruch.py      Stoppbare Anfragen (T-28)
+   ├─ materialien.py  Ablage: Katalog in SQLite, Dateien mit filedepot (L-01)
+   ├─ vektoren.py     Chunking, Embeddings, ChromaDB (T-29)  ──►  ChromaDB (eigener Dienst)
+   ├─ store.py        SQLite: Sessions + vollständiges Event-Log
+   ├─ version.py      Version und Commit (T-31)
+   └─ lessons/        Lektionen als JSON (materialgebunden, austauschbar)
 ```
 
 Designentscheide, angelehnt ans Systemkonzept vom April 2026:
@@ -107,7 +118,20 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `PUT /api/teacher/lessons/{id}` | Lektion ändern (Version und Änderungsdatum werden nachgeführt) |
 | `DELETE /api/teacher/lessons/{id}` | Lektion archivieren |
 | `POST /api/teacher/lessons/{id}/duplizieren` | Kopie «<Titel> (Kopie)» mit allen Inhalten, ohne Sequenzen, Version 1 (T-17) |
-| `POST /api/teacher/lessons/extract` | Text aus PDF/Word/Text-Datei extrahieren |
+| `POST /api/teacher/lessons/extract` | Text aus PDF/Word/Text-Datei extrahieren (ohne Ablage) |
+| `GET /api/teacher/materialien` | Lernmaterialien der Ablage mit Filtern `q`, `fach`, `niveau`, `tag`, `format`, `lehrperson`, `von`, `bis`, `archivierte` (L-01/L-02) |
+| `GET /api/teacher/materialien/werte` | Bestehende Fächer, Niveaus, Tags, Formate und Lehrpersonen (Vorschläge) |
+| `POST /api/teacher/materialien` | Datei mit Metadaten hochladen (multipart: `file`, `name`, `faecher`, `niveau`, `beschreibung`, `tags`, `hochgeladen_von`, `datei_geaendert_am`, `trotzdem`); 409 bei gleicher Datei |
+| `GET/PUT /api/teacher/materialien/{id}` | Details mit verwendenden Lektionen, Metadaten ändern |
+| `GET /api/teacher/materialien/{id}/datei` | Originaldatei herunterladen |
+| `GET /api/teacher/materialien/{id}/text` | Extrahierter Text, seitenweise (Vorschau) |
+| `POST /api/teacher/materialien/{id}/archivieren` | Archivieren (= Löschen), 409 solange eine aktive Lektion es verwendet (L-03) |
+| `POST /api/teacher/materialien/{id}/wiederherstellen` | Archiviertes Material wiederherstellen |
+| `POST /api/teacher/materialien/{id}/indexieren` | Material neu in die Vektordatenbank legen (T-29) |
+| `POST /api/teacher/materialien/indexieren` | Offene, fehlerhafte und mit anderem Modell indexierte Materialien neu indexieren (`?alle=true`: alle) |
+| `GET /api/teacher/vektordb` | Vektordatenbank: eingerichtet, erreichbar, Modell, Chunk-Parameter |
+| `POST /api/session/{id}/stopp` | Laufende Anfrage stoppen (`anfrage_id` aus dem Header `X-ITS-Anfrage`): `abgebrochen`, `zu_spaet` oder `unbekannt` (T-28) |
+| `GET /api/version` | Version und Commit, ohne Anmeldung (T-31) |
 | `POST /api/teacher/lessons/suggest-goals` | KI-Vorschlag für Lernziele (experimentell), verlangt `titel` und `material`; kein Titelvorschlag mehr (T-18) |
 | `POST /api/teacher/lessons/check-material` | Material mit den Lernzielen abgleichen (Erklärung, Beispiel, Begründung) |
 | `GET /api/session/{id}/state` | Zustand inkl. `wartet_auf` (Basis für das Fortsetzen) |
@@ -164,6 +188,18 @@ Designentscheide, angelehnt ans Systemkonzept vom April 2026:
 | `ITS_DOMAIN` | Domain für den HTTPS-Betrieb mit Docker/Caddy |
 | `ITS_LOG_LEVEL` | Log-Stufe für alle Module: `DEBUG`, `INFO` (Standard), `WARNING`, `ERROR` (T-24) |
 | `ITS_LOG_LEVELS` | Stufen einzelner Module, kommagetrennt, z.B. `its.auth=DEBUG` schreibt bei Header-Anmeldung alle ankommenden Header ins Log (T-24) |
+| `ITS_MATERIAL_DIR` | Ablage der Lernmaterialien (Originale und extrahierter Text, filedepot), Standard `materialien/` im Projektordner (L-01) |
+| `ITS_MATERIAL_MAX_MB` | Grösste Datei in MB (Standard 50) |
+| `ITS_TESSERACT`, `ITS_TESSERACT_SPRACHEN` | Programm und Sprachen für die Texterkennung in Bildern (Standard `tesseract`, `deu+eng`) |
+| `ITS_VEKTOR_DB_URL` | Adresse der ChromaDB, z.B. `http://localhost:8011`; leer = keine Vektordatenbank, kein RAG (T-29) |
+| `ITS_EMBED_PROVIDER` | Anbieter der Embeddings: `auto` (wie `LLM_PROVIDER`; bei Anthropic gibt es keine), `ollama`, `openai`, `mock`, `aus` |
+| `ITS_EMBED_MODEL` | Embedding-Modell (Standard Ollama `qwen3-embedding:0.6b`, OpenAI `text-embedding-3-small`) |
+| `ITS_EMBED_QUERY_PREFIX` | Instruktion vor Suchanfragen (Standard bei Qwen3-Embedding gesetzt, sonst leer) |
+| `ITS_CHUNK_GROESSE`, `ITS_CHUNK_OVERLAP` | Chunkgrösse und Overlap in Zeichen (Standard 1200 und 300, Entscheid E6) |
+| `ITS_RAG` | `auto` (Standard) oder `aus` für den ganzen Server (T-30) |
+| `ITS_RAG_AB_TOKENS` | Ab welcher Materialgrösse «Materialzugriff: automatisch» Auszüge verwendet (Standard 4000 geschätzte Tokens) |
+| `ITS_RAG_K`, `ITS_RAG_MAX_ZEICHEN` | Höchstzahl Auszüge und Zeichen pro Anfrage (Standard 6 und 7000) |
+| `ITS_GIT_COMMIT` | Commit für die Versionsanzeige, wenn kein `.git` vorhanden ist (Docker, T-31) |
 | `ITS_LOG_HEADERS_UNMASKED` | `true` zeigt Cookie, Authorization und Header mit jwt/token/secret im Namen ungekürzt (Standard `false`, Entscheid E5) |
 
 ## Tests
@@ -182,7 +218,7 @@ Instanz mit Mock-Provider (bei Bedarf verzögert oder scheiternd):
 
 ```bash
 pip install playwright && python3 -m playwright install chromium
-python3 tests/ui/ui_checks.py          # alle Szenarien, oder z.B. t02 d07 t22
+python3 tests/ui/ui_checks.py          # alle Szenarien, oder z.B. t02 d07 t22 l01 l02 t28 t30
 ```
 
 Für die Prüfung der Formeldarstellung (T-13) lädt das Skript KaTeX aus einem lokal
@@ -203,12 +239,35 @@ python3 tests/eval/diagnose_ollama.py            # leere Antworten und Tokensch�
 ## Bewusste Grenzen (MVP)
 
 Kein eigenes Benutzerverzeichnis (ein gemeinsames Lehrpersonen-Passwort und ein
-Klassencode, optional Anmeldung über einen Proxy), kein RAG über grosse Dokumente
-(das Material geht direkt in den Kontext, sehr lange Dokumente daher kürzen).
+Klassencode, optional Anmeldung über einen Proxy). RAG gibt es seit Auftrag 4 nur für
+Lernmaterialien aus der Ablage und nur mit eingerichteter Vektordatenbank; Lektionen mit
+eingefügtem Text arbeiten weiterhin mit dem ganzen Material. Bilder ohne Texterkennung
+werden abgelegt, aber nicht indexiert.
+
+## Vektordatenbank einrichten (T-29)
+
+```bash
+pip install -r requirements.txt               # enthält chromadb (Client und Server)
+chroma run --path vektordb --port 8011        # eigener Dienst, eigenes Fenster
+ollama pull qwen3-embedding:0.6b              # Embedding-Modell beim Chat-Anbieter
+# .env: ITS_VEKTOR_DB_URL=http://localhost:8011
+```
+
+Auf Windows startet `start.bat` die Vektordatenbank automatisch in einem eigenen Fenster.
+Mit Docker läuft sie als Dienst `chroma` (siehe `docker-compose.yml`). Den Overlap prüft
+`python tests/eval/eval_chunking.py --embedder its --dateien <grosses.pdf>` mit dem echten
+Embedding-Modell; der Bericht landet in `tests/eval/berichte/`.
+
+## Versionierung (T-31)
+
+Die Version steht in `VERSION`, die Historie in `CHANGELOG.md`. Pro Auftrag steigt die
+Minor-Version, Korrekturen erhöhen die Patch-Version, 1.0.0 ist der Stand für den Pilot.
+Angezeigt wird `Version+Commit`; im Container setzt man den Commit beim Bauen:
+`ITS_GIT_COMMIT=$(git rev-parse --short HEAD) docker compose build`.
 
 ## Sinnvolle nächste Schritte
 
 1. Prompts mit realen Lernenden-Antworten tunen (Bewertungsstrenge, Erklärtiefe).
 2. Eigene Lektionen über den Editor erstellen und mit der Klasse testen.
 3. Tutoring-Modi (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept.
-4. RAG-Anbindung an P2 für umfangreiches Material.
+4. Overlap und Schwelle für RAG mit qwen3-embedding auf a9-mega bestätigen (`tests/eval/eval_chunking.py`).

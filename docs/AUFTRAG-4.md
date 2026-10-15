@@ -100,3 +100,62 @@ Serverstart. Historie in `CHANGELOG.md`.
 | E8 | Stopp über eine Anfrage-ID: Abbruch-Endpunkt, Prüfung vor dem Übernehmen, bei Ollama Streaming mit Abbruch | Zuverlässig auch hinter Cloudflare, wo ein abgebrochener Browser-Request den Server nicht sicher erreicht |
 | E9 | Die Lektion speichert Verweise und den zusammengesetzten Text als Momentaufnahme | Lernverläufe bleiben rekonstruierbar, alle bestehenden Prüfungen (Kopie, Quellen, Fallback-Abschnitte) arbeiten unverändert |
 | E10 | Die Lehrperson als Uploader: Header-Name, sonst Feld «Hochgeladen von» | Mit gemeinsamem Passwort gibt es keine Personen; ein Feld ist ehrlicher als ein erfundener Name |
+
+## 4. Experiment zum Overlap (Entscheid E6)
+
+**Frage.** Wie gross muss der Overlap sein, damit eine Textstelle, nach der gefragt wird,
+vollständig in einem der gefundenen Chunks steht, und was kostet er?
+
+**Vorgehen.** `tests/eval/eval_chunking.py` zerlegt ein Korpus mit der Pipeline des ITS
+(`vektoren.zerlegen`) in Chunks von 800, 1200 und 1600 Zeichen mit 0, 10, 15, 20, 25 und 33
+Prozent Overlap. 1000 zufällige Textstellen (1 bis 3 Sätze eines Absatzes) werden mit rund
+60 Prozent ihrer Inhaltswörter in zufälliger Reihenfolge abgefragt. Gemessen wird, wie oft
+einer der drei besten Chunks die ganze Stelle enthält (voll@3), dazu die Anzahl Chunks
+(Speicher und Rechenzeit beim Indexieren) und die Zeichen der drei Treffer (Promptlänge).
+Korpus: die Lektionen «Bruchbegriff» und «Haftungsrecht» und zwei Sitzungstage des
+Europäischen Parlaments auf Deutsch (776'521 Zeichen; das OR war aus der Arbeitsumgebung
+nicht abrufbar). Die Textstellen sind im Median 249 Zeichen lang, 75 Prozent kürzer als
+378, 90 Prozent kürzer als 495.
+
+**Ergebnis mit lexikalischer Gewichtung (TF-IDF), Chunkgrösse 1200:**
+
+| Overlap | Chunks | Faktor | voll@3 | Kontext (3 Treffer) |
+|---|---|---|---|---|
+| 0 | 718 | 1.00 | 89.2 % | 3247 Zeichen |
+| 120 (10 %) | 797 | 1.11 | 92.8 % | 3235 |
+| 180 (15 %) | 825 | 1.15 | 93.7 % | 3258 |
+| 240 (20 %) | 858 | 1.19 | 96.7 % | 3253 |
+| **300 (25 %)** | **894** | **1.25** | **98.1 %** | **3262** |
+| 396 (33 %) | 984 | 1.37 | 98.8 % | 3267 |
+
+Bei 800 Zeichen reicht selbst ein Drittel Overlap nur für 94,3 Prozent (die Chunks sind zu
+klein für längere Stellen), bei 1600 Zeichen erreicht 25 Prozent 99,0 Prozent, kostet aber
+4420 statt 3260 Zeichen Kontext pro Anfrage. Mit deutschen Wortvektoren (spaCy) war die
+Suche selbst zu ungenau (rund 20 Prozent Treffer), der Overlap änderte daran wenig; dieser
+Lauf taugt nur als Hinweis, dass ein schwaches Embedding-Modell den Effekt überdeckt.
+
+**Entscheid.** 1200 Zeichen mit 300 Zeichen Overlap (25 Prozent): Ab hier liegt der Wert
+weniger als einen Prozentpunkt unter dem besten, und 300 Zeichen decken drei Viertel der
+gefragten Stellen ganz ab. Der Preis sind 25 Prozent mehr Chunks, die Promptlänge bleibt
+gleich. Der Overlap besteht aus ganzen Sätzen und gilt innerhalb eines Abschnitts; ein neuer
+Gesetzesartikel oder eine neue Überschrift beginnt ohne Text aus dem vorangehenden.
+
+**Bestätigung ausstehend.** Auf a9-mega mit dem echten Modell:
+`.venv\Scripts\python.exe tests\eval\eval_chunking.py --embedder its --dateien <OR.pdf>`.
+Weicht die Empfehlung ab, genügt `ITS_CHUNK_OVERLAP` in der `.env` und «Offene und veraltete
+Materialien indexieren» bzw. Neu-Indexieren aller Materialien (`POST
+/api/teacher/materialien/indexieren?alle=true`).
+
+## 5. Abweichungen und Grenzen
+
+- Die Kombination von Metadaten und Vektoren in PostgreSQL/pgvector ist geprüft, aber nicht
+  gewählt (E1, E2). Die Trennung in `materialien.py` (Katalog) und `vektoren.py` (Vektoren)
+  hält einen späteren Umzug klein.
+- Eingefügter Text und ältere, lektionsinterne Quellen werden nicht indexiert; sie stehen im
+  RAG-Modus ganz im Systemprompt. Wer sehr grossen Text so verwendet, sollte ihn in die
+  Ablage übernehmen.
+- Ein Material lässt sich nicht ersetzen, nur neu hochladen: Lektionen verweisen auf eine
+  unveränderliche Datei. Ein geänderter Name gilt in einer Lektion erst nach dem nächsten
+  Speichern (Momentaufnahme).
+- Der Stopp verwirft Ergebnisse zuverlässig; bei OpenAI und Anthropic läuft ein bereits
+  gestarteter Aufruf beim Anbieter zu Ende, nur bei Ollama wird er wirklich abgebrochen.

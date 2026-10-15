@@ -5,8 +5,8 @@ zusammen. Es dient als Kontext für eine neue Claude-Session (z.B. auf einem
 anderen Rechner), damit dort ohne Unterbruch weitergearbeitet werden kann.
 Lies zusätzlich das `README.md` im Projektstamm.
 
-Stand: 13. Oktober 2026 (nachgeführt nach dem Auftrag «Anpassungen ITS-Prototyp nach dem
-dritten Testdurchlauf», Pakete T-25, T-26 und D-13 bis D-18)
+Stand: 15. Oktober 2026, Version 0.5.0 (nachgeführt nach Auftrag 4, Feedback von Pascal vom
+13.10.2026: Pakete L-01 bis L-03 und T-27 bis T-31)
 
 ## 1. Projektkontext
 
@@ -134,6 +134,25 @@ Oberfläche: Legende passend zu den sichtbaren Buttons (T-25), Zeitstempel in de
 Sequenzliste (T-26). Details in `claude/status-t25-…` bis `claude/status-d18-…` und
 `claude/status-auftrag-3.md`.
 
+Auftrag 4 (15.10.2026, Feedback von Pascal, Version 0.5.0): Lernmaterialien sind global
+(L-01, `app/materialien.py`, Seite `/teacher/materialien`): Originale und seitenweiser Text
+liegen mit filedepot im Dateisystem (`ITS_MATERIAL_DIR`), der Katalog mit Metadaten
+(Name, Fächer, Niveau, Beschreibung bis 128 Zeichen, Tags) und Datei-Metadaten in der
+SQLite-Tabelle `materialien`. Der Editor wählt Materialien aus der Ablage mit Filtern; die
+Lektion speichert Verweise `materialien`, den eigenen Text `material_eigen` und weiterhin
+den zusammengesetzten Text `material` als Momentaufnahme (L-02, Entscheid E9). Archivieren
+nur ohne aktive Lektion (L-03). ChromaDB ist ein eigener Dienst (`ITS_VEKTOR_DB_URL`,
+Entscheid E1); `app/vektoren.py` zerlegt (1200 Zeichen, Overlap 300 innerhalb eines
+Abschnitts, E6), bettet beim Chat-Anbieter ein (Ollama `qwen3-embedding:0.6b`, E4) und legt
+pro Modell eine Sammlung an (T-29). `app/rag.py` entscheidet pro Lektion zwischen Auszügen
+und ganzem Material (automatisch ab 4000 Tokens, Einstellung «Materialzugriff», E5); alle
+Aufrufe mit Material laufen über `tutor._chat`, die Auszüge stehen am Ende des Benutzerteils,
+der Systemprompt nennt nur die Quellen (T-30). Neue Ereignisse: `rag_abruf`,
+`anfrage_abgebrochen`. Stoppen über `app/abbruch.py` und `POST /api/session/{sid}/stopp`
+(T-28), bei Ollama per Streaming mit Verbindungsabbruch. Favicon (T-27), Version in `VERSION`
+mit Commit-Hash aus `.git` im Fuss jeder Seite (T-31). Entscheide und Experiment in
+`docs/AUFTRAG-4.md`.
+
 Prüfwerkzeuge neben pytest: `tests/ui/ui_checks.py` (Playwright gegen eine
 eigens gestartete Instanz) und `tests/eval/eval_didaktik.py` (Evaluation der
 didaktischen Pakete gegen das echte Modell, schreibt einen Bericht nach
@@ -161,6 +180,11 @@ Qwen3 braucht mit Denken rund 11 Sekunden selbst fuer eine Ein-Wort-Antwort
 (ohne Denken 3,3 Sekunden, gemessen ueber /api/llm-test auf a9-mega),
 und der Gedankengang wird ohnehin verworfen (`strip_reasoning` in `llm.py`).
 Fuer Qualitaetsvergleiche laesst er sich mit `OLLAMA_THINK=true` einschalten.
+Seit Auftrag 4 zusätzlich: `pip install -r requirements.txt` (filedepot, chromadb),
+`ollama pull qwen3-embedding:0.6b` und in der `.env` `ITS_VEKTOR_DB_URL=http://localhost:8011`.
+`start.bat` startet die Vektordatenbank (`chroma run --path vektordb --port 8011`) in einem
+eigenen Fenster; Port 8000 ist auf a9-mega belegt, deshalb 8011. Daten liegen in `vektordb/`
+und `materialien/` (gitignored, mit sichern).
 Zugänge (API-Keys, GitHub-Token) stehen bewusst NICHT in diesem Dokument –
 die `.env` ist gitignored und wird pro Rechner neu erstellt.
 
@@ -215,6 +239,10 @@ danach lohnt sich der Versuch mit einem kleineren Modell.
 - Seit Auftrag 3 kostet eine neue Aufgabe mindestens einen zusätzlichen LLM-Aufruf (Gegenprüfung), bei abweichenden Fachbegriffen zwei, bei einer Abweichung zusätzlich eine Neugenerierung. Das läuft im Vorabruf; klickt jemand sehr schnell auf «Weiter», wird die Wartezeit sichtbar. In der Messübersicht stehen die Zeilen «Musterlösung prüfen» und «Musterlösung vergleichen». Notfalls `ITS_MUSTERLOESUNG_PRUEFEN=false`.
 - Die Bewertung spricht von der «erwarteten Lösung», nicht mehr von der «Musterlösung»; ein Feedback, das die Musterlösung erwähnt, gilt als Regelverstoss (D-14).
 - `profile.antworten_aktuell` enthält seit D-14 auch die Elemente der letzten Bewertung. Neubewertungen (Widerspruch, Selbstkorrektur, Urteilskorrektur) nehmen die Zählung der ersetzten Bewertung zurück (`main._urteil_zuruecknehmen`); sie sind nur bei offener Aufgabe möglich.
+- Seit Auftrag 4: Ohne `ITS_VEKTOR_DB_URL` gibt es kein RAG; die Ablage funktioniert trotzdem, der Index-Stand heisst dann «ohne Vektor-DB». Wird das Embedding-Modell gewechselt, stehen die Materialien auf «anderes Modell», und die Lektionen arbeiten bis zum Neu-Indexieren mit dem ganzen Material. Bei `LLM_PROVIDER=anthropic` gibt es keine Embeddings; dann `ITS_EMBED_PROVIDER=ollama` setzen.
+- Läuft ChromaDB beim Hochladen oder beim Serverstart nicht, steht das Material auf «Index-Fehler». Nach dem Start der Vektordatenbank auf der Seite «Lernmaterialien» den Link «Offene und veraltete Materialien indexieren» klicken.
+- Die Indexierung läuft in einem Thread im Serverprozess, eine nach der anderen. Ein Neustart während der Indexierung ist unkritisch: Beim Start werden offene und unterbrochene Indexierungen nachgeholt.
+- Der Stopp (T-28) merkt sich Anfragen im Arbeitsspeicher; das setzt einen Serverprozess voraus (uvicorn ohne mehrere Worker, wie bisher).
 - Der Mock-Provider kennt die neuen Schrittarten. «stimmt doch», «vertretbar» oder «Annahme» in einem Widerspruch lassen ihn das Urteil ändern, «wirklich» in einer Verständnisfrage nach einer Bewertung löst eine Selbstkorrektur aus (für Playwright).
 
 ## 6. Austausch mit Swiss Learning Analytics (LLMTutor)
@@ -243,6 +271,7 @@ Noch offen: gleiches Tunnel-Muster später für RIB-AI-01 im Pilot.
 2. **Anpassungen aus dem ersten Testdurchlauf – Phasen 1 bis 4 UMGESETZT (27./28.9.2026)**: T-01 bis T-07, D-01 bis D-06 und N-01 bis N-05. Evaluation mit qwen3:30b gelaufen (Berichte unter `tests/eval/berichte/`, Befunde in den Statusnotizen D-01 und D-05). Offen: Klassentest mit echtem Modell, Material der Quantenphysik-Lektion überarbeiten (D-06), für die Internetrecherche einen SearXNG-Dienst aufsetzen. Kandidat für später: Bewertungselemente schon bei der Aufgabengenerierung festlegen statt bei jeder Bewertung neu (siehe D-05).
 3. **Anpassungen aus dem zweiten Testdurchlauf – UMGESETZT (11.10.2026)**: T-08 bis T-24, D-07 bis D-12, 495 pytest-Tests und 152 Playwright-Prüfungen grün. Evaluation und Diagnose gegen qwen3:30b am 12.10.2026 auf a9-mega gelaufen: alle Kriterien D-07 bis D-12 erfüllt, 0 Fallbacks und 0 leere Antworten bei rund 200 Aufrufen; Ursache der leeren Antworten belegt, Tokenschätzung kalibriert (3.4 Zeichen pro Token). Offen: Klassentest. Ausblick laut Auftrag: lektionsspezifische Witze im Editor, Wahl auch nach falscher Antwort, automatisches Kürzen oder RAG für grosses Material.
 3b. **Anpassungen aus dem dritten Testdurchlauf – UMGESETZT (13.10.2026)**: T-25, T-26, D-13 bis D-18 nach den Entscheiden E1 bis E6 (Vorschläge), pytest und Playwright grün. Offen: Evaluation mit qwen3:30b auf a9-mega (`tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09`), Auswertung von Christians its.db vom 13.10.2026 und der Lektion «Haftungsrecht Version 3». Ausblick laut Auftrag: Musterlösungen durch die Lehrperson korrigieren, Auswertung pro Lektion nach Widerspruch, Selbstkorrekturen und unsicheren Musterlösungen, geprüfte Fallaufgaben für normative Fächer.
+3c. **Auftrag 4 (Feedback Pascal) – UMGESETZT (15.10.2026)**: L-01 bis L-03, T-27 bis T-31, Version 0.5.0. Offen: auf a9-mega `qwen3-embedding:0.6b` laden, Chroma starten, `tests/eval/eval_chunking.py --embedder its --dateien <OR.pdf>` laufen lassen und Overlap (E6) sowie die RAG-Schwelle (E5) bestätigen; danach eine Lektion mit dem ganzen OR als Material testen. Ausblick laut Feedback: Freitextsuche über die Vektordatenbank bei der Auswahl (gestrichener Punkt 2a), Umzug von Katalog und Vektoren nach PostgreSQL/pgvector, falls auch die Sessions dorthin wandern.
 4. **Prompt-Tuning** mit Roys Praxisbeobachtungen auf Basis der Evaluationsberichte (Vergleich Ollama vs. Cloud als Evaluationsergebnis).
 5. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
 6. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.
