@@ -1374,6 +1374,258 @@ def d18_selbstkorrektur(pw):
         check("D-18 tutor_korrektur im Lernverlauf", "Neubewertung nach Selbstkorrektur" in page.inner_text("#detail-events"))
 
 
+
+# ---------------------------------------------------------------- Auftrag 4 (Oktober 2026)
+
+def _testdateien(ordner: Path) -> dict:
+    sys.path.insert(0, str(ROOT / "tests"))
+    from material_hilfen import HAFTUNG, pdf
+    dateien = {"haftung.pdf": pdf(HAFTUNG), "brueche.txt": ("Ein Bruch besteht aus Zaehler und Nenner. " * 12).encode()}
+    pfade = {}
+    for name, daten in dateien.items():
+        (ordner / name).write_bytes(daten)
+        pfade[name] = str(ordner / name)
+    return pfade
+
+
+@scenario("t27")
+def t27_t31_favicon_version(pw):
+    """T-27/T-31: Favicon und Version mit Commit im Fuss jeder Seite."""
+    with server() as base:
+        page = launch(pw).new_page()
+        v = httpx.get(base + "/api/version").json()
+        for pfad in ["/", "/teacher", "/teacher/lessons", "/teacher/lessons/new", "/teacher/materialien"]:
+            page.goto(base + pfad)
+            fuss = page.locator("#its-version")
+            expect(fuss).to_contain_text(v["version"], timeout=10000)
+            check(f"T-31 Fuss mit Version und Commit auf {pfad}",
+                  (v["commit"] or "") in fuss.inner_text() and fuss.get_attribute("data-version") == v["anzeige"],
+                  fuss.inner_text())
+            ok = page.evaluate("""async () => {
+                const l = document.querySelector('link[rel=icon][type="image/svg+xml"]');
+                if (!l) return false;
+                const r = await fetch(l.href); return r.ok && (await r.text()).includes('<svg');
+            }""")
+            check(f"T-27 Favicon verlinkt und abrufbar auf {pfad}", ok)
+        check("T-27 /favicon.ico", httpx.get(base + "/favicon.ico").status_code == 200)
+
+
+@scenario("l01")
+def l01_materialien_ablage(pw):
+    """L-01/L-03: Upload mit Metadaten, Vorschläge gegen Dubletten, Filter, Archivieren."""
+    with server() as base:
+        pfade = _testdateien(Path(tempfile.mkdtemp(prefix="its_ui_dateien_")))
+        page = launch(pw).new_page(viewport={"width": 1300, "height": 900})
+        page.goto(base + "/teacher/materialien")
+        page.set_input_files("#file", [pfade["haftung.pdf"]])
+        expect(page.locator(".itsm-modal")).to_be_visible(timeout=10000)
+        page.locator(".itsm-datei input[type=text]").first.fill("OR Haftpflicht")
+        page.locator(".itsm-datei input[type=text]").nth(1).fill("x" * 140)
+        check("L-01 Beschreibung höchstens 128 Zeichen",
+              len(page.locator(".itsm-datei input[type=text]").nth(1).input_value()) == 128)
+        page.locator(".itsm-datei input[type=text]").nth(1).fill("Art. 41 bis 56 OR")
+        chips = page.locator(".itsm-chips input")
+        chips.nth(0).fill("Recht"); chips.nth(0).press("Enter")
+        page.locator(".itsm-feld input[list]").nth(1).fill("BM 2. Lehrjahr")
+        chips.nth(1).fill("Haftung"); chips.nth(1).press("Enter")
+        page.locator(".itsm-feld input[list]").last.fill("Frau Muster")
+        page.click("#itsm-los")
+        expect(page.locator(".itsm-modal")).to_have_count(0, timeout=15000)
+        zeile = page.locator(".itsm-tabelle tbody tr").first
+        expect(zeile).to_contain_text("OR Haftpflicht", timeout=10000)
+        text = zeile.inner_text()
+        check("L-01 Tabelle zeigt Metadaten und Datei-Metadaten",
+              all(x in text for x in ("Recht", "BM 2. Lehrjahr", "Haftung", "pdf", "3", "Frau Muster")), text)
+        # Zweiter Upload: Vorschlag aus bestehenden Werten, ähnlicher Tag wird gemeldet
+        page.set_input_files("#file", [pfade["brueche.txt"]])
+        expect(page.locator(".itsm-modal")).to_be_visible(timeout=10000)
+        optionen = page.evaluate("() => Array.from(document.querySelectorAll('datalist option')).map(o => o.value)")
+        check("L-01 bestehende Fächer und Tags als Vorschläge", "Recht" in optionen and "Haftung" in optionen, str(optionen))
+        chips = page.locator(".itsm-chips input")
+        chips.nth(1).fill("haftungen"); chips.nth(1).press("Enter")
+        expect(page.locator(".itsm-aehnlich").filter(has_text="Haftung").first).to_be_visible(timeout=5000)
+        page.locator(".itsm-aehnlich button").first.click()
+        chips.nth(0).fill("recht"); chips.nth(0).press("Enter")
+        chip_texte = page.locator(".itsm-chip").all_inner_texts()
+        check("L-01 Schreibweise der bestehenden Werte übernommen («recht» → «Recht»)",
+              any(c.startswith("Recht") for c in chip_texte) and any(c.startswith("Haftung") for c in chip_texte),
+              str(chip_texte))
+        page.click("#itsm-los")
+        expect(page.locator(".itsm-modal")).to_have_count(0, timeout=15000)
+        expect(page.locator(".itsm-tabelle tbody tr")).to_have_count(2, timeout=10000)
+        page.select_option(".itsm-filter select[data-f=format]", "txt")
+        expect(page.locator(".itsm-tabelle tbody tr")).to_have_count(1, timeout=5000)
+        check("L-02 Filter nach Format wirkt sofort", "brueche" in page.locator(".itsm-tabelle tbody").inner_text())
+        page.select_option(".itsm-filter select[data-f=format]", "")
+        page.fill(".itsm-filter input[data-f=q]", "Art. 41")
+        expect(page.locator(".itsm-tabelle tbody tr")).to_have_count(1, timeout=5000)
+        page.fill(".itsm-filter input[data-f=q]", "")
+        expect(page.locator(".itsm-tabelle tbody tr")).to_have_count(2, timeout=5000)
+        # Details mit Textvorschau
+        page.locator(".itsm-tabelle tbody tr", has_text="OR Haftpflicht").locator("button[data-a=details]").click()
+        expect(page.locator("#itsm-text")).to_contain_text("Tierhalterhaftung", timeout=10000)
+        check("L-01 Details zeigen Speicherort", "depot" in page.locator(".itsm-box").inner_text())
+        page.click(".itsm-box button[data-a=zu]")
+        # L-03: Archivieren ohne Lektion, danach unter «Archivierte anzeigen» wiederherstellen
+        page.locator(".itsm-tabelle tbody tr", has_text="brueche").locator("button[data-a=archivieren]").click()
+        page.click(".itsm-box button[data-a=ja]")
+        expect(page.locator(".itsm-tabelle tbody tr")).to_have_count(1, timeout=10000)
+        page.check(".itsm-filter input[data-f=archivierte]")
+        expect(page.locator(".itsm-tabelle tbody tr.archiviert")).to_have_count(1, timeout=5000)
+        page.locator(".itsm-tabelle tbody tr.archiviert button[data-a=wiederherstellen]").click()
+        expect(page.locator(".itsm-tabelle tbody tr.archiviert")).to_have_count(0, timeout=5000)
+        check("L-03 archivieren und wiederherstellen", page.locator(".itsm-tabelle tbody tr").count() == 2)
+
+
+@scenario("l02")
+def l02_auswahl_im_editor(pw):
+    """L-02/L-03: Material aus der Ablage im Editor wählen, Lektion speichern, Archivieren blockiert."""
+    with server() as base:
+        pfade = _testdateien(Path(tempfile.mkdtemp(prefix="its_ui_dateien_")))
+        c = httpx.Client(base_url=base)
+        with open(pfade["haftung.pdf"], "rb") as f:
+            m = c.post("/api/teacher/materialien", files={"file": ("haftung.pdf", f.read())},
+                       data={"name": "OR Haftpflicht", "tags": '["Haftung"]', "faecher": '["Recht"]'}).json()
+        page = launch(pw).new_page(viewport={"width": 1300, "height": 900})
+        page.goto(base + "/teacher/lessons/new")
+        page.click("#btn-ablage")
+        expect(page.locator("#ablage-tabelle .itsm-tabelle tbody tr")).to_have_count(1, timeout=10000)
+        page.select_option("#ablage-tabelle select[data-f=tag]", "Haftung")
+        page.locator("#ablage-tabelle .itsm-tabelle tbody tr").first.click()
+        expect(page.locator("#btn-ablage-uebernehmen")).to_be_enabled(timeout=5000)
+        page.click("#btn-ablage-uebernehmen")
+        expect(page.locator("#source-list")).to_contain_text("OR Haftpflicht", timeout=5000)
+        check("L-02 Material als «Ablage» in der Lektion", "Ablage" in page.locator("#source-list").inner_text())
+        page.fill("#titel", "Haftung aus der Ablage")
+        page.fill("#ziele", "Haftungsarten unterscheiden")
+        page.click("#btn-save")
+        expect(page.locator("#result")).to_contain_text("veröffentlicht", timeout=10000)
+        lektion = [l for l in c.get("/api/teacher/lessons").json() if l["titel"] == "Haftung aus der Ablage"][0]
+        d = c.get(f"/api/teacher/lessons/{lektion['id']}").json()
+        check("L-02 Lektion verweist auf das Material und enthält den Text",
+              d["materialien"] == [m["id"]] and "Tierhalterhaftung" in d["material"], str(d.get("materialien")))
+        # Bearbeiten zeigt das Material wieder als Eintrag aus der Ablage
+        page.goto(base + f"/teacher/lessons/{lektion['id']}/edit")
+        expect(page.locator("#source-list")).to_contain_text("OR Haftpflicht", timeout=10000)
+        check("L-02 beim Bearbeiten kein doppelter Text", page.locator("#material").input_value() == "")
+        # L-03: Archivieren blockiert, solange die Lektion aktiv ist
+        page.goto(base + "/teacher/materialien")
+        page.locator(".itsm-tabelle tbody tr").first.locator("button[data-a=archivieren]").click()
+        page.click(".itsm-box button[data-a=ja]")
+        expect(page.locator(".itsm-box .itsm-meldung")).to_contain_text("Haftung aus der Ablage", timeout=5000)
+        check("L-03 Archivieren nennt die Lektion und bleibt blockiert",
+              page.locator(".itsm-box button[data-a=ja]").is_disabled())
+
+
+@scenario("t28")
+def t28_stoppen(pw):
+    """T-28: «Stoppen» während der Tutor arbeitet; die Nachricht steht wieder im Feld."""
+    with server(ITS_MOCK_DELAY="1.5") as base:
+        page = launch(pw).new_page()
+        start_lernsequenz(page, base, name="Stopp-UI")
+        # Verständnisfrage stoppen
+        page.fill("#chat-input", "Was ist eigentlich ein Schaden?")
+        page.click("#btn-ask")
+        expect(page.locator("#btn-stopp")).to_be_visible(timeout=5000)
+        check("T-28 Stopp-Button bleibt klickbar, während die Aktionsbuttons gesperrt sind",
+              page.locator("#btn-stopp").is_enabled() and page.locator("#btn-ask").is_disabled())
+        page.click("#btn-stopp")
+        page.wait_for_selector("#waiting", state="detached", timeout=10000)
+        tutor_vorher = page.locator(".msg.tutor").count()
+        check("T-28 Frage steht wieder im Eingabefeld",
+              page.locator("#chat-input").input_value() == "Was ist eigentlich ein Schaden?")
+        check("T-28 gestoppte Nachricht markiert, Hinweis im Chat",
+              page.locator(".msg.user.gestoppt").count() == 1 and "Gestoppt" in page.locator(".note").last.inner_text())
+        page.wait_for_timeout(2500)
+        check("T-28 keine verspätete Antwort im Chat", page.locator(".msg.tutor").count() == tutor_vorher,
+              f"{tutor_vorher} -> {page.locator('.msg.tutor').count()}")
+        # Antwort stoppen: Sie zählt nicht und lässt sich danach ohne neue Sicherheitsfrage senden
+        page.click("#btn-continue")
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        page.fill("#chat-input", "Eine Antwort, die ich zu früh abgeschickt habe, mit genug Text.")
+        page.click("#btn-answer")
+        page.locator("#confidence-buttons button[data-v='6']").click()
+        expect(page.locator("#btn-stopp")).to_be_visible(timeout=5000)
+        page.click("#btn-stopp")
+        page.wait_for_selector("#waiting", state="detached", timeout=10000)
+        check("T-28 Antwort zurück im Feld",
+              page.locator("#chat-input").input_value().startswith("Eine Antwort, die ich zu früh"))
+        check("T-28 gestoppte Antwort zählt nicht", "0 richtig" in page.inner_text("#prog-badges")
+              or "richtig" not in page.inner_text("#prog-badges"), page.inner_text("#prog-badges"))
+        page.click("#btn-answer")
+        check("T-28 keine zweite Sicherheitsfrage", page.locator("#confidence-box").is_hidden())
+        page.wait_for_selector("#waiting", state="detached", timeout=30000)
+        expect(page.locator(".msg.tutor.good, .msg.tutor.mid, .msg.tutor.bad").last).to_be_visible(timeout=10000)
+        page.goto(base + "/teacher")
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-events")).to_contain_text("Bearbeitung gestoppt", timeout=10000)
+        check("T-28 Lehrperson sieht beide Stopps",
+              page.locator("#detail-events").inner_text().count("Bearbeitung gestoppt") == 2)
+
+
+@scenario("t30")
+def t30_rag(pw):
+    """T-29/T-30: Mit ChromaDB: Index im Katalog, Fundstelle unter der Theorie, Abrufe im Lernverlauf."""
+    try:
+        import chromadb  # noqa: F401
+    except ImportError:
+        check("T-30 übersprungen (chromadb fehlt)", True)
+        return
+    port = _free_port()
+    pfad = tempfile.mkdtemp(prefix="its_ui_chroma_")
+    chroma = Path(sys.executable).parent / "chroma"
+    proc = subprocess.Popen([str(chroma), "run", "--path", pfad, "--port", str(port)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(150):
+            try:
+                if httpx.get(f"http://127.0.0.1:{port}/api/v2/heartbeat", timeout=1).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                time.sleep(0.1)
+        with server(ITS_VEKTOR_DB_URL=f"http://127.0.0.1:{port}", ITS_CHUNK_GROESSE="300",
+                    ITS_CHUNK_OVERLAP="60") as base:
+            pfade = _testdateien(Path(tempfile.mkdtemp(prefix="its_ui_dateien_")))
+            c = httpx.Client(base_url=base)
+            with open(pfade["haftung.pdf"], "rb") as f:
+                m = c.post("/api/teacher/materialien", files={"file": ("haftung.pdf", f.read())},
+                           data={"name": "OR Haftpflicht"}).json()
+            for _ in range(50):
+                if c.get(f"/api/teacher/materialien/{m['id']}").json()["index_status"] == "bereit":
+                    break
+                time.sleep(0.2)
+            lid = c.post("/api/teacher/lessons", json={
+                "titel": "RAG im Browser", "lernziele": ["Die Tierhalterhaftung erklaeren"], "material": "",
+                "materialien": [m["id"]], "einstellungen": {"materialzugriff": "auszuege"}}).json()["id"]
+            page = launch(pw).new_page(viewport={"width": 1300, "height": 900})
+            page.goto(base + "/teacher/materialien")
+            expect(page.locator(".itsm-index.bereit")).to_be_visible(timeout=10000)
+            check("T-29 Stand «Index bereit» in der Ablage", True)
+            page.locator("button[data-a=details]").first.click()
+            box = page.locator(".itsm-box")
+            expect(box).to_contain_text("mock-wortstamm-256", timeout=10000)
+            check("T-29 Details nennen Modell, Chunks und Overlap",
+                  "Overlap 60 Zeichen" in box.inner_text() and "Chunks" in box.inner_text(), box.inner_text()[:400])
+            page.goto(base + "/")
+            start_lernsequenz(page, base, name="RAG-UI", lesson=lid)
+            quelle = page.locator(".msg.tutor.theory .quelle").last
+            expect(quelle).to_contain_text("OR Haftpflicht, S.", timeout=10000)
+            check("T-30 Fundstelle mit Seite unter der Theorie", True)
+            page.fill("#chat-input", "Wer haftet für ein Tier?")
+            page.click("#btn-ask")
+            page.wait_for_selector("#waiting", state="detached", timeout=30000)
+            check("T-30 Quellen unter der Chat-Antwort",
+                  "OR Haftpflicht, S." in page.locator(".msg.tutor").last.inner_text())
+            page.goto(base + "/teacher")
+            page.locator(".seq-item").first.click()
+            expect(page.locator("#detail-events")).to_contain_text("Auszüge", timeout=10000)
+            check("T-30 Abrufe mit Ähnlichkeit im Lernverlauf",
+                  "Ähnlichkeit" in page.locator("#detail-events").inner_text())
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+        shutil.rmtree(pfad, ignore_errors=True)
+
 def run(names):
     with sync_playwright() as pw:
         for name in names:

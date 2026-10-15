@@ -504,6 +504,7 @@ function renderEvent(ev, mitDatum) {
       + (p.konzept ? ` <span class="muted">Konzept «${esc(p.konzept)}»</span>` : ""); }
     else if (ev.type === "kopie_erkannt") { cls += " regel_verstoss"; body = `✍️ <strong>Kopie erkannt</strong> (D-11): ${Math.round(p.anteil * 100)} % der Antwort wörtlich aus «${esc(p.quelle || "")}», nicht bewertet und nicht als Versuch gezählt`; }
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
+    else if (ev.type === "anfrage_abgebrochen") body = `⏹️ <strong>Bearbeitung gestoppt</strong> (${esc({antwort: "Antwort", frage: "Verständnisfrage", theorie: "«Theorie dazu»", genauer: "«Genauer erklären»", widerspruch: "Einwand", einstufung: "Einstufung", allgemeinwissen: "Allgemeinwissen", internet: "Internetrecherche"}[p.art] || p.art)}), nichts übernommen${p.text ? `: <span class="muted">${esc(p.text)}</span>` : ""}`;
     else if (ev.type === "rag_abruf") {
       // T-30: Auszüge aus der Vektordatenbank, die der Tutor für diesen Schritt bekam
       if (p.modus === "voll") body = `🗂️ Vektordatenbank bei ${esc(SCHRITT[p.schrittart] || p.schrittart)}: <span class="fb">${esc(p.fehler || "")}</span>`;

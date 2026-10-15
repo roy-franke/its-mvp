@@ -21,7 +21,7 @@ from collections import deque
 
 import httpx
 
-from . import didaktik
+from . import abbruch, didaktik
 
 log = logging.getLogger("its.llm")
 
@@ -330,15 +330,60 @@ def ollama_payload(system: str, user: str, json_mode: bool = False) -> dict:
     return payload
 
 
+def _ollama_post(url: str, payload: dict) -> httpx.Response:
+    """POST an Ollama /api/chat.
+
+    T-28: Ist die laufende Anfrage stoppbar, wird gestreamt. Ein Stopp schliesst
+    die Verbindung; Ollama bricht die Generierung dann ab, und die nächste
+    Anfrage muss nicht warten. Die Teile werden wieder zu einer Antwort im
+    Format ohne Streaming zusammengesetzt, damit der Rest gleich bleibt.
+    """
+    signal = abbruch.signal()
+    if signal is None:
+        return httpx.post(url, json=payload, timeout=TIMEOUT)
+    inhalt, denken, letzte = [], [], {}
+    client = httpx.Client(timeout=TIMEOUT)
+    abbruch.schliessen_merken(client.close)
+    try:
+        with client.stream("POST", url, json=dict(payload, stream=True)) as r:
+            if r.status_code != 200:
+                r.read()
+                return httpx.Response(r.status_code, content=r.content, request=r.request)
+            for zeile in r.iter_lines():
+                if signal.is_set():
+                    raise abbruch.Abgebrochen(abbruch.info())
+                if not zeile.strip():
+                    continue
+                teil = json.loads(zeile)
+                nachricht = teil.get("message") or {}
+                inhalt.append(nachricht.get("content") or "")
+                denken.append(nachricht.get("thinking") or "")
+                if teil.get("done"):
+                    letzte = teil
+    except abbruch.Abgebrochen:
+        raise
+    except Exception:
+        if signal.is_set():               # Verbindung durch den Stopp geschlossen
+            raise abbruch.Abgebrochen(abbruch.info())
+        raise
+    finally:
+        abbruch.schliessen_merken(None)
+        client.close()
+    if signal.is_set():
+        raise abbruch.Abgebrochen(abbruch.info())
+    daten = dict(letzte, message={"role": "assistant", "content": "".join(inhalt), "thinking": "".join(denken)})
+    return httpx.Response(200, json=daten, request=httpx.Request("POST", url))
+
+
 def _chat_ollama(system: str, user: str, json_mode: bool = False) -> tuple[str, dict]:
     base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
     payload = ollama_payload(system, user, json_mode)
-    r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
+    r = _ollama_post(f"{base}/api/chat", payload)
     if r.status_code == 400 and "think" in payload:
         # Modelle ohne Denkmodus lehnen das Feld ab – ohne erneut versuchen
         log.info("Modell kennt keinen Denkmodus, Anfrage ohne 'think'")
         payload.pop("think")
-        r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
+        r = _ollama_post(f"{base}/api/chat", payload)
     r.raise_for_status()
     data = r.json()
     meta = _ollama_meta(data)
@@ -352,7 +397,7 @@ def _chat_ollama(system: str, user: str, json_mode: bool = False) -> tuple[str, 
         log.warning("Leere Antwort, Denkmodus hat %d Zeichen verbraucht; erneut mit think=false",
                     len(denken))
         payload["think"] = False
-        r = httpx.post(f"{base}/api/chat", json=payload, timeout=TIMEOUT)
+        r = _ollama_post(f"{base}/api/chat", payload)
         if r.status_code == 400:
             # Server kennt das Feld nicht: dann bleibt es bei der leeren Antwort
             log.warning("Server lehnt think=false ab: %s", r.text[:200])
@@ -574,7 +619,12 @@ def _chat_mock(system: str, user: str, json_mode: bool = False) -> tuple[str, di
     # ITS_MOCK_FAIL lässt die genannten Schrittarten scheitern (kommagetrennt).
     delay = float(os.getenv("ITS_MOCK_DELAY", "0") or 0)
     if delay > 0:
-        time.sleep(delay)
+        # T-28: in kleinen Schritten, damit ein Stopp sofort wirkt (wie das Streaming bei Ollama)
+        ende = time.time() + delay
+        while time.time() < ende:
+            if abbruch.gestoppt():
+                raise abbruch.Abgebrochen(abbruch.info())
+            time.sleep(min(0.05, max(0.0, ende - time.time())))
     # Varianten (T-09): «X:leer» liefert immer eine leere Antwort, «X:leer_json»
     # nur bis zum veränderten zweiten Versuch (Hinweis «/no_think» im Prompt).
     fail = {x.strip() for x in os.getenv("ITS_MOCK_FAIL", "").split(",") if x.strip()}
@@ -655,10 +705,15 @@ def _chat_mit_info(system: str, user: str, json_mode: bool = False) -> tuple[str
     fenster = kontextfenster()
     if fenster and geschaetzt > fenster:
         info["kontext"] = _kontext_ueberschritten(label, geschaetzt, geschaetzt=True)
+    abbruch.pruefen()                  # T-28: nach einem Stopp keinen weiteren Aufruf
     t0 = time.perf_counter()
     try:
         text, meta = fn(system, user, json_mode=json_mode)
     except Exception as e:
+        if isinstance(e, abbruch.Abgebrochen) or abbruch.gestoppt():
+            record_timing(label, time.perf_counter() - t0, {"fehler": "gestoppt", "gestoppt": True,
+                                                            "prompt_tokens_geschaetzt": geschaetzt})
+            raise abbruch.Abgebrochen(abbruch.info()) from e
         record_timing(label, time.perf_counter() - t0,
                       {"fehler": f"{type(e).__name__}: {e}"[:200],
                        "prompt_tokens_geschaetzt": geschaetzt})
@@ -751,6 +806,8 @@ def _chat_json(system: str, user: str, fallback: dict, check=None,
     for versuch in range(1, versuche + 1):
         try:
             text, info = _chat_mit_info(system, prompt, json_mode=json_mode)
+        except abbruch.Abgebrochen:
+            raise                      # T-28: gestoppt ist kein Fehler, kein zweiter Versuch
         except Exception as e:
             ursache = e.original if isinstance(e, LLMAufrufFehler) else e
             kontext = kontext or (e.info.get("kontext") if isinstance(e, LLMAufrufFehler) else None)

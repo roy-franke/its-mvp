@@ -1519,6 +1519,9 @@ def verlauf_fuer_lernende(events: list[dict], fuer_fortsetzen: bool = False) -> 
                 eintrag[bew] += 1
         elif typ == "chat_question":
             eintraege.append({"art": "frage", "zeit": zeit, "text": p.get("frage", "")})
+        elif typ == "anfrage_abgebrochen" and fuer_fortsetzen:
+            # T-28: Die lernende Person hat die Bearbeitung gestoppt; nichts wurde bewertet
+            eintraege.append({"art": "notiz", "zeit": zeit, "text": "Bearbeitung gestoppt, nicht bewertet."})
         elif typ == "chat_reply":
             e = {"art": "tutor", "zeit": zeit, "text": p.get("antwort", ""),
                  "ausserhalb_material": bool(p.get("ausserhalb_material")),

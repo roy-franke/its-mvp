@@ -12,6 +12,7 @@ Lehrpersonen-Sicht (Monitoring light):
   GET  /api/teacher/sessions/{id}   -> vollständiger Lernverlauf (Event-Log)
 """
 
+import copy
 import io
 import json
 import logging
@@ -27,13 +28,13 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import time
 
-from . import auth, didaktik, einstellungen, llm, materialien, rag, store, tutor, vektoren, version
+from . import abbruch, auth, didaktik, einstellungen, llm, materialien, rag, store, tutor, vektoren, version
 
 def _log_stufen_einrichten() -> str:
     """T-24: Log-Stufen ohne Code-Änderung.
@@ -96,6 +97,38 @@ else:
 # denken muss. Ausnahmen (Login, Logout) hängen bewusst direkt an `app`.
 teacher_api = APIRouter(prefix="/api/teacher", dependencies=[Depends(auth.require_teacher)])
 teacher_pages = APIRouter(prefix="/teacher", dependencies=[Depends(auth.require_teacher_page)])
+
+
+@app.exception_handler(abbruch.Abgebrochen)
+async def anfrage_gestoppt(request: Request, exc: abbruch.Abgebrochen):
+    """T-28: Gestoppte Anfrage: nichts übernehmen, protokollieren, 409 melden."""
+    info = exc.info or {}
+    sid = info.get("sid")
+    if sid and store.get_session(sid):
+        if info.get("profil") is not None:
+            store.update_session(sid, profile=info["profil"])     # Stand vor der Anfrage
+        store.log_event(sid, "anfrage_abgebrochen", {"art": info.get("art"), "text": info.get("text", "")})
+    return JSONResponse(status_code=409, content={"detail": {
+        "message": "Die Bearbeitung wurde gestoppt. Deine Nachricht steht wieder im Eingabefeld.",
+        "abgebrochen": True}})
+
+
+def _stoppbar(request: Request, sid: str, art: str, text: str, profil: dict | None = None) -> None:
+    """T-28: Meldet die laufende Anfrage als stoppbar an (Header X-ITS-Anfrage)."""
+    abbruch.beginnen(request.headers.get(abbruch.HEADER), sid, art, text,
+                     copy.deepcopy(profil) if profil is not None else None)
+
+
+class StoppRequest(BaseModel):
+    anfrage_id: str
+
+
+@app.post("/api/session/{sid}/stopp")
+def stoppen(sid: str, req: StoppRequest, request: Request):
+    """T-28: «Stoppen» während der Tutor arbeitet. Antwort: abgebrochen,
+    zu_spaet (Ergebnis schon übernommen) oder unbekannt."""
+    _owned(request, sid)
+    return {"ergebnis": abbruch.stoppen(sid, req.anfrage_id)}
 
 
 @app.middleware("http")
@@ -814,7 +847,9 @@ def assess(sid: str, req: AssessRequest, request: Request):
     lesson = load_lesson(s["lesson_id"])
     profile = s["profile"]
     questions = profile.get("assessment_questions", [])
+    _stoppbar(request, sid, "einstufung", "\n".join(req.answers))
     result = tutor.evaluate_assessment(lesson, questions, req.answers)
+    abbruch.uebernehmen()
     _log_llm_meta(sid, "EINSTUFUNG_BEWERTEN", result)
     profile["level"] = result["level"]
     store.log_event(sid, "assessment_evaluated", {
@@ -1044,6 +1079,7 @@ def answer(sid: str, req: AnswerRequest, request: Request):
         raise HTTPException(400, "Der aktuelle Schritt ist Theorie – es gibt "
                                  "nichts zu bewerten. Weiter mit /next")
     confidence = req.confidence if req.confidence in range(1, 11) else None
+    _stoppbar(request, sid, "antwort", req.answer)
     return _antwort_bewerten(sid, lesson, profile, task, req.answer, confidence)
 
 
@@ -1070,6 +1106,7 @@ def _antwort_bewerten(sid: str, lesson: dict, profile: dict, task: dict, text: s
     vorher = profile.get("antworten_aktuell") or []
     uebernommen = kopie["passagen"] if kopie["anteil"] >= didaktik.TEILKOPIE_SCHWELLE else None
     result = tutor.evaluate_answer(lesson, profile, task, text, vorher, uebernommen)
+    abbruch.uebernehmen()              # T-28: ab hier zählt die Bewertung
     if uebernommen:
         result["teilkopie"] = kopie["anteil"]
     _log_llm_meta(sid, "ANTWORT_BEWERTEN", result)
@@ -1209,6 +1246,7 @@ def _neu_bewerten(sid: str, lesson: dict, profile: dict, task: dict, art: str, t
     letzte, vorher = bisher[-1], bisher[:-1]
     result = tutor.evaluate_answer(lesson, profile, task, letzte.get("antwort", ""), vorher,
                                    zweite_sicht={"art": art, "text": text})
+    abbruch.uebernehmen()
     _log_llm_meta(sid, "ANTWORT_BEWERTEN", result)
     alt = letzte.get("bewertung")
     neu = result.get("bewertung")
@@ -1325,6 +1363,7 @@ def choose(sid: str, request: Request, req: WahlRequest):
         begruendung = (req.text or "").strip()
         if not begruendung:
             raise HTTPException(400, "Schreib kurz, warum du das anders siehst.")
+        _stoppbar(request, sid, "widerspruch", begruendung[:1000])
         return _neu_bewerten(sid, lesson, profile, task, "widerspruch", begruendung[:1000])
     if req.wahl == "neu_bewerten":
         # D-18, Entscheid E4: Der Tutor hat sich im Chat korrigiert
@@ -1478,6 +1517,7 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
         # N-03: ausgeschaltet oder nicht freigegeben, dann kein Aufruf nach aussen
         art = "frage"
     task = profile.get("current_task")
+    _stoppbar(request, sid, art, message, profil=profile)    # Stand vor der Eskalation
     stufe = None
     if art in ("theorie", "genauer"):
         stufe = tutor.eskalationsstufe(profile, (task or {}).get("konzept") or "")
@@ -1488,6 +1528,7 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
         result = tutor.answer_internet(lesson, profile, task)
     else:
         result = tutor.answer_question(lesson, profile, task, message, history, art, stufe)
+    abbruch.uebernehmen()
     if art == "allgemeinwissen" and not result.get("_fallback") and einstellungen.internet_erlaubt(lesson):
         result["angebot"] = "internet"       # nächste Stufe anbieten
     _log_llm_meta(sid, "FRAGE_BEANTWORTEN", result)

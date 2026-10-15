@@ -84,6 +84,12 @@
   .msg.tutor.waiting .dots span:nth-child(2) { animation-delay: .2s; }
   .msg.tutor.waiting .dots span:nth-child(3) { animation-delay: .4s; }
   .msg.tutor.waiting .slow { display: block; font-size: .8rem; margin-top: 6px; }
+  /* T-28: Bearbeitung stoppen */
+  .stopp { background: #fff; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 999px;
+           padding: 2px 12px; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; margin-left: 10px; }
+  .stopp:hover { background: #fef2f2; }
+  .stopp:disabled { opacity: .5; cursor: default; }
+  .msg.user.gestoppt { opacity: .55; text-decoration: line-through; }
   @keyframes blink { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
   button.action:disabled, .confbtn:disabled { opacity: .45; cursor: not-allowed; filter: grayscale(.4); }
   .msg.tutor.error { background: #fef2f2; border-color: #fecaca; }
@@ -227,7 +233,8 @@
       <p style="font-weight:600" id="assess-question"></p>
       <textarea id="assess-answer" rows="3" placeholder="Deine Antwort …"></textarea>
       <div class="btnrow"><button id="btn-assess">Weiter</button></div>
-      <div id="assess-spinner" class="spinner hidden">Dein Tutor denkt nach …</div>
+      <div id="assess-spinner" class="spinner hidden">Dein Tutor denkt nach …
+        <button type="button" class="stopp hidden" id="btn-assess-stopp">⏹ Stoppen</button></div>
       <div id="assess-error" class="formerror hidden"></div>
     </div>
   </div>
@@ -333,7 +340,7 @@
 const $ = id => document.getElementById(id);
 let sessionId = null, questions = [], qIndex = 0, assessAnswers = [];
 let answerEnabled = true;
-let confidenceAsked = false, pendingAnswer = "";
+let confidenceAsked = false, pendingAnswer = "", pendingBlase = null;
 let me = null, codeRequired = false, currentLessonTitle = "", currentTask = null;
 
 class ApiError extends Error {
@@ -345,9 +352,24 @@ class ApiError extends Error {
   }
 }
 
-async function api(path, body, method = "POST") {
+// T-28: Eine stoppbare Anfrage trägt eine ID im Header; «Stoppen» meldet sie dem
+// Server und bricht danach den Request im Browser ab.
+let laufend = null;          // { id, controller, stoppbar }
+function neueAnfrage() {
+  const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+  laufend = { id: id.replace(/[^A-Za-z0-9_-]/g, ""), controller: new AbortController() };
+  return laufend;
+}
+function istGestoppt(e) {
+  return (e && e.name === "AbortError") || (e && e.detail && e.detail.abgebrochen);
+}
+
+async function api(path, body, method = "POST", stoppbar = false) {
+  const headers = { "Content-Type": "application/json" };
+  let signal;
+  if (stoppbar && laufend) { headers["X-ITS-Anfrage"] = laufend.id; signal = laufend.controller.signal; }
   const r = await fetch("/api" + path, {
-    method, headers: { "Content-Type": "application/json" },
+    method, headers, signal,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!r.ok) {
@@ -455,6 +477,14 @@ function showWaiting() {
   div.id = "waiting";
   div.setAttribute("role", "status");
   div.innerHTML = 'Dein Tutor denkt nach <span class="dots"><span></span><span></span><span></span></span>';
+  if (laufend && laufend.stoppbar) {
+    const b = document.createElement("button");
+    b.className = "stopp"; b.id = "btn-stopp"; b.type = "button";
+    b.textContent = "⏹ Stoppen";
+    b.title = "Bearbeitung abbrechen, z.B. wenn du zu früh abgeschickt hast";
+    b.onclick = () => stoppen(b);
+    div.appendChild(b);
+  }
   $("chat").appendChild(div);
   $("chat").scrollTop = $("chat").scrollHeight;
   waitTimer = setTimeout(() => {
@@ -470,7 +500,29 @@ function hideWaiting() {
   const w = $("waiting");
   if (w) w.remove();
 }
-function setChatBusy(on) {
+async function stoppen(knopf) {
+  const a = laufend;
+  if (!a || !sessionId) return;
+  if (knopf) knopf.disabled = true;
+  let ergebnis = "abgebrochen";
+  try {
+    ergebnis = (await api(`/session/${sessionId}/stopp`, { anfrage_id: a.id })).ergebnis;
+  } catch { /* Server nicht erreichbar: trotzdem im Browser abbrechen */ }
+  if (ergebnis === "zu_spaet") {
+    // Die Antwort ist schon übernommen und kommt gleich
+    const w = $("waiting");
+    if (w && knopf) knopf.textContent = "Antwort ist schon fertig …";
+    return;
+  }
+  a.controller.abort();
+}
+function stoppHinweis(text) {
+  addNote(text || "Gestoppt. Deine Nachricht steht wieder im Eingabefeld; du kannst sie anpassen und erneut senden. " +
+                  "Das zählt nicht als Versuch.");
+}
+function setChatBusy(on, stoppbar) {
+  if (on && stoppbar) neueAnfrage().stoppbar = true;
+  if (!on) laufend = null;
   busy = on;
   if (on) showWaiting(); else hideWaiting();
   document.querySelectorAll("#view-learn button.action, #view-learn select.action-select, #confidence-buttons button")
@@ -892,6 +944,8 @@ function renderAssess() {
   $("assess-answer").focus();
 }
 
+$("btn-assess-stopp").onclick = () => stoppen($("btn-assess-stopp"));
+
 $("btn-assess").onclick = async () => {
   if ($("btn-assess").disabled) return;
   if (qIndex < questions.length) {
@@ -901,8 +955,13 @@ $("btn-assess").onclick = async () => {
   if (qIndex < questions.length) { renderAssess(); return; }
   $("btn-assess").disabled = true; $("assess-spinner").classList.remove("hidden");
   showError("assess-error", "");
+  // T-28: Auch die Einstufung lässt sich stoppen, die letzte Antwort steht dann wieder im Feld
+  neueAnfrage().stoppbar = true;
+  $("btn-assess-stopp").classList.remove("hidden");
+  $("btn-assess-stopp").disabled = false;
   try {
-    const d = await api(`/session/${sessionId}/assess`, { answers: assessAnswers });
+    const d = await api(`/session/${sessionId}/assess`, { answers: assessAnswers }, "POST", true);
+    laufend = null;
     $("chat").innerHTML = "";
     addNote(`Einstufung: Du startest auf Niveau «${d.level_label}». ${d.begruendung}`);
     show("view-learn");
@@ -910,8 +969,16 @@ $("btn-assess").onclick = async () => {
     try { await nextTask(); } catch (e) { addError(e); setRetryMode(); }
     finally { setChatBusy(false); }
   } catch (e) {
-    showError("assess-error", e.message + " Klick nochmals auf «Weiter».");
+    if (istGestoppt(e)) {
+      const letzte = assessAnswers.pop();
+      qIndex = assessAnswers.length;
+      renderAssess();
+      $("assess-answer").value = letzte === "weiss ich nicht" ? "" : letzte;
+      showError("assess-error", "Gestoppt. Du kannst deine Antwort anpassen und nochmals auf «Weiter» klicken.");
+    } else showError("assess-error", e.message + " Klick nochmals auf «Weiter».");
   } finally {
+    laufend = null;
+    $("btn-assess-stopp").classList.add("hidden");
     $("btn-assess").disabled = false; $("assess-spinner").classList.add("hidden");
   }
 };
@@ -1034,15 +1101,18 @@ $("btn-answer").onclick = () => {
   if (busy || !answerEnabled) return;
   const text = $("chat-input").value.trim();
   if (!text) { $("chat-input").focus(); return; }
-  addMsg("user", text, "Du (Antwort)");
+  const blase = addMsg("user", text, "Du (Antwort)");
   $("chat-input").value = "";
   if (!confidenceAsked) {
     confidenceAsked = true;
     pendingAnswer = text;
+    pendingBlase = blase;
     showConfidence(true);
     return;
   }
-  submitAnswer(text, null);
+  const sicherheit = gestoppteSicherheit;
+  gestoppteSicherheit = null;
+  submitAnswer(text, sicherheit, blase);
 };
 
 function showConfidence(show) {
@@ -1060,19 +1130,29 @@ $("confidence-buttons").onclick = e => {
   const v = e.target.dataset && e.target.dataset.v;
   if (!v || busy) return;
   showConfidence(false);
-  submitAnswer(pendingAnswer, parseInt(v, 10));
+  submitAnswer(pendingAnswer, parseInt(v, 10), pendingBlase);
 };
 
-async function submitAnswer(text, confidence) {
+let gestoppteSicherheit = null;     // T-28: Sicherheit einer gestoppten Antwort gilt beim erneuten Senden
+async function submitAnswer(text, confidence, blase) {
   if (busy) return;
-  setChatBusy(true);
+  setChatBusy(true, true);
   try {
     const d = await api(`/session/${sessionId}/answer`,
-      { answer: text, confidence });
+      { answer: text, confidence }, "POST", true);
     handleAnswer(d, text);
   } catch (e) {
-    addError(e);
-    $("chat-input").value = $("chat-input").value || text;   // Antwort nicht verlieren
+    if (istGestoppt(e)) {
+      if (blase) blase.classList.add("gestoppt");
+      gestoppteSicherheit = confidence;
+      $("chat-input").value = text;
+      stoppHinweis("Gestoppt. Deine Antwort steht wieder im Eingabefeld; du kannst sie anpassen und erneut " +
+                   "senden. Das zählt nicht als Versuch.");
+      $("chat-input").focus();
+    } else {
+      addError(e);
+      $("chat-input").value = $("chat-input").value || text;   // Antwort nicht verlieren
+    }
   }
   finally { setChatBusy(false); }
 }
@@ -1189,15 +1269,15 @@ $("btn-einwand").onclick = async () => {
   if (busy) return;
   const text = $("chat-input").value.trim();
   if (!text) { $("chat-input").focus(); return; }
-  addMsg("user", text, "Du (Einwand)");
+  const blase = addMsg("user", text, "Du (Einwand)");
   $("chat-input").value = "";
   einwandModus(false);
-  setChatBusy(true);
+  setChatBusy(true, true);
   try {
-    const d = await api(`/session/${sessionId}/wahl`, { wahl: "widerspruch", text });
+    const d = await api(`/session/${sessionId}/wahl`, { wahl: "widerspruch", text }, "POST", true);
     handleAnswer(d);
   } catch (e) {
-    addError(e);
+    if (istGestoppt(e)) { blase.classList.add("gestoppt"); stoppHinweis(); } else addError(e);
     $("chat-input").value = text;
     einwandModus(true);
   } finally { setChatBusy(false); aktualisiereLegende(); }
@@ -1253,16 +1333,22 @@ async function waehle(id, label) {
 // ---------- Verständnisfragen und Theorie auf Abruf (jederzeit)
 async function sendChat(text, art) {
   if (busy) return;
-  addMsg("user ask", text, "Du (Frage)");
-  setChatBusy(true);
+  const blase = addMsg("user ask", text, "Du (Frage)");
+  setChatBusy(true, true);
   try {
-    const d = await api(`/session/${sessionId}/chat`, { message: text, art: art || "frage" });
+    const d = await api(`/session/${sessionId}/chat`, { message: text, art: art || "frage" }, "POST", true);
     zeigeTutorAntwort(d);
     // D-18: Der Tutor hat sich korrigiert, «Antwort neu bewerten lassen» kommt dazu
     if (d.zusatz) renderWahl(d.wahl || [], d.zusatz);
     if (d.angebot === "allgemeinwissen" || d.angebot === "internet") addOffer(d.angebot);
     if (d.progress) { renderProgress(d.progress); pendingNext = null; }
-  } catch (e) { addError(e); }
+  } catch (e) {
+    if (istGestoppt(e)) {
+      blase.classList.add("gestoppt");
+      if ((art || "frage") === "frage") { $("chat-input").value = text; stoppHinweis(); $("chat-input").focus(); }
+      else stoppHinweis("Gestoppt. Du kannst die Erklärung jederzeit wieder anfordern.");
+    } else addError(e);
+  }
   finally { setChatBusy(false); }
 }
 
