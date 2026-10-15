@@ -33,7 +33,7 @@ from pydantic import BaseModel
 
 import time
 
-from . import auth, didaktik, einstellungen, llm, materialien, store, tutor, version
+from . import auth, didaktik, einstellungen, llm, materialien, store, tutor, vektoren, version
 
 def _log_stufen_einrichten() -> str:
     """T-24: Log-Stufen ohne Code-Änderung.
@@ -80,6 +80,16 @@ log.info("Zugangsschutz Lehrpersonen: %s | Klassencode: %s | Header-Anmeldung: %
 
 log.info("Log-Stufen: %s", _LOG_STUFEN)
 log.info("ITS-Tutor Version %s", version.info()["anzeige"])
+# T-29: Vektordatenbank und unterbrochene Indexierungen
+if vektoren.aktiv():
+    log.info("Vektordatenbank: %s (%s, Embeddings %s/%s, Chunks %d Zeichen, Overlap %d)", vektoren.url(),
+             "erreichbar" if vektoren.erreichbar(neu=True) else "NICHT erreichbar", vektoren.anbieter(),
+             vektoren.modell(), vektoren.chunk_groesse(), vektoren.chunk_overlap())
+    _nachgeholt = vektoren.nachholen()
+    if _nachgeholt:
+        log.info("Indexierung nachgeholt für %d Lernmaterialien", _nachgeholt)
+else:
+    log.info("Vektordatenbank: aus (ITS_VEKTOR_DB_URL leer oder kein Embedding-Anbieter), Lektionen mit ganzem Material")
 
 # Rollenprüfung zentral als Abhängigkeit der Router (T-04): Jede Route unter
 # /api/teacher und /teacher ist damit geschützt, ohne dass sie einzeln daran
@@ -523,8 +533,9 @@ def _materialien_info(lesson: dict) -> list[dict]:
     for mid in lesson.get("materialien") or []:
         m = materialien.holen(mid)
         if m:
-            out.append({k: m[k] for k in ("id", "name", "dateiname", "dateiformat", "seiten", "zeichen",
-                                          "status", "index_status", "beschreibung", "faecher", "niveau", "tags")})
+            out.append({**{k: m[k] for k in ("id", "name", "dateiname", "dateiformat", "seiten", "zeichen",
+                                             "status", "beschreibung", "faecher", "niveau", "tags")},
+                        "index_status": vektoren.index_stand(m)})
         else:
             out.append({"id": mid, "name": mid, "status": "fehlt"})
     return out
@@ -539,6 +550,7 @@ def _material_oder_404(mid: str) -> dict:
 
 def _material_antwort(m: dict, mit_lektionen: bool = False) -> dict:
     out = materialien.oeffentlich(m)
+    out["index_status"] = vektoren.index_stand(m)
     if mit_lektionen:
         out["lektionen"] = _lektionen_mit_material(m["id"])
     return out
@@ -618,8 +630,26 @@ async def material_hochladen(request: Request, file: UploadFile = File(...), nam
 
 
 def _indexierung_anstossen(mid: str) -> None:
-    """T-29: Hook für die Indexierung (wird mit der Vektordatenbank belegt)."""
-    return None
+    """T-29: Material im Hintergrund zerlegen, einbetten und in Chroma ablegen."""
+    vektoren.im_hintergrund(mid)
+
+
+@teacher_api.get("/vektordb")
+def vektordb_status():
+    """T-29: Ist eine Vektordatenbank eingerichtet und erreichbar, mit welchem Modell?"""
+    return vektoren.status()
+
+
+@teacher_api.post("/materialien/indexieren")
+def materialien_indexieren(alle: bool = False):
+    """Offene, fehlerhafte und mit einem anderen Modell indexierte Materialien (alle=true: alle) neu indexieren."""
+    if not vektoren.aktiv():
+        raise HTTPException(409, "Keine Vektordatenbank eingerichtet (ITS_VEKTOR_DB_URL).")
+    ids = [m["id"] for m in materialien.alle(include_archived=True)
+           if m["zeichen"] and (alle or vektoren.index_stand(m) in ("offen", "fehler", "veraltet", "aus"))]
+    for mid in ids:
+        vektoren.im_hintergrund(mid)
+    return {"angestossen": len(ids)}
 
 
 class MaterialMetaRequest(BaseModel):
@@ -645,6 +675,16 @@ def material_aendern(mid: str, req: MaterialMetaRequest):
     except materialien.MaterialFehler as e:
         raise HTTPException(400, str(e))
     return _material_antwort(m, mit_lektionen=True)
+
+
+@teacher_api.post("/materialien/{mid}/indexieren")
+def material_indexieren(mid: str):
+    """T-29: Ein Material neu indexieren (z.B. nach einem Modellwechsel)."""
+    _material_oder_404(mid)
+    if not vektoren.aktiv():
+        raise HTTPException(409, "Keine Vektordatenbank eingerichtet (ITS_VEKTOR_DB_URL).")
+    vektoren.im_hintergrund(mid)
+    return _material_antwort(materialien.holen(mid))
 
 
 @teacher_api.get("/materialien/{mid}/datei")

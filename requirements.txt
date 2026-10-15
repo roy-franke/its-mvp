@@ -6,3 +6,5 @@ python-multipart>=0.0.9
 pypdf>=4.0
 python-docx>=1.1
 filedepot>=0.12
+# T-29: Client fuer die Vektordatenbank; enthaelt auch den Server (chroma run)
+chromadb>=1.0,<2

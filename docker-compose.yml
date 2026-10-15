@@ -7,9 +7,25 @@ services:
       args:
         # T-31: Commit fuer die Versionsanzeige, z.B. ITS_GIT_COMMIT=$(git rev-parse --short HEAD) docker compose build
         ITS_GIT_COMMIT: ${ITS_GIT_COMMIT:-}
+    image: its-mvp:latest
     env_file: .env
+    environment:
+      # T-29: Vektordatenbank als eigener Dienst (Entscheid E1)
+      - ITS_VEKTOR_DB_URL=${ITS_VEKTOR_DB_URL:-http://chroma:8000}
     volumes:
       - its-data:/data
+    depends_on:
+      - chroma
+    restart: unless-stopped
+
+  # ChromaDB aus demselben Image (gleiche Version wie der Client im ITS)
+  chroma:
+    image: its-mvp:latest
+    pull_policy: never
+    entrypoint: []
+    command: ["chroma", "run", "--host", "0.0.0.0", "--port", "8000", "--path", "/chroma"]
+    volumes:
+      - chroma-data:/chroma
     restart: unless-stopped
 
   caddy:
@@ -27,5 +43,6 @@ services:
 
 volumes:
   its-data:
+  chroma-data:
   caddy-data:
   caddy-config:

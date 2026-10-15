@@ -157,7 +157,7 @@ def alle(include_archived: bool = False) -> list[dict]:
     return [_row(r) for r in rows]
 
 
-def _setzen(mid: str, **felder):
+def setzen(mid: str, **felder):
     if not felder:
         return
     werte = []
@@ -426,7 +426,7 @@ def metadaten_aendern(mid: str, daten: dict) -> dict:
         raise KeyError(mid)
     meta = metadaten_pruefen({**{k: m[k] for k in ("name", "faecher", "niveau", "beschreibung", "tags")},
                               **{k: v for k, v in daten.items() if v is not None}}, m["dateiname"])
-    _setzen(mid, **meta, geaendert_am=time.time())
+    setzen(mid, **meta, geaendert_am=time.time())
     return holen(mid)
 
 
@@ -462,13 +462,13 @@ def text(mid: str) -> str:
 # ---------------------------------------------------------------- Status (L-03)
 
 def archivieren(mid: str) -> dict:
-    _setzen(mid, status="archiviert", archiviert_am=time.time())
+    setzen(mid, status="archiviert", archiviert_am=time.time())
     log.info("Lernmaterial archiviert: %s", mid)
     return holen(mid)
 
 
 def wiederherstellen(mid: str) -> dict:
-    _setzen(mid, status="aktiv", archiviert_am=None, geaendert_am=time.time())
+    setzen(mid, status="aktiv", archiviert_am=None, geaendert_am=time.time())
     log.info("Lernmaterial wiederhergestellt: %s", mid)
     return holen(mid)
 

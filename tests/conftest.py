@@ -47,3 +47,48 @@ def _neue_lektionen_archivieren():
             data = json.loads(p.read_text(encoding="utf-8"))
             data["archiviert"] = True
             p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+# ---------------------------------------------------------------- T-29/T-30: echte ChromaDB
+
+@pytest.fixture(scope="session")
+def chroma_url():
+    """Startet `chroma run` in einem temporären Ordner (übersprungen ohne chromadb)."""
+    import socket
+    import subprocess
+    import sys
+    import time
+    pytest.importorskip("chromadb")
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    pfad = tempfile.mkdtemp(prefix="its_chroma_")
+    chroma = Path(sys.executable).parent / "chroma"
+    befehl = [str(chroma)] if chroma.exists() else [sys.executable, "-m", "chromadb.cli.cli"]
+    proc = subprocess.Popen(befehl + ["run", "--path", pfad, "--port", str(port)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import httpx
+    url = f"http://127.0.0.1:{port}"
+    for _ in range(150):
+        try:
+            if httpx.get(url + "/api/v2/heartbeat", timeout=1).status_code == 200:
+                break
+        except httpx.HTTPError:
+            time.sleep(0.1)
+    else:
+        proc.terminate()
+        pytest.skip("ChromaDB liess sich nicht starten")
+    yield url
+    proc.terminate()
+    proc.wait(timeout=10)
+    shutil.rmtree(pfad, ignore_errors=True)
+
+
+@pytest.fixture
+def mit_vektordb(chroma_url, monkeypatch):
+    monkeypatch.setenv("ITS_VEKTOR_DB_URL", chroma_url)
+    from app import vektoren
+    vektoren._erreichbar.update(zeit=0.0)
+    yield chroma_url
+    vektoren.warten()
+    vektoren._erreichbar.update(zeit=0.0)

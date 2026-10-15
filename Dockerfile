@@ -16,9 +16,10 @@ RUN chmod +x docker-entrypoint.sh
 ARG ITS_GIT_COMMIT=
 ENV ITS_GIT_COMMIT=${ITS_GIT_COMMIT}
 
-# Daten (SQLite-DB und Lektionen) liegen auf einem Volume und überleben Updates
+# Daten (SQLite-DB, Lektionen und Lernmaterialien) liegen auf einem Volume und überleben Updates
 ENV ITS_DB_PATH=/data/its.db \
-    ITS_LESSONS_DIR=/data/lessons
+    ITS_LESSONS_DIR=/data/lessons \
+    ITS_MATERIAL_DIR=/data/materialien
 
 EXPOSE 8000
 ENTRYPOINT ["./docker-entrypoint.sh"]

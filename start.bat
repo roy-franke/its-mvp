@@ -34,6 +34,13 @@ if defined TEACHER_PASSWORD (
     echo.
 )
 
+rem T-29: Vektordatenbank (ChromaDB) als eigener Dienst in einem eigenen Fenster.
+rem Wirkt nur mit ITS_VEKTOR_DB_URL=http://localhost:8011 in der .env.
+rem Laeuft sie schon, meldet das zweite Fenster «Adresse belegt»; das ist harmlos.
+if exist ".venv\Scripts\chroma.exe" (
+    start "ITS Vektordatenbank" ".venv\Scripts\chroma.exe" run --path vektordb --port 8011
+)
+
 echo Server laeuft gleich auf http://localhost:8010
 echo Lernende:   http://localhost:8010/
 echo Lehrperson: http://localhost:8010/teacher
