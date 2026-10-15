@@ -26,14 +26,14 @@ from dotenv import load_dotenv
 # Bereits gesetzte Umgebungsvariablen haben Vorrang (so auch in den Tests).
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import time
 
-from . import auth, didaktik, einstellungen, llm, store, tutor, version
+from . import auth, didaktik, einstellungen, llm, materialien, store, tutor, version
 
 def _log_stufen_einrichten() -> str:
     """T-24: Log-Stufen ohne Code-Änderung.
@@ -70,6 +70,7 @@ LESSONS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="ITS MVP")
 store.init_db()
+materialien.init_db()
 # Beim Start sichtbar machen, welcher Schutz aktiv ist (T-04: Passwortproblem
 # war von aussen nicht erkennbar).
 log.info("Zugangsschutz Lehrpersonen: %s | Klassencode: %s | Header-Anmeldung: %s",
@@ -179,6 +180,7 @@ class LessonSource(BaseModel):
     """Eine hochgeladene Quelldatei – nur Metadaten, der Text steckt in `material`."""
     name: str
     chars: int = 0
+    material_id: str | None = None
 
 
 class LessonCreateRequest(BaseModel):
@@ -188,11 +190,16 @@ class LessonCreateRequest(BaseModel):
     tutor_hinweise: str = ""
     quellen: list[LessonSource] = []
     einstellungen: dict | None = None
+    # L-02: Verweise auf Lernmaterialien aus der globalen Ablage. `material`
+    # enthält dann nur noch den eigenen Text (eingefügt oder ältere,
+    # lektionsinterne Quellen); der Server setzt das ganze Material zusammen.
+    materialien: list[str] = []
 
 
 class SuggestGoalsRequest(BaseModel):
     material: str
     titel: str = ""
+    materialien: list[str] = []      # L-02: Lernmaterialien aus der Ablage
 
 
 class TeacherLoginRequest(BaseModel):
@@ -208,9 +215,44 @@ def lessons_list():
             for d in _all_lessons()]
 
 
-def _validate_lesson(req: LessonCreateRequest) -> dict:
+def _materialien_zusammensetzen(ids: list[str], eigen: str, eigene_quellen: list[dict],
+                                bisher: list[str] | None = None) -> dict:
+    """L-02, Entscheid E9: Material der Lektion aus Verweisen und eigenem Text.
+
+    Jedes gewählte Lernmaterial wird zu einem Block «### Quelle: <Name>» (wie
+    bisher, N-01). Die Lektion speichert die Verweise und den zusammengesetzten
+    Text als Momentaufnahme. Wählbar sind nur aktive Materialien; ein schon
+    verwendetes, inzwischen archiviertes Material darf in der Lektion bleiben.
+    """
+    bloecke, quellen, namen = [], [], {q["name"] for q in eigene_quellen}
+    gesehen: list[str] = []
+    for mid in ids:
+        if mid in gesehen:
+            continue
+        m = materialien.holen(mid)
+        if not m:
+            raise HTTPException(400, f"Lernmaterial {mid} gibt es nicht")
+        if m["status"] != "aktiv" and mid not in (bisher or []):
+            raise HTTPException(409, f"Das Lernmaterial «{m['name']}» ist archiviert. Stelle es zuerst wieder her.")
+        name, n = m["name"], 2
+        while name in namen:
+            name, n = f"{m['name']} ({n})", n + 1
+        namen.add(name)
+        inhalt = materialien.text(mid)
+        bloecke.append(materialien.quellen_block(dict(m, name=name), inhalt))
+        quellen.append({"name": name, "chars": len(inhalt), "material_id": mid})
+        gesehen.append(mid)
+    if eigen:
+        bloecke.append(eigen)
+    return {"material": "\n\n---\n\n".join(bloecke).strip(), "materialien": gesehen,
+            "quellen": quellen + eigene_quellen, "material_eigen": eigen}
+
+
+def _validate_lesson(req: LessonCreateRequest, bisher: list[str] | None = None) -> dict:
     titel = req.titel.strip()
-    material = req.material.strip()
+    eigene_quellen = [{"name": q.name, "chars": q.chars} for q in req.quellen if not q.material_id]
+    teile = _materialien_zusammensetzen(req.materialien, req.material.strip(), eigene_quellen, bisher)
+    material = teile["material"]
     ziele = [z.strip() for z in req.lernziele if z.strip()]
     if not titel:
         raise HTTPException(400, "Titel fehlt")
@@ -227,7 +269,9 @@ def _validate_lesson(req: LessonCreateRequest) -> dict:
         "titel": titel,
         "lernziele": ziele,
         "material": material,
-        "quellen": [{"name": q.name, "chars": q.chars} for q in req.quellen],
+        "material_eigen": teile["material_eigen"],
+        "materialien": teile["materialien"],
+        "quellen": teile["quellen"],
         "tutor_hinweise": req.tutor_hinweise.strip(),
         "einstellungen": settings,
     }
@@ -315,6 +359,7 @@ def lesson_detail(lesson_id: str):
     n = store.count_sessions_by_lesson().get(lesson_id, {})
     return {**lesson, "id": lesson_id,
             "einstellungen": einstellungen.settings(lesson),
+            "materialien_info": _materialien_info(lesson),
             "version": lesson.get("version", 1),
             "laufend": n.get("aktiv", 0) + n.get("pausiert", 0),
             "sequenzen": sum(n.values())}
@@ -327,7 +372,7 @@ def lesson_update(lesson_id: str, req: LessonCreateRequest):
     lesson = load_lesson(lesson_id)
     if lesson.get("archiviert"):
         raise HTTPException(409, "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten.")
-    lesson.update(_validate_lesson(req))
+    lesson.update(_validate_lesson(req, lesson.get("materialien") or []))
     lesson["id"] = lesson_id
     lesson["version"] = int(lesson.get("version", 1)) + 1
     lesson["geaendert_am"] = time.time()
@@ -384,8 +429,16 @@ def lesson_restore(lesson_id: str):
     lesson.pop("archiviert_am", None)
     lesson["geaendert_am"] = time.time()
     _save_lesson(lesson)
-    log.info("Lektion wiederhergestellt: %s", lesson_id)
-    return {"ok": True, "id": lesson_id}
+    # L-03: Eine aktive Lektion darf kein archiviertes Material verwenden
+    zurueck = []
+    for mid in lesson.get("materialien") or []:
+        m = materialien.holen(mid)
+        if m and m["status"] == "archiviert":
+            materialien.wiederherstellen(mid)
+            zurueck.append(m["name"])
+    log.info("Lektion wiederhergestellt: %s%s", lesson_id,
+             f" (mit Lernmaterial: {', '.join(zurueck)})" if zurueck else "")
+    return {"ok": True, "id": lesson_id, "materialien_wiederhergestellt": zurueck}
 
 
 @teacher_api.post("/lessons/extract")
@@ -405,6 +458,14 @@ async def lesson_extract(file: UploadFile = File(...)):
 class CheckMaterialRequest(BaseModel):
     lernziele: list[str]
     material: str
+    materialien: list[str] = []      # L-02: Lernmaterialien aus der Ablage
+
+
+def _editor_material(material: str, ids: list[str]) -> str:
+    """Material für die KI-Hilfen im Editor, mit den gewählten Lernmaterialien."""
+    if not ids:
+        return material
+    return _materialien_zusammensetzen(ids, material.strip(), [], bisher=ids)["material"]
 
 
 @teacher_api.post("/lessons/check-material")
@@ -412,9 +473,10 @@ def lesson_check_material(req: CheckMaterialRequest):
     """D-06: Material mit den Lernzielen abgleichen (Empfehlung, blockiert nichts)."""
     if not [z for z in req.lernziele if z.strip()]:
         raise HTTPException(400, "Zuerst Lernziele eintragen")
-    if len(req.material.strip()) < 20:
+    material = _editor_material(req.material, req.materialien)
+    if len(material.strip()) < 20:
         raise HTTPException(400, "Zuerst Material hochladen oder einfügen")
-    return tutor.check_material(req.lernziele, req.material)
+    return tutor.check_material(req.lernziele, material)
 
 
 @teacher_api.post("/lessons/suggest-goals")
@@ -422,30 +484,18 @@ def lesson_suggest_goals(req: SuggestGoalsRequest):
     """KI-Vorschlag für Lernziele (experimentell, T-18): Der Titel der Lehrperson setzt den Rahmen."""
     if not req.titel.strip():
         raise HTTPException(400, "Zuerst einen Titel eingeben. Er setzt den Rahmen für die Lernziele.")
-    if len(req.material.strip()) < 100:
+    material = _editor_material(req.material, req.materialien)
+    if len(material.strip()) < 100:
         raise HTTPException(400, "Zuerst Material einfügen (mindestens 100 Zeichen)")
-    return tutor.suggest_goals(req.material, req.titel)
+    return tutor.suggest_goals(material, req.titel)
 
 
 def _extract_text(filename: str, data: bytes) -> str:
-    name = filename.lower()
-    if name.endswith((".txt", ".md")):
-        return data.decode("utf-8", errors="replace")
-    if name.endswith(".docx"):
-        try:
-            import docx
-        except ImportError:
-            raise HTTPException(500, "python-docx nicht installiert: pip install python-docx")
-        d = docx.Document(io.BytesIO(data))
-        return "\n".join(p.text for p in d.paragraphs if p.text.strip())
-    if name.endswith(".pdf"):
-        try:
-            from pypdf import PdfReader
-        except ImportError:
-            raise HTTPException(500, "pypdf nicht installiert: pip install pypdf")
-        reader = PdfReader(io.BytesIO(data))
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
-    raise HTTPException(400, "Unterstützte Formate: .pdf, .docx, .txt, .md")
+    """Text einer Datei (seit L-01 im Modul materialien, auch mit Bildern per OCR)."""
+    try:
+        return materialien.extrahieren(filename, data)["text"]
+    except materialien.MaterialFehler as e:
+        raise HTTPException(400, str(e))
 
 
 def _unique_slug(titel: str) -> str:
@@ -456,6 +506,189 @@ def _unique_slug(titel: str) -> str:
         slug = f"{s}-{n}"
         n += 1
     return slug
+
+
+# ---------------------------------------------------------------- Lernmaterialien (L-01 bis L-03)
+
+def _lektionen_mit_material(mid: str, nur_aktive: bool = False) -> list[dict]:
+    """Lektionen, die ein Lernmaterial verwenden (für L-03 und die Detailansicht)."""
+    return [{"id": d["_datei"].stem, "titel": d.get("titel", d["_datei"].stem),
+             "archiviert": bool(d.get("archiviert"))}
+            for d in _all_lessons(include_archived=True)
+            if mid in (d.get("materialien") or []) and not (nur_aktive and d.get("archiviert"))]
+
+
+def _materialien_info(lesson: dict) -> list[dict]:
+    out = []
+    for mid in lesson.get("materialien") or []:
+        m = materialien.holen(mid)
+        if m:
+            out.append({k: m[k] for k in ("id", "name", "dateiname", "dateiformat", "seiten", "zeichen",
+                                          "status", "index_status", "beschreibung", "faecher", "niveau", "tags")})
+        else:
+            out.append({"id": mid, "name": mid, "status": "fehlt"})
+    return out
+
+
+def _material_oder_404(mid: str) -> dict:
+    m = materialien.holen(mid)
+    if not m:
+        raise HTTPException(404, "Lernmaterial nicht gefunden")
+    return m
+
+
+def _material_antwort(m: dict, mit_lektionen: bool = False) -> dict:
+    out = materialien.oeffentlich(m)
+    if mit_lektionen:
+        out["lektionen"] = _lektionen_mit_material(m["id"])
+    return out
+
+
+def _uploader(request: Request, angabe: str | None) -> str:
+    """E10: Bei Header-Anmeldung der angemeldete Name, sonst die Angabe im Formular."""
+    ident = auth.identity(request)
+    if ident.via == "header" and ident.name:
+        return ident.name
+    return (angabe or "").strip() or "Lehrperson"
+
+
+def _zeit(text: str | None) -> float | None:
+    """Datum «2026-10-15» oder Sekunden; leer = kein Filter."""
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    import datetime
+    try:
+        return datetime.datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        raise HTTPException(400, f"Ungültiges Datum: {text}")
+
+
+@teacher_api.get("/materialien")
+def materialien_liste(archivierte: bool = False, q: str = "", fach: str = "", niveau: str = "", tag: str = "",
+                      format: str = "", lehrperson: str = "", von: str | None = None, bis: str | None = None):
+    """L-01/L-02: Lernmaterialien der Ablage, gefiltert nach Metadaten und Datei-Metadaten."""
+    bis_t = _zeit(bis)
+    if bis and bis_t and len(bis) == 10:
+        bis_t += 86399                       # ganzer Tag
+    liste = materialien.filtern(materialien.alle(include_archived=archivierte), q=q, fach=fach, niveau=niveau,
+                                tag=tag, fmt=format, lehrperson=lehrperson, von=_zeit(von), bis=bis_t)
+    verwendet: dict[str, int] = {}
+    for d in _all_lessons(include_archived=False):
+        for mid in d.get("materialien") or []:
+            verwendet[mid] = verwendet.get(mid, 0) + 1
+    return [dict(_material_antwort(m), lektionen_aktiv=verwendet.get(m["id"], 0)) for m in liste]
+
+
+@teacher_api.get("/materialien/werte")
+def materialien_werte():
+    """Vorschläge für Fächer, Niveau, Tags, Formate und Lehrpersonen (gegen Dubletten)."""
+    return materialien.werte()
+
+
+@teacher_api.post("/materialien", status_code=201)
+async def material_hochladen(request: Request, file: UploadFile = File(...), name: str = Form(""),
+                             faecher: str = Form("[]"), niveau: str = Form(""), beschreibung: str = Form(""),
+                             tags: str = Form("[]"), hochgeladen_von: str = Form(""),
+                             datei_geaendert_am: str = Form(""), trotzdem: bool = Form(False)):
+    """L-01: Datei mit Metadaten in die globale Ablage legen. Danach wird sie im
+    Hintergrund für die Vektordatenbank aufbereitet (T-29)."""
+    daten = await file.read()
+    geaendert = None
+    if datei_geaendert_am.strip():
+        try:
+            geaendert = float(datei_geaendert_am) / (1000 if float(datei_geaendert_am) > 1e11 else 1)
+        except ValueError:
+            geaendert = None
+    try:
+        m = materialien.anlegen(file.filename or "", daten,
+                                {"name": name, "faecher": faecher, "niveau": niveau,
+                                 "beschreibung": beschreibung, "tags": tags},
+                                hochgeladen_von=_uploader(request, hochgeladen_von),
+                                datei_geaendert_am=geaendert, trotz_dublette=trotzdem)
+    except materialien.DublettenFehler as e:
+        raise HTTPException(409, {"message": str(e), "vorhanden": materialien.oeffentlich(e.vorhanden)})
+    except materialien.MaterialFehler as e:
+        raise HTTPException(400, str(e))
+    _indexierung_anstossen(m["id"])
+    return _material_antwort(materialien.holen(m["id"]))
+
+
+def _indexierung_anstossen(mid: str) -> None:
+    """T-29: Hook für die Indexierung (wird mit der Vektordatenbank belegt)."""
+    return None
+
+
+class MaterialMetaRequest(BaseModel):
+    name: str | None = None
+    faecher: list[str] | None = None
+    niveau: str | None = None
+    beschreibung: str | None = None
+    tags: list[str] | None = None
+
+
+@teacher_api.get("/materialien/{mid}")
+def material_detail(mid: str):
+    return _material_antwort(_material_oder_404(mid), mit_lektionen=True)
+
+
+@teacher_api.put("/materialien/{mid}")
+def material_aendern(mid: str, req: MaterialMetaRequest):
+    """Metadaten nachträglich ändern (die Datei bleibt). Lektionen behalten ihre
+    Momentaufnahme; ein neuer Name gilt beim nächsten Speichern der Lektion."""
+    _material_oder_404(mid)
+    try:
+        m = materialien.metadaten_aendern(mid, req.model_dump())
+    except materialien.MaterialFehler as e:
+        raise HTTPException(400, str(e))
+    return _material_antwort(m, mit_lektionen=True)
+
+
+@teacher_api.get("/materialien/{mid}/datei")
+def material_datei(mid: str):
+    """Originaldatei herunterladen."""
+    _material_oder_404(mid)
+    daten, m = materialien.datei(mid)
+    from urllib.parse import quote
+    return Response(daten, media_type=m["mime"] or "application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(m['dateiname'])}"})
+
+
+@teacher_api.get("/materialien/{mid}/text")
+def material_text(mid: str, max_zeichen: int = 4000):
+    """Extrahierter Text für die Vorschau (seitenweise, gekürzt)."""
+    m = _material_oder_404(mid)
+    seiten, rest, out = materialien.seiten(mid), max(0, max_zeichen), []
+    for s in seiten:
+        if rest <= 0:
+            break
+        out.append({"seite": s.get("seite"), "text": s.get("text", "")[:rest]})
+        rest -= len(out[-1]["text"])
+    return {"id": mid, "zeichen": m["zeichen"], "seiten": out, "gekuerzt": sum(len(s.get("text", "")) for s in seiten) > max_zeichen}
+
+
+@teacher_api.post("/materialien/{mid}/archivieren")
+def material_archivieren(mid: str):
+    """L-03: Archivieren (= Löschen) nur, wenn keine aktive Lektion das Material verwendet."""
+    m = _material_oder_404(mid)
+    aktiv = _lektionen_mit_material(mid, nur_aktive=True)
+    if aktiv:
+        raise HTTPException(409, {"message": "Das Lernmaterial wird noch verwendet. Archiviere zuerst die "
+                                             "Lektionen oder entferne das Material daraus: "
+                                             + ", ".join(f"«{l['titel']}»" for l in aktiv) + ".",
+                                  "lektionen": aktiv})
+    if m["status"] == "archiviert":
+        return _material_antwort(m, mit_lektionen=True)
+    return _material_antwort(materialien.archivieren(mid), mit_lektionen=True)
+
+
+@teacher_api.post("/materialien/{mid}/wiederherstellen")
+def material_wiederherstellen(mid: str):
+    _material_oder_404(mid)
+    return _material_antwort(materialien.wiederherstellen(mid), mit_lektionen=True)
 
 
 # ---------------------------------------------------------------- Lernende
@@ -1850,6 +2083,12 @@ def teacher_login_page(request: Request):
 @teacher_pages.get("/lessons")
 def lessons_page():
     return _page("lessons.html")
+
+
+@teacher_pages.get("/materialien")
+def materialien_seite():
+    """L-01: Seite «Lernmaterialien» (Ablage, Upload, Filter, Archiv)."""
+    return _page("materialien.html")
 
 
 @teacher_pages.get("/lessons/new")

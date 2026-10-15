@@ -10,7 +10,7 @@ from app.main import app
 
 BASE = Path(__file__).resolve().parent.parent
 SEITEN = ["index.html", "teacher.html", "lessons.html", "lesson_editor.html", "teacher_login.html",
-          ]
+          "materialien.html"]
 
 
 def test_version_ist_semver_und_steht_im_changelog():

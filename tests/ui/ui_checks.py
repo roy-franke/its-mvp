@@ -61,7 +61,7 @@ def server(extra_lessons: dict | None = None, **env):
     full_env.update({
         "LLM_PROVIDER": "mock", "ITS_DB_PATH": str(tmp / "its.db"),
         "ITS_LESSONS_DIR": str(lessons), "TEACHER_PASSWORD": "", "CLASS_CODE": "",
-        "ITS_TOTAL_STEPS": "4",
+        "ITS_TOTAL_STEPS": "4", "ITS_MATERIAL_DIR": str(tmp / "materialien"), "ITS_VEKTOR_DB_URL": "",
     })
     full_env.update({k: str(v) for k, v in env.items()})
     proc = subprocess.Popen(

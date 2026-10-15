@@ -22,6 +22,10 @@ _lessons_tmp = Path(tempfile.mkdtemp(prefix="its_lessons_"))
 _default = Path(__file__).resolve().parent.parent / "app" / "lessons" / "haftungsrecht.json"
 shutil.copy(_default, _lessons_tmp / _default.name)
 os.environ["ITS_LESSONS_DIR"] = str(_lessons_tmp)
+# L-01: Ablage der Lernmaterialien und T-29: keine Vektordatenbank, ausser ein
+# Test richtet eine ein
+os.environ["ITS_MATERIAL_DIR"] = str(Path(tempfile.mkdtemp(prefix="its_material_")))
+os.environ["ITS_VEKTOR_DB_URL"] = ""
 
 
 import json  # noqa: E402

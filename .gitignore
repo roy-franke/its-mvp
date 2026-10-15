@@ -12,6 +12,10 @@ its.db
 its.db-journal
 *.db
 
+# Lernmaterialien (L-01) und Vektordatenbank (T-29): Daten, nicht Code
+materialien/
+vektordb/
+
 # macOS
 .DS_Store
 
