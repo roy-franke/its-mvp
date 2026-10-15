@@ -131,8 +131,9 @@ function groesse(k) {
   const t = `ca. ${k.tokens.toLocaleString("de-CH")} Tokens`;
   if (!k.max) return `<span class="muted">${t}</span>`;
   const p = Math.round(100 * k.tokens / k.max);
-  return `<span class="${k.warnung ? "zu-gross" : "muted"}" title="Anteil am Kontextfenster OLLAMA_NUM_CTX=${k.max}">` +
-         `${t}<br>${p} % des Kontextfensters${k.warnung ? " ⚠️" : ""}</span>`;
+  return `<span class="${k.warnung ? "zu-gross" : "muted"}" title="Anteil am Kontextfenster OLLAMA_NUM_CTX=${k.max}. ${esc(k.rag_grund || "")}">` +
+         `${t}<br>${p} % des Kontextfensters${k.warnung ? " ⚠️" : ""}</span>` +
+         (k.rag ? `<br><span class="pill" style="margin:0" title="${esc(k.rag_grund)}">RAG: Auszüge</span>` : "");
 }
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g,

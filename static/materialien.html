@@ -89,8 +89,22 @@ fetch("/api/me").then(r => r.json()).then(m => {
 fetch("/api/teacher/vektordb").then(r => r.ok ? r.json() : null).then(d => {
   if (!d) return;
   $("rag-status").textContent = d.aktiv
-    ? `Vektordatenbank: ${d.url} · Embeddings mit ${d.anbieter} ${d.modell}${d.erreichbar ? "" : " · zurzeit nicht erreichbar"}.`
+    ? `Vektordatenbank: ${d.url} · Embeddings mit ${d.anbieter} ${d.modell} · Chunks bis ${d.chunk_groesse} Zeichen, ` +
+      `Overlap ${d.overlap}${d.erreichbar ? "" : " · zurzeit nicht erreichbar"}. `
     : "Vektordatenbank ist nicht eingerichtet (ITS_VEKTOR_DB_URL). Lektionen arbeiten mit dem ganzen Material.";
+  if (d.aktiv) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "linkbtn"; b.id = "btn-indexieren";
+    b.textContent = "Offene und veraltete Materialien indexieren";
+    b.style.cssText = "background:none;border:0;color:#2563eb;text-decoration:underline;cursor:pointer;font:inherit;padding:0";
+    b.onclick = async () => {
+      const r = await fetch("/api/teacher/materialien/indexieren", { method: "POST" });
+      const x = await r.json().catch(() => ({}));
+      tab.meldung(r.ok ? "ok" : "fehler", r.ok ? `Indexierung für ${x.angestossen} Lernmaterialien gestartet.` : (x.detail || "Fehler"));
+      setTimeout(() => tab.laden(), 1500);
+    };
+    $("rag-status").appendChild(b);
+  }
 }).catch(() => {});
 </script>
 <script src="/static/version.js" defer></script>

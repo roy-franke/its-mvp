@@ -191,6 +191,16 @@
         <option value="ausgewogen" selected>Ausgewogen (Standard)</option>
         <option value="streng">Streng</option>
       </select>
+      <label for="s-materialzugriff" style="font-weight:600">Materialzugriff
+        <span class="sub">Automatisch: Ist das Material aus der Ablage gross (ab rund 4000 Tokens) und in der
+          Vektordatenbank indexiert, bekommt der Tutor pro Schritt nur die passenden Auszüge (RAG), sonst das ganze
+          Material. Die beiden anderen Werte erzwingen eines davon, etwa für Vergleiche.
+          <span id="vektordb-status"></span></span></label>
+      <select id="s-materialzugriff" class="full">
+        <option value="automatisch" selected>Automatisch (Standard)</option>
+        <option value="auszuege">Immer Auszüge aus der Vektordatenbank (RAG)</option>
+        <option value="ganz">Immer das ganze Material</option>
+      </select>
       <label style="font-weight:600;display:flex;gap:8px;align-items:flex-start">
         <input type="checkbox" id="s-allgemeinwissen" checked style="margin-top:4px">
         <span>Allgemeinwissen des Modells für Erklärungen erlauben
@@ -523,8 +533,11 @@ $("btn-save").onclick = async () => {
     if (r.status === 401) { location.href = "/teacher/login"; return; }
     if (!r.ok) throw new Error(d.detail || "Speichern fehlgeschlagen");
     // T-08: Warnung, wenn das Material das Kontextfenster weitgehend füllt
-    const warnung = d.kontext && d.kontext.warnung
-      ? `<p class="kontext-warnung" id="kontext-warnung">⚠️ ${esc(d.kontext.text)}</p>` : "";
+    const warnung = (d.kontext && d.kontext.warnung
+      ? `<p class="kontext-warnung" id="kontext-warnung">⚠️ ${esc(d.kontext.text)}</p>` : "")
+      + (d.kontext && d.kontext.rag
+      ? `<p class="sub" id="rag-hinweis">🗂️ Der Tutor arbeitet in dieser Lektion mit Auszügen aus der Vektordatenbank
+          (${esc(d.kontext.rag_grund)}).</p>` : "");
     if (editId) {
       showResult("success", `✅ Änderungen an «${esc(d.titel)}» gespeichert (Version ${d.version}).` +
         (d.laufend ? ` ${d.laufend} laufende ${d.laufend === 1 ? "Lernsequenz arbeitet" : "Lernsequenzen arbeiten"}
@@ -595,6 +608,7 @@ function collectSettings() {
     einsatzart: $("s-einsatzart").value,
     niveauanpassung: $("s-niveauanpassung").value,
     bewertungsstrenge: $("s-bewertungsstrenge").value,
+    materialzugriff: $("s-materialzugriff").value,
     wissensstufen: ["material"].concat($("s-allgemeinwissen").checked ? ["allgemeinwissen"] : [],
                                        $("s-internet").checked ? ["internet"] : []),
   };
@@ -604,6 +618,7 @@ function applySettings(e) {
   if (e.einsatzart) $("s-einsatzart").value = e.einsatzart;
   if (e.niveauanpassung) $("s-niveauanpassung").value = e.niveauanpassung;
   if (e.bewertungsstrenge) $("s-bewertungsstrenge").value = e.bewertungsstrenge;
+  if (e.materialzugriff) $("s-materialzugriff").value = e.materialzugriff;
   if (e.wissensstufen) {
     $("s-allgemeinwissen").checked = e.wissensstufen.includes("allgemeinwissen");
     $("s-internet").checked = e.wissensstufen.includes("internet");
@@ -667,6 +682,13 @@ renderSources();
 if (editId) loadForEdit();
 fetch("/api/me").then(r => r.json()).then(m => {
   $("link-abmelden").classList.toggle("hidden", !m.abmelden);
+}).catch(() => {});
+// T-30: Ist eine Vektordatenbank eingerichtet?
+fetch("/api/teacher/vektordb").then(r => r.ok ? r.json() : null).then(d => {
+  if (!d) return;
+  document.getElementById("vektordb-status").textContent = d.aktiv
+    ? `Vektordatenbank: ${d.erreichbar ? "eingerichtet" : "eingerichtet, aber zurzeit nicht erreichbar"} (${d.modell}).`
+    : "Auf diesem Server ist keine Vektordatenbank eingerichtet; der Tutor arbeitet immer mit dem ganzen Material.";
 }).catch(() => {});
 // N-03: zeigen, ob die Recherche auf dem Server überhaupt eingeschaltet ist
 fetch("/api/teacher/websuche").then(r => r.ok ? r.json() : null).then(d => {

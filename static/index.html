@@ -948,7 +948,7 @@ function zeigeTheorie(t) {
   const titel = (t.nochmals_anders ? "Nochmals anders erklärt: " : "") + (t.titel || "");
   const m = addMsg("tutor theory", (titel ? "### 📖 " + titel + "\n\n" : "") + (t.inhalt || "") +
     (t.beispiel ? "\n\n💡 **Beispiel:** " + t.beispiel : ""), "Tutor – Theorie");
-  quellenZeile(m, t.quelle);
+  quellenZeile(m, t.quelle ? t.quelle + (t.fundstelle ? ", " + t.fundstelle : "") : "");
   return m;
 }
 function zeigeAufgabe(t) {
@@ -983,7 +983,14 @@ function zeigeTutorAntwort(d) {
   } else if (d.ausserhalb_material) {
     addMsg("tutor extern", d.antwort ?? d.text, "Tutor · Ergänzung ausserhalb des Lektionsmaterials");
   } else {
-    addMsg("tutor", d.antwort ?? d.text, d.nochmals_anders ? "Tutor · Nochmals anders erklärt" : "Tutor");
+    const m = addMsg("tutor", d.antwort ?? d.text, d.nochmals_anders ? "Tutor · Nochmals anders erklärt" : "Tutor");
+    // T-30: Fundstellen der Auszüge aus der Vektordatenbank
+    if ((d.quellen || []).length) {
+      const q = document.createElement("span");
+      q.className = "quelle";
+      q.textContent = (d.quellen.length === 1 ? "Quelle: " : "Quellen: ") + d.quellen.join(" · ");
+      m.appendChild(q);
+    }
   }
 }
 
@@ -1442,7 +1449,7 @@ function verlaufEintrag(e) {
   if (e.art === "theorie") {
     zeile("Theorie", (e.titel ? "### 📖 " + e.titel + "\n\n" : "") + (e.inhalt || "") +
       (e.beispiel ? "\n\n💡 **Beispiel:** " + e.beispiel : ""), "tutor theory");
-    quellenZeile(div, e.quelle);
+    quellenZeile(div, e.quelle ? e.quelle + (e.fundstelle ? ", " + e.fundstelle : "") : "");
   } else if (e.art === "aufgabe") {
     zeile("Aufgabe" + (e.konzept ? " · " + e.konzept : ""), (e.titel ? e.titel + "\n\n" : "") +
       (e.inhalt || "") + (e.frage ? "\n\n❓ " + e.frage : "") +
@@ -1460,6 +1467,7 @@ function verlaufEintrag(e) {
   } else if (e.art === "tutor") {
     zeile(e.internet ? "Tutor · Internetrecherche" : e.ausserhalb_material ? "Tutor · ausserhalb des Materials" : "Tutor",
       e.text || "", "tutor" + (e.internet ? " extern web" : e.ausserhalb_material ? " extern" : ""));
+    if ((e.quellen || []).length) quellenZeile(div, e.quellen.join(" · "));
     if ((e.links || []).length) {
       const ul = document.createElement("ul"); ul.className = "links";
       for (const l of e.links) {

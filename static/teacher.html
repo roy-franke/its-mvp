@@ -450,7 +450,7 @@ function renderEvent(ev, mitDatum) {
     else if (ev.type === "assessment_questions") body = `Einstufungsfragen${p.quelle && p.quelle !== "modell" ? ` <span class="fb">(ergänzt aus ${p.quelle === "lektion" ? "den Fallback-Fragen der Lektion" : "den Lernzielen"})</span>` : ""}: ${(p.questions || []).map(q => esc(typeof q === "string" ? q : (q && (q.frage || q.question || q.text)) || JSON.stringify(q))).join(" | ")}`;
     else if (ev.type === "assessment_evaluated") body = `Einstufung: <strong>${LABEL[p.level] || p.level}</strong> – ${esc(p.begruendung)}<br><span class="muted">Antworten: ${p.answers.map(esc).join(" | ")}</span>`;
     else if (ev.type === "task" && p.typ === "fehler") body = `⚠️ Schritt konnte nicht erzeugt werden (Lernende sehen «Nochmals versuchen»)`;
-    else if (ev.type === "task" && p.typ === "theorie") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}${p.nochmals_anders ? '<span class="pill">Nochmals anders erklärt</span> ' : ""}📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<div class="muted">${fmt(p.inhalt)}</div>${p.beispiel ? `<div class="muted">${fmt("💡 " + p.beispiel)}</div>` : ""}${p.quelle ? `<br><span class="muted">Quelle: ${esc(p.quelle)}</span>` : ""}${p.quelle_verworfen ? `<br><span class="fb">Quelle verworfen (nicht in der Lektion): ${esc(p.quelle_verworfen)}</span>` : ""}`;
+    else if (ev.type === "task" && p.typ === "theorie") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}${p.nochmals_anders ? '<span class="pill">Nochmals anders erklärt</span> ' : ""}📖 Theorie: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)})<div class="muted">${fmt(p.inhalt)}</div>${p.beispiel ? `<div class="muted">${fmt("💡 " + p.beispiel)}</div>` : ""}${p.quelle ? `<br><span class="muted">Quelle: ${esc(p.quelle)}${p.fundstelle ? ", " + esc(p.fundstelle) : ""}</span>` : ""}${p.quelle_verworfen ? `<br><span class="fb">Quelle verworfen (nicht in der Lektion): ${esc(p.quelle_verworfen)}</span>` : ""}`;
     else if (ev.type === "task") body = `${p.fallback ? '<span class="fb">[Fallback]</span> ' : ""}📝 Aufgabe: <strong>${esc(p.titel)}</strong> (${esc(p.konzept)}${p.aufgabentyp ? ", " + esc(p.aufgabentyp) : ""})<div class="muted">${fmt(p.inhalt)}</div>${fmt("❓ " + (p.frage || ""))}`
       + (p.erwartete_antwort ? `<br><span class="muted">Erwartet: ${esc(p.erwartete_antwort)}${(p.schluesselbegriffe || []).length ? " · Schlüsselbegriffe: " + p.schluesselbegriffe.map(esc).join(", ") : ""}</span>` : "")
       + ((p.erwartete_elemente || []).length ? `<br><span class="muted">Erwartete Elemente: ${p.erwartete_elemente.map((e, i) => `${i + 1}) ${elementText(e)}`).join(" · ")}</span>` : "")
@@ -481,7 +481,7 @@ function renderEvent(ev, mitDatum) {
         + (p.selbsteinschaetzung ? `<br><span class="muted">🪞 ${esc(p.selbsteinschaetzung)}</span>` : "");
     }
     else if (ev.type === "chat_question") body = `❓ ${p.art === "theorie" ? "«Theorie dazu»" : p.art === "genauer" ? "«Genauer erklären»" : p.art === "allgemeinwissen" ? "Allgemeinwissen angenommen" : p.art === "internet" ? "Internetrecherche angenommen" : "Verständnisfrage"}${p.stufe ? ` <span class="muted">(Stufe ${p.stufe})</span>` : ""}: <em>${esc(p.frage)}</em>`;
-    else if (ev.type === "chat_reply") body = `💬 Tutor${p.internet ? ' <span class="pill test">Internet</span>' : p.ausserhalb_material ? ' <span class="pill test">ausserhalb Material</span>' : ""}: ${fmt(p.antwort)}${(p.links || []).length ? "<br>" + p.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.titel)}</a>`).join(" · ") : ""}${p.suchanfrage ? `<br><span class="muted">Suchanfrage: ${esc(p.suchanfrage)}</span>` : ""}`
+    else if (ev.type === "chat_reply") body = `💬 Tutor${p.internet ? ' <span class="pill test">Internet</span>' : p.ausserhalb_material ? ' <span class="pill test">ausserhalb Material</span>' : ""}: ${fmt(p.antwort)}${(p.links || []).length ? "<br>" + p.links.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.titel)}</a>`).join(" · ") : ""}${p.suchanfrage ? `<br><span class="muted">Suchanfrage: ${esc(p.suchanfrage)}</span>` : ""}${(p.quellen || []).length ? `<br><span class="muted">Quellen: ${p.quellen.map(esc).join(" · ")}</span>` : ""}`
       + (p.aehnlichkeit != null ? `<br><span class="muted">Ähnlichkeit zu bisherigen Erklärungen: ${Math.round(p.aehnlichkeit * 100)} %</span>` : "");
     else if (ev.type === "finished") body = `🎉 Abgeschlossen${fmt(p.zusammenfassung)}`;
     else if (ev.type === "fallback_used") body = `⚠️ <strong>Fallback</strong> bei ${esc(SCHRITT[p.schrittart] || p.schrittart)}`
@@ -504,6 +504,16 @@ function renderEvent(ev, mitDatum) {
       + (p.konzept ? ` <span class="muted">Konzept «${esc(p.konzept)}»</span>` : ""); }
     else if (ev.type === "kopie_erkannt") { cls += " regel_verstoss"; body = `✍️ <strong>Kopie erkannt</strong> (D-11): ${Math.round(p.anteil * 100)} % der Antwort wörtlich aus «${esc(p.quelle || "")}», nicht bewertet und nicht als Versuch gezählt`; }
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
+    else if (ev.type === "rag_abruf") {
+      // T-30: Auszüge aus der Vektordatenbank, die der Tutor für diesen Schritt bekam
+      if (p.modus === "voll") body = `🗂️ Vektordatenbank bei ${esc(SCHRITT[p.schrittart] || p.schrittart)}: <span class="fb">${esc(p.fehler || "")}</span>`;
+      else body = `🗂️ <strong>${(p.treffer || []).length} Auszüge</strong> aus der Vektordatenbank für ${esc(SCHRITT[p.schrittart] || p.schrittart)}`
+        + ` <span class="muted">(${p.zeichen} Zeichen, ${esc(p.modell || "")})</span>`
+        + `<div class="muted">Suche: ${(p.anfragen || []).map(a => "«" + esc(a) + "»").join(", ")}</div>`
+        + `<ol class="muted" style="margin:4px 0 0 18px;padding:0">${(p.treffer || []).map(t =>
+            `<li>${(p.verwendet || []).includes(t.nr) ? "<strong>" : ""}${esc(t.quelle)}${t.fundstelle ? ", " + esc(t.fundstelle) : ""}${(p.verwendet || []).includes(t.nr) ? "</strong> (verwendet)" : ""} · Ähnlichkeit ${Number(t.aehnlichkeit).toFixed(2)}</li>`).join("")}</ol>`
+        + (p.verwendet_verworfen ? `<div class="fb">Ungültige Auszugsnummern verworfen: ${esc(p.verwendet_verworfen)}</div>` : "");
+    }
     else if (ev.type === "vorabruf_verworfen") body = `♻️ Vorbereiteter Schritt verworfen: <span class="muted">${esc(p.grund)}</span>`;
     else if (ev.type === "loesung_gezeigt") {
       // D-17: dieselbe Gegenüberstellung, die die lernende Person sah

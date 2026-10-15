@@ -585,7 +585,16 @@ def _chat_mock(system: str, user: str, json_mode: bool = False) -> tuple[str, di
                  "gesamt_sekunden": 9.5}
     if f"{label}:leer" in fail or (f"{label}:leer_json" in fail and LEER_HINWEIS not in user):
         return "\n\n   \n", leer_meta
-    return _mock_text(system, user), {}
+    text = _mock_text(system, user)
+    if "AUSZÜGE AUS DEM MATERIAL" in user and "[1] Quelle:" in user:
+        # T-30: Der Mock stützt sich auf den ersten Auszug (ITS_MOCK_AUSZUG wählt eine andere Nummer)
+        try:
+            d = json.loads(text)
+            d["auszuege"] = [int(os.getenv("ITS_MOCK_AUSZUG", "1"))]
+            text = json.dumps(d, ensure_ascii=False)
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+    return text, {}
 
 
 _PROVIDERS = {

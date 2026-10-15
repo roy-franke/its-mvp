@@ -161,7 +161,7 @@ def test_lektion_ansehen_mit_standard_einstellungen():
         assert d["titel"] == "Ansehen Testlektion" and d["version"] == 1
         assert d["quellen"] == [{"name": "skript.pdf", "chars": 120}]
         assert d["einstellungen"] == {"einsatzart": "einfuehrung", "niveauanpassung": "automatisch",
-                                      "bewertungsstrenge": "ausgewogen",
+                                      "bewertungsstrenge": "ausgewogen", "materialzugriff": "automatisch",
                                       "wissensstufen": ["material", "allgemeinwissen"]}
         liste = {l["id"]: l for l in client.get("/api/teacher/lessons").json()}
         assert liste[lid]["lernziele"] == 2 and liste[lid]["quellen"] == 1

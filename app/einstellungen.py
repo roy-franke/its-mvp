@@ -32,6 +32,15 @@ EINSTELLUNGEN: dict[str, dict] = {
         },
         "standard": "ausgewogen",
     },
+    "materialzugriff": {
+        "titel": "Materialzugriff",
+        "werte": {
+            "automatisch": "Automatisch: grosses Material als Auszüge aus der Vektordatenbank, sonst ganz",
+            "auszuege": "Immer Auszüge (RAG), sofern die Materialien indexiert sind",
+            "ganz": "Immer das ganze Material im Prompt",
+        },
+        "standard": "automatisch",
+    },
     "wissensstufen": {
         "titel": "Wissensquellen für Erklärungen",
         "werte": {

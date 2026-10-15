@@ -33,7 +33,7 @@ from pydantic import BaseModel
 
 import time
 
-from . import auth, didaktik, einstellungen, llm, materialien, store, tutor, vektoren, version
+from . import auth, didaktik, einstellungen, llm, materialien, rag, store, tutor, vektoren, version
 
 def _log_stufen_einrichten() -> str:
     """T-24: Log-Stufen ohne Code-Änderung.
@@ -96,6 +96,13 @@ else:
 # denken muss. Ausnahmen (Login, Logout) hängen bewusst direkt an `app`.
 teacher_api = APIRouter(prefix="/api/teacher", dependencies=[Depends(auth.require_teacher)])
 teacher_pages = APIRouter(prefix="/teacher", dependencies=[Depends(auth.require_teacher_page)])
+
+
+@app.middleware("http")
+async def rag_protokoll(request: Request, call_next):
+    """T-30: Pro Anfrage eine eigene Liste für die Abrufe aus der Vektordatenbank."""
+    rag.sammeln_beginnen()
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -294,19 +301,27 @@ def _kontext_info(lesson: dict) -> dict:
     bleibt für Aufgabe, Verlauf und Antwort kaum noch Platz.
     """
     vollstaendig = {"titel": "", "lernziele": [], "material": "", **lesson}
-    tokens = llm.schaetze_tokens(tutor._system_prompt(vollstaendig))
+    modus, grund = rag.modus(vollstaendig)
+    tokens = llm.schaetze_tokens(tutor._system_prompt(vollstaendig, voll=modus != "rag"))
+    if modus == "rag":
+        tokens += llm.schaetze_tokens("x" * rag.max_zeichen())    # Auszüge im Benutzerteil
     maximum = llm.kontextfenster()
-    info = {"tokens": tokens, "max": maximum, "anteil": None, "warnung": False, "text": ""}
+    info = {"tokens": tokens, "max": maximum, "anteil": None, "warnung": False, "text": "",
+            "rag": modus == "rag", "rag_grund": grund,
+            "material_tokens": llm.schaetze_tokens(vollstaendig.get("material") or "")}
     if maximum:
         info["anteil"] = round(tokens / maximum, 2)
         if tokens > maximum * llm.KONTEXT_WARNGRENZE:
             info["warnung"] = True
-            info["text"] = (f"Achtung: Das Material dieser Lektion belegt geschätzt {tokens:,} Tokens "
+            zahl = lambda n: f"{n:,}".replace(",", "'")
+            info["text"] = (f"Achtung: Das Material dieser Lektion belegt geschätzt {zahl(tokens)} Tokens "
                             f"und damit {round(100 * tokens / maximum)} Prozent des Kontextfensters "
-                            f"(OLLAMA_NUM_CTX={maximum:,}). Für Aufgabe, Verlauf und Antwort bleibt "
+                            f"(OLLAMA_NUM_CTX={zahl(maximum)}). Für Aufgabe, Verlauf und Antwort bleibt "
                             "kaum Platz; das Sprachmodell sieht dann nur einen Teil des Materials. "
-                            "Kürze das Material oder teile es auf mehrere Lektionen auf. "
-                            "Gespeichert wurde die Lektion trotzdem.").replace(",", "'")
+                            "Kürze das Material oder teile es auf mehrere Lektionen auf. Liegt das Material in "
+                            "der Ablage und ist eine Vektordatenbank eingerichtet, arbeitet der Tutor stattdessen "
+                            f"mit Auszügen (RAG, zurzeit nicht: {grund}). "
+                            "Gespeichert wurde die Lektion trotzdem.")
     return info
 
 
@@ -471,11 +486,22 @@ class CheckMaterialRequest(BaseModel):
     materialien: list[str] = []      # L-02: Lernmaterialien aus der Ablage
 
 
-def _editor_material(material: str, ids: list[str]) -> str:
-    """Material für die KI-Hilfen im Editor, mit den gewählten Lernmaterialien."""
+def _editor_material(material: str, ids: list[str], anfragen: list[str] | None = None,
+                     grenze: int = 12000) -> str:
+    """Material für die KI-Hilfen im Editor, mit den gewählten Lernmaterialien.
+
+    T-30: Ist es länger als das, was die KI-Hilfe liest (`grenze`), kommen statt
+    des Anfangs die zu den Lernzielen bzw. zum Titel passenden Auszüge aus der
+    Vektordatenbank, sofern die Materialien indexiert sind.
+    """
     if not ids:
         return material
-    return _materialien_zusammensetzen(ids, material.strip(), [], bisher=ids)["material"]
+    ganz = _materialien_zusammensetzen(ids, material.strip(), [], bisher=ids)["material"]
+    if len(ganz) > grenze and anfragen:
+        auszuege = rag.material_fuer_editor(ids, anfragen, grenze - len(material.strip()) - 200)
+        if auszuege:
+            return (auszuege + ("\n\n---\n\n" + material.strip() if material.strip() else "")).strip()
+    return ganz
 
 
 @teacher_api.post("/lessons/check-material")
@@ -483,7 +509,7 @@ def lesson_check_material(req: CheckMaterialRequest):
     """D-06: Material mit den Lernzielen abgleichen (Empfehlung, blockiert nichts)."""
     if not [z for z in req.lernziele if z.strip()]:
         raise HTTPException(400, "Zuerst Lernziele eintragen")
-    material = _editor_material(req.material, req.materialien)
+    material = _editor_material(req.material, req.materialien, [z for z in req.lernziele if z.strip()])
     if len(material.strip()) < 20:
         raise HTTPException(400, "Zuerst Material hochladen oder einfügen")
     return tutor.check_material(req.lernziele, material)
@@ -494,7 +520,7 @@ def lesson_suggest_goals(req: SuggestGoalsRequest):
     """KI-Vorschlag für Lernziele (experimentell, T-18): Der Titel der Lehrperson setzt den Rahmen."""
     if not req.titel.strip():
         raise HTTPException(400, "Zuerst einen Titel eingeben. Er setzt den Rahmen für die Lernziele.")
-    material = _editor_material(req.material, req.materialien)
+    material = _editor_material(req.material, req.materialien, [req.titel.strip()], grenze=8000)
     if len(material.strip()) < 100:
         raise HTTPException(400, "Zuerst Material einfügen (mindestens 100 Zeichen)")
     return tutor.suggest_goals(material, req.titel)
@@ -808,7 +834,13 @@ SCHRITTART = {"theorie": "THEORIE_SCHRITT", "aufgabe": "NAECHSTE_AUFGABE"}
 
 
 def _log_llm_meta(sid: str, schrittart: str, data: dict):
-    """Protokolliert Fallbacks und Regelverstösse eines LLM-Ergebnisses (T-01)."""
+    """Protokolliert Fallbacks und Regelverstösse eines LLM-Ergebnisses (T-01).
+
+    T-30: dazu jeden Abruf aus der Vektordatenbank als Ereignis rag_abruf
+    (beim Vorabruf am Schritt gespeichert, sonst aus dieser Anfrage).
+    """
+    for info in (data.pop("_rag", None) or []) + rag.abrufe_holen():
+        store.log_event(sid, "rag_abruf", info)
     if data.get("_fallback"):
         payload = {"schrittart": schrittart, "grund": data.get("_fehler", "unbekannt")}
         if data.get("_kontext"):
@@ -831,6 +863,14 @@ def _einsatzart(lesson: dict) -> str:
 
 def _generate_step(lesson: dict, profile: dict, history: list[dict],
                    adaptation: str | None) -> tuple[str, dict]:
+    step_type, task = _generate_step_inhalt(lesson, profile, history, adaptation)
+    # T-30: Abrufe gehören zum Schritt, auch wenn er erst später übernommen wird (Vorabruf)
+    task["_rag"] = (task.get("_rag") or []) + rag.abrufe_holen()
+    return step_type, task
+
+
+def _generate_step_inhalt(lesson: dict, profile: dict, history: list[dict],
+                          adaptation: str | None) -> tuple[str, dict]:
     step_type = tutor.decide_step_type(profile, adaptation, _einsatzart(lesson))
     if step_type == "theorie":
         theorie = tutor.generate_theory(lesson, profile, history, adaptation)
@@ -1499,12 +1539,12 @@ def chat_with_tutor(sid: str, req: ChatRequest, request: Request):
         "antwort": antwort, "art": art, "stufe": stufe, "konzept": result.get("konzept", ""),
         "ausserhalb_material": ausserhalb, "angebot": result.get("angebot"),
         "internet": bool(result.get("internet")), "links": result.get("links") or [],
-        "suchanfrage": result.get("suchanfrage"),
+        "suchanfrage": result.get("suchanfrage"), "quellen": result.get("quellen") or [],
         "aehnlichkeit": round(didaktik.aehnlichkeit(
             antwort, tutor.bisherige_erklaerungen(history, result.get("konzept", ""))), 2)
         if art in ("theorie", "genauer") and stufe and stufe < 3 else None,
     })
-    out = {"antwort": antwort, "ausserhalb_material": ausserhalb,
+    out = {"antwort": antwort, "ausserhalb_material": ausserhalb, "quellen": result.get("quellen") or [],
            "internet": bool(result.get("internet")), "links": result.get("links") or [],
            "hinweis": result.get("hinweis"), "nochmals_anders": bool(result.get("nochmals_anders")),
            "angebot": result.get("angebot"), "stufe": stufe, "progress": niveau}

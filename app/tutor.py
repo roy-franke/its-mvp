@@ -12,7 +12,7 @@ import json
 import os
 import re
 
-from . import didaktik, einstellungen, llm, websuche
+from . import didaktik, einstellungen, llm, rag, websuche
 
 LEVELS = ["basic", "intermediate", "advanced"]
 
@@ -121,14 +121,21 @@ def correct_rate(p: dict) -> float:
 
 # ---------------------------------------------------------------- Prompts
 
-def _system_prompt(lesson: dict) -> str:
+def _system_prompt(lesson: dict, voll: bool | None = None) -> str:
     """Systemprompt: innerhalb einer Lektion für alle Schrittarten identisch.
 
     Nur so wirkt der Prompt-Cache von Ollama. Alles, was sich von Schritt zu
     Schritt ändert (gezeigte Theorie, erklärte Konzepte, Beispiele), gehört in
     den Benutzerteil der Anfrage. Lektionseinstellungen dürfen hinein, weil sie
     innerhalb einer Lektion konstant sind.
+
+    T-30: Im RAG-Modus steht statt des ganzen Materials nur die Liste der
+    Quellen (rag.uebersicht); die Auszüge kommen in den Benutzerteil.
+    `voll` erzwingt das ganze Material (None: nach rag.modus).
     """
+    if voll is None:
+        voll = rag.modus(lesson)[0] != "rag"
+    material_block = f"MATERIAL:\n{lesson['material']}" if voll else rag.uebersicht(lesson)
     hints = lesson.get("tutor_hinweise", "").strip()
     hint_block = (
         f"\n\nHINWEISE DER LEHRPERSON AN DICH (beachte sie, solange sie den "
@@ -154,9 +161,39 @@ def _system_prompt(lesson: dict) -> str:
         + _einstellungen_block(lesson)
         + f"LEKTION: {lesson['titel']}\n"
         f"LERNZIELE:\n" + "\n".join(f"- {z}" for z in lesson["lernziele"]) + "\n\n"
-        f"MATERIAL:\n{lesson['material']}"
+        + material_block
         + hint_block
     )
+
+
+def _chat(lesson: dict, anfragen: list[str], user: str, **kw) -> dict:
+    """LLM-Aufruf mit Lektionsmaterial (T-30): ganz im Systemprompt oder als
+    Auszüge aus der Vektordatenbank am Ende des Benutzerteils.
+
+    `anfragen` sind die Suchtexte für das Retrieval dieser Schrittart. Scheitert
+    das Retrieval, läuft der Aufruf mit dem ganzen Material (protokolliert).
+    Die Rückgabe trägt im RAG-Modus `_rag_treffer` (die verwendeten Auszüge).
+    """
+    schritt = llm._label(user)
+    modus, grund = rag.modus(lesson)
+    if modus != "rag":
+        return llm.chat_json(_system_prompt(lesson, voll=True), user, **kw)
+    try:
+        auszug, info = rag.auszuege(lesson, anfragen, schritt)
+    except Exception as e:
+        rag.protokoll({"schrittart": schritt, "modus": "voll",
+                       "fehler": f"Retrieval gescheitert, ganzes Material verwendet: {type(e).__name__}: {e}"[:300]})
+        return llm.chat_json(_system_prompt(lesson, voll=True), user, **kw)
+    data = llm.chat_json(_system_prompt(lesson, voll=False), user + auszug, **kw)
+    data["_rag_treffer"] = rag.verwendung(info, data)
+    rag.protokoll(info)
+    return data
+
+
+def _ziele(lesson: dict) -> list[str]:
+    """Suchtexte aus den Lernzielen, mit dem Titel als Rahmen."""
+    titel = lesson.get("titel", "")
+    return [f"{titel}: {z}" for z in lesson.get("lernziele") or []] or [titel]
 
 
 EINSATZART_TEXT = {
@@ -331,8 +368,8 @@ def generate_assessment_detail(lesson: dict) -> dict:
             return (f"{didaktik.STRUKTUR_PRAEFIX} Das Feld «questions» muss eine Liste mit genau 3 "
                     f"Fragen als Text sein (lesbar waren {n}). Keine Objekte, nur Texte.")
         return None
-    data = llm.chat_json(
-        _system_prompt(lesson),
+    data = _chat(
+        lesson, _ziele(lesson),
         "AUFGABE: EINSTUFUNGSFRAGEN\n"
         "Erstelle genau 3 kurze, offene Einstiegsfragen, um das Vorwissen zur "
         "Lektion einzuschätzen: eine leichte, eine mittlere, eine anspruchsvolle. "
@@ -362,8 +399,8 @@ def generate_assessment_detail(lesson: dict) -> dict:
 def evaluate_assessment(lesson: dict, questions: list[str], answers: list[str]) -> dict:
     """Bewertet die Einstufungsantworten und bestimmt das Startniveau."""
     qa = "\n".join(f"Frage: {q}\nAntwort: {a}" for q, a in zip(questions, answers))
-    data = llm.chat_json(
-        _system_prompt(lesson),
+    data = _chat(
+        lesson, _ziele(lesson),
         "AUFGABE: EINSTUFUNG_BEWERTEN\n"
         "Beurteile das Vorwissen anhand dieser Antworten und bestimme das "
         "Startniveau: basic, intermediate oder advanced. Leere oder sehr knappe "
@@ -478,10 +515,18 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
                 or (doppelte_theorie(d, erklaert, vorher_text) if neues_konzept else None)
                 or (didaktik.zu_aehnlich(didaktik.theorietext(d), [vorher_text], didaktik.THEORIE_AEHNLICH)
                     if adaptation == "simplify" and vorher_text else None))
-    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={}, check=pruefen)
+    # T-30: Suche nach dem Konzept, das erklärt werden soll, sonst nach den Lernzielen
+    if adaptation in ("explain", "konzept") and ziel:
+        anfragen = [f"{ziel}: Erklärung, Merkmale und Beispiel"]
+    elif adaptation == "simplify" and vorher:
+        anfragen = [f"{vorher.get('konzept', '')}: {vorher.get('titel', '')}"]
+    else:
+        anfragen = _ziele(lesson)
+    data = _chat(lesson, anfragen, instruction, fallback={}, check=pruefen)
     if data.get("_fallback"):
         return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"
+    _fundstelle_setzen(data, lesson)
     data["merkmale"] = didaktik.merkmale_bereinigen(data.get("merkmale"))
     if adaptation == "simplify" and vorher:
         data["nochmals_anders"] = True     # D-08: erlaubte Ausnahme, gekennzeichnet
@@ -501,6 +546,15 @@ def doppelte_theorie(theorie: dict, erklaert: list[str], vorher_text: str) -> st
         return ("Die Erklärung wiederholt im Wesentlichen die vorangehende Theorie. Führe ein anderes, "
                 "noch nicht erklärtes Konzept ein.")
     return None
+
+
+def _fundstelle_setzen(data: dict, lesson: dict) -> None:
+    """T-30: Quelle und Fundstelle aus dem ersten verwendeten Auszug (statt der Angabe des Modells)."""
+    treffer = data.pop("_rag_treffer", None)
+    if treffer:
+        data["quelle"] = treffer[0]["quelle"]
+        if treffer[0].get("fundstelle"):
+            data["fundstelle"] = treffer[0]["fundstelle"]
 
 
 def _quelle_setzen(data: dict, lesson: dict) -> None:
@@ -596,8 +650,9 @@ def pruefe_musterloesung(lesson: dict, task: dict, theorie: dict | None = None) 
                 or didaktik.merkmale_bereinigen(task.get("merkmale")))
     elemente = didaktik.elemente_bereinigen(task.get("erwartete_elemente"))
     konzept = (task.get("konzept") or "").strip()
-    data = llm.chat_json(
-        _system_prompt(lesson),
+    fall = f"{task.get('inhalt', '')} {task.get('frage', '')}"
+    data = _chat(
+        lesson, [fall],
         "AUFGABE: MUSTERLOESUNG_PRUEFEN\n"
         "Löse die folgende Aufgabe selbst, nur mit dem Lektionsmaterial und dem Sachverhalt. Eine "
         "Musterlösung kennst du nicht. Stütze dich nur auf Angaben, die im Sachverhalt stehen; erfinde "
@@ -623,8 +678,8 @@ def pruefe_musterloesung(lesson: dict, task: dict, theorie: dict | None = None) 
                     unterschied=f"Der Sachverhalt enthält die Merkmale von «{konzept}» nicht ({', '.join(merkmale)}).")
     if didaktik.loesungen_stimmen_ueberein(task.get("erwartete_antwort", ""), out["loesung"], lesson):
         return dict(out, ergebnis="uebereinstimmend", vergleich="fachbegriffe")
-    vergleich = llm.chat_json(
-        _system_prompt(lesson),
+    vergleich = _chat(
+        lesson, [fall],
         "AUFGABE: MUSTERLOESUNG_VERGLEICHEN\n"
         "Zwei Lösungen zum selben Fall. Stimmen sie im Ergebnis überein (dieselbe Antwort auf die Frage, auch "
         "wenn anders formuliert)? Ergänzt die eine die andere nur, gilt das als übereinstimmend.\n"
@@ -779,8 +834,13 @@ def _aufgabe_erzeugen(lesson: dict, profile: dict, history: list[dict],
 
     # Drei Versuche statt zwei: Die Evaluation mit qwen3:30b zeigte, dass das
     # Modell ein wiederverwendetes Beispiel oft erst beim zweiten Hinweis ersetzt.
-    data = llm.chat_json(_system_prompt(lesson), instruction, fallback={}, check=pruefen,
-                         versuche=3)
+    # T-30: Die Aufgabe bezieht sich auf die vorangehende Theorie (D-09), sonst auf die Lernziele
+    if theorie and adaptation != "naechstes_thema":
+        anfragen = [f"{theorie.get('konzept', '')}: {theorie.get('titel', '')}. {str(theorie.get('inhalt', ''))[:400]}"]
+    else:
+        anfragen = _ziele(lesson)
+    data = _chat(lesson, anfragen, instruction, fallback={}, check=pruefen, versuche=3)
+    data.pop("_rag_treffer", None)
     if data.get("_fallback"):
         return task_fallback(lesson, profile, adaptation, data)
     if not isinstance(data.get("optionen"), list) or data.get("aufgabentyp") != "multiple_choice":
@@ -934,8 +994,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                 or didaktik.musterloesung_erwaehnt(f"{d.get('feedback', '')} {d.get('hinweis', '')}")
                 or didaktik.hinweis_wiederholt(d.get("hinweis", ""), frueher_hinweise)
                 or didaktik.vorsicht_bemaengelt(d, answer, offene_punkte))
-    data = llm.chat_json(
-        _system_prompt(lesson),
+    data = _chat(
+        lesson, [f"{task.get('inhalt', '')} {task.get('frage', '')}", answer],
         "AUFGABE: ANTWORT_BEWERTEN\n"
         + kontext +
         "Gehe in zwei Schritten vor:\n"
@@ -1269,8 +1329,9 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
                    "Schlägt der Lernende eine andere Lösung vor, prüfe sie ernsthaft am Sachverhalt: Unter "
                    "welcher Annahme wäre sie richtig, und sagt der Fall dazu etwas? Erfinde keine Angaben, "
                    "die nicht im Fall stehen.\n")
-    data = llm.chat_json(
-        _system_prompt(lesson),
+    anfragen = ([question] if art == "frage" else []) + [f"{konzept}: {(task or {}).get('frage', '') or (task or {}).get('titel', '')}"]
+    data = _chat(
+        lesson, anfragen,
         "AUFGABE: FRAGE_BEANTWORTEN\n"
         f"{task_ctx}"
         f"Niveau des Lernenden: {profile['level']}.\n"
@@ -1304,6 +1365,10 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
     data["angebot"] = None
     # D-08: Erneute Erklärung zum selben Konzept ist erlaubt, aber gekennzeichnet
     data["nochmals_anders"] = art in ("theorie", "genauer") and bool(bisherige) and not data.get("_fallback")
+    # T-30: Fundstellen der verwendeten Auszüge (nur im RAG-Modus, nie aus Allgemeinwissen)
+    treffer = data.pop("_rag_treffer", None) or []
+    if treffer and not data["ausserhalb_material"]:
+        data["quellen"] = rag.fundstellen_text(treffer)
     return data
 
 
@@ -1427,7 +1492,7 @@ def verlauf_fuer_lernende(events: list[dict], fuer_fortsetzen: bool = False) -> 
         p, typ, zeit = ev["payload"], ev["type"], ev["created_at"]
         if typ == "task" and p.get("typ") in ("theorie", "aufgabe"):
             e = {"art": p["typ"], "id": f"e{ev['id']}", "zeit": zeit,
-                 **{k: p.get(k) for k in ("titel", "inhalt", "frage", "beispiel", "konzept", "quelle")
+                 **{k: p.get(k) for k in ("titel", "inhalt", "frage", "beispiel", "konzept", "quelle", "fundstelle")
                     if p.get(k)}}
             if p.get("optionen"):
                 e["optionen"] = list(p["optionen"])
@@ -1460,6 +1525,8 @@ def verlauf_fuer_lernende(events: list[dict], fuer_fortsetzen: bool = False) -> 
                  "internet": bool(p.get("internet"))}
             if p.get("links"):
                 e["links"] = [{"titel": l.get("titel"), "url": l.get("url")} for l in p["links"]]
+            if p.get("quellen"):
+                e["quellen"] = list(p["quellen"])          # T-30: Fundstellen
             eintraege.append(e)
         elif typ == "finished":
             eintraege.append({"art": "abschluss", "zeit": zeit,
@@ -1521,8 +1588,8 @@ def answer_internet(lesson: dict, profile: dict, task: dict | None) -> dict:
                                    "Frag am besten deine Lehrperson.", links=[], angebot="lehrperson",
                     ausserhalb_material=False, internet=False)
     liste = "\n".join(f"[{i + 1}] {t['titel']} ({t['url']}): {t['auszug']}" for i, t in enumerate(treffer))
-    data = llm.chat_json(
-        _system_prompt(lesson),
+    data = _chat(
+        lesson, [konzept or lesson.get("titel", "")],
         "AUFGABE: FRAGE_BEANTWORTEN\n"
         f"Aktuelles Konzept: {konzept}\n"
         f"Niveau des Lernenden: {profile['level']}.\n"
@@ -1548,8 +1615,8 @@ def answer_internet(lesson: dict, profile: dict, task: dict | None) -> dict:
 
 def generate_summary(lesson: dict, profile: dict, history: list[dict]) -> dict:
     """Erzeugt die Abschlusszusammenfassung mit Lernzielabgleich."""
-    data = llm.chat_json(
-        _system_prompt(lesson),
+    data = _chat(
+        lesson, _ziele(lesson),
         "AUFGABE: ABSCHLUSS\n"
         f"Der Lernende hat {profile['step']} Schritte bearbeitet, "
         f"{profile['correct']} richtig, {profile['wrong']} falsch, "
