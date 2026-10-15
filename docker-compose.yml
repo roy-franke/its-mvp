@@ -2,7 +2,11 @@
 # Anleitung: docs/DEPLOYMENT.md
 services:
   its:
-    build: .
+    build:
+      context: .
+      args:
+        # T-31: Commit fuer die Versionsanzeige, z.B. ITS_GIT_COMMIT=$(git rev-parse --short HEAD) docker compose build
+        ITS_GIT_COMMIT: ${ITS_GIT_COMMIT:-}
     env_file: .env
     volumes:
       - its-data:/data

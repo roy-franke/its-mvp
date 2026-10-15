@@ -33,7 +33,7 @@ from pydantic import BaseModel
 
 import time
 
-from . import auth, didaktik, einstellungen, llm, store, tutor
+from . import auth, didaktik, einstellungen, llm, store, tutor, version
 
 def _log_stufen_einrichten() -> str:
     """T-24: Log-Stufen ohne Code-Änderung.
@@ -78,6 +78,7 @@ log.info("Zugangsschutz Lehrpersonen: %s | Klassencode: %s | Header-Anmeldung: %
          f"aktiv ({auth.user_header()}, {auth.roles_header()})" if auth.trust_headers() else "aus")
 
 log.info("Log-Stufen: %s", _LOG_STUFEN)
+log.info("ITS-Tutor Version %s", version.info()["anzeige"])
 
 # Rollenprüfung zentral als Abhängigkeit der Router (T-04): Jede Route unter
 # /api/teacher und /teacher ist damit geschützt, ohne dass sie einzeln daran
@@ -1754,8 +1755,14 @@ def teacher_logout(request: Request):
 @app.get("/api/info")
 def info():
     return {"provider": llm.provider_name(), "model": llm.current_model(),
-            "kontextfenster": llm.kontextfenster(),
+            "kontextfenster": llm.kontextfenster(), "version": version.info()["anzeige"],
             "lessons": [p.stem for p in sorted(LESSONS_DIR.glob('*.json'))]}
+
+
+@app.get("/api/version")
+def version_info():
+    """T-31: Semantische Version und Short-Hash des Commits (ohne Anmeldung)."""
+    return version.info()
 
 
 @teacher_api.get("/timings")
@@ -1819,6 +1826,13 @@ def _page(name: str) -> FileResponse:
 @app.get("/")
 def index():
     return _page("index.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """T-27: Browser fragen /favicon.ico auch ohne Link im Kopf der Seite an."""
+    return FileResponse(BASE / "static" / "favicon.ico", media_type="image/x-icon",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @teacher_pages.get("")
