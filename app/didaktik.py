@@ -1002,6 +1002,90 @@ def fachbegriff_trotzdem_ungenau(bewertung: dict, task: dict, antwort: str) -> s
     return None
 
 
+# ---------------------------------------------------------------- D-21
+#
+# «Prüfe, ob der Begriff «Haftung für Fahrlässigkeit» im Material explizit als korrekte
+# Bezeichnung genannt wird» verriet die gesuchte Antwort. Gesperrt sind die Stämme der
+# Schlüsselbegriffe und des erwarteten Inhalts der noch nicht erfüllten Elemente, ausser sie
+# stehen in der Aufgabe oder in einer Antwort der lernenden Person. Wortvergleich wie bei D-20.
+
+GESPERRT_MIN_LAENGE = 5     # kürzere Stämme («sorg», «haft») treffen zu viele harmlose Wörter
+
+
+def ist_multiple_choice(task: dict) -> bool:
+    return bool(task.get("optionen")) or (task.get("aufgabentyp") or "").lower() in (
+        "multiple_choice", "multiple-choice", "mc")
+
+
+def _gegeben(stamm_wort: str, text_staemme: set[str]) -> bool:
+    """Steht der Stamm schon in der Aufgabe oder in einer Antwort? Gleich, gebeugt (gemeinsamer Anfang,
+    «gelockert»/«gelockerte») oder als Teil einer Zusammensetzung dort."""
+    return _steckt_in(stamm_wort, text_staemme) or any(
+        min(len(stamm_wort), len(t)) >= 4 and (t.startswith(stamm_wort) or stamm_wort.startswith(t))
+        for t in text_staemme)
+
+
+def gesperrte_staemme(task: dict, elemente, antworten: list[str]) -> set[str]:
+    """D-21: Stämme, die Feedback und Hinweis nicht nennen dürfen.
+
+    `elemente` ist die Bewertung je Element (Status in der Reihenfolge der festgelegten Elemente).
+    Sind alle Elemente erfüllt, ist nichts gesperrt. Ein Schlüsselbegriff, der nur zu erfüllten
+    Elementen gehört, bleibt frei (D-15: Bei «vertretbar» darf die erwartete Lösung erscheinen).
+    """
+    if ist_multiple_choice(task):
+        return set()
+    status = [str(e.get("status", "")).strip().lower() for e in elemente or [] if isinstance(e, dict)]
+    if status and all(s in WIE_KORREKT for s in status):
+        return set()
+    festgelegt = elemente_normalisieren(task.get("erwartete_elemente"))
+    if len(status) == len(festgelegt):
+        offen = [f["erwartet"] for f, s in zip(festgelegt, status) if s not in WIE_KORREKT]
+        erfuellt = [f["erwartet"] for f, s in zip(festgelegt, status) if s in WIE_KORREKT]
+    else:
+        offen, erfuellt = [f["erwartet"] for f in festgelegt], []
+    roh: set[str] = set()
+    for text in offen:
+        roh |= staemme(text)
+
+    def gehoert_zu(teile: set[str], inhalt: str) -> bool:
+        return all(_kommt_vor(t, staemme(inhalt)) for t in teile)
+    for begriff in schluesselbegriffe(task):
+        teile = staemme(begriff)
+        if any(gehoert_zu(teile, x) for x in erfuellt) and not any(gehoert_zu(teile, x) for x in offen):
+            continue
+        roh |= teile
+    gegeben = staemme(" ".join([task.get("titel") or "", task.get("inhalt") or "", task.get("frage") or ""]
+                               + [str(a or "") for a in antworten]))
+    return {t for t in roh if len(t) >= GESPERRT_MIN_LAENGE and not _gegeben(t, gegeben)}
+
+
+def verratene_woerter(text: str, gesperrt: set[str]) -> list[str]:
+    """Wörter aus `text`, die einen gesperrten Stamm enthalten (auch gebeugt oder zusammengesetzt)."""
+    if not gesperrt:
+        return []
+    return list(dict.fromkeys(w for w in woerter(text) if any(_steckt_in(t, {stamm(w)}) for t in gesperrt)))
+
+
+def loesung_verraten(bewertung: dict, task: dict, antworten: list[str]) -> str | None:
+    """D-21: Feedback oder Hinweis nennen die erwartete Antwort, einen Schlüsselbegriff oder den
+    erwarteten Inhalt eines noch nicht erfüllten Elements, den die lernende Person nicht selbst
+    geschrieben hat. Multiple Choice ist ausgenommen."""
+    gesperrt = gesperrte_staemme(task, bewertung.get("elemente"), antworten)
+    treffer = verratene_woerter(f"{bewertung.get('feedback', '')} {bewertung.get('hinweis', '')}", gesperrt)
+    if not treffer:
+        return None
+    return ("Feedback oder Hinweis verraten die erwartete Antwort: " + ", ".join(f"«{w}»" for w in treffer)
+            + " hat der Lernende nicht selbst geschrieben. Nenne keinen Begriff und keinen Inhalt der erwarteten "
+            "Lösung. Gib einen Denkanstoss, der auf den Fall oder das Material verweist, ohne das Ergebnis "
+            "vorwegzunehmen; aufgreifen darfst du nur, was in der Aufgabe oder in der Antwort des Lernenden steht.")
+
+
+def ohne_verratene_saetze(text: str, gesperrt: set[str]) -> str:
+    """D-21: Entfernt die Sätze, die einen gesperrten Stamm enthalten."""
+    saetze = [s for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s]
+    return " ".join(s for s in saetze if not verratene_woerter(s, gesperrt))
+
+
 HINWEIS_AEHNLICH = 0.75
 
 

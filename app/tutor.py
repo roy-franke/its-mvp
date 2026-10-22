@@ -949,6 +949,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
     letzte = vorher[-1] if vorher else None
     alte_elemente = [e for e in (letzte or {}).get("elemente") or [] if isinstance(e, dict)]
     frueher_hinweise = [v.get("hinweis", "") for v in vorher if v.get("hinweis")]
+    # D-21: Was die lernende Person selbst geschrieben hat, darf der Tutor aufgreifen
+    antworten_lernende = [answer] + [str(v.get("antwort") or "") for v in vorher]
     if letzte:
         kontext += (f"Bisheriger Versuch des Lernenden: {letzte.get('antwort', '')}\n"
                     + (f"Dein Hinweis dazu: {letzte.get('hinweis', '')}\n" if letzte.get("hinweis") else ""))
@@ -995,7 +997,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                 or didaktik.musterloesung_erwaehnt(f"{d.get('feedback', '')} {d.get('hinweis', '')}")
                 or didaktik.hinweis_wiederholt(d.get("hinweis", ""), frueher_hinweise)
                 or didaktik.vorsicht_bemaengelt(d, answer, offene_punkte)
-                or didaktik.fachbegriff_trotzdem_ungenau(d, task, answer))
+                or didaktik.fachbegriff_trotzdem_ungenau(d, task, answer)
+                or didaktik.loesung_verraten(d, task, antworten_lernende))
     data = _chat(
         lesson, [f"{task.get('inhalt', '')} {task.get('frage', '')}", answer],
         "AUFGABE: ANTWORT_BEWERTEN\n"
@@ -1049,7 +1052,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "deshalb nicht abschliessend beurteilen kannst.\n"
         "Formuliere den Hinweis als Anstoss, nicht als neue Frage, die statt der Aufgabe "
         "beantwortet werden soll. Verrate die Lösung nie, auch nicht implizit, und sprich nie von "
-        "der «Musterlösung»: Der Lernende kennt sie nicht.\n\n"
+        "der «Musterlösung»: Der Lernende kennt sie nicht.\n"
+        + OHNE_LOESUNG_REGEL + "\n"
         'Format: {"elemente": [{"element": "zentrales Element", '
         '"status": "korrekt|vertretbar|ungenau|nicht_beurteilbar|falsch|fehlt", '
         '"begruendung": "ein Satz", "antwort": "was der Lernende dazu schreibt", '
@@ -1087,8 +1091,43 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
     if urteil and urteil != data["bewertung"]:
         data["bewertung_modell"] = data["bewertung"]
         data["bewertung"] = urteil
+    if not didaktik.ist_multiple_choice(task):
+        # D-21 AK 4: Verrät der Text nach dem Korrekturversuch noch die Lösung, wird ersetzt bzw. gekürzt
+        gesperrt = didaktik.gesperrte_staemme(task, data["elemente"], antworten_lernende)
+        if didaktik.verratene_woerter(data.get("hinweis", ""), gesperrt):
+            data["hinweis"] = hinweis_ohne_loesung(data["elemente"], gesperrt)
+            data["hinweis_ersetzt"] = True
+        if didaktik.verratene_woerter(data.get("feedback", ""), gesperrt):
+            data["feedback"] = (didaktik.ohne_verratene_saetze(data.get("feedback", ""), gesperrt)
+                                or FEEDBACK_OHNE_LOESUNG.get(data["bewertung"], FEEDBACK_OHNE_LOESUNG["teilweise"]))
+            data["feedback_gekuerzt"] = True
     data["korrekt"] = data["bewertung"] == "korrekt"
     return data
+
+
+# D-21: Feedback und Hinweis verraten die erwartete Lösung nicht (gilt nicht für Multiple Choice)
+OHNE_LOESUNG_REGEL = (
+    "Ist ein Teil noch nicht erfüllt, nennst du in Feedback und Hinweis keinen Begriff und keinen Inhalt der "
+    "erwarteten Lösung zu diesem Teil, den der Lernende nicht selbst geschrieben hat; du benennst nur, welcher Teil "
+    "fehlt oder noch nicht genügt, und verweist auf den Fall oder das Material.\n")
+
+FEEDBACK_OHNE_LOESUNG = {
+    "teilweise": "Ein Teil deiner Antwort stimmt, ein Teil genügt noch nicht.",
+    "falsch": "Deine Antwort trifft den Fall noch nicht.",
+}
+
+
+def hinweis_ohne_loesung(elemente: list[dict], gesperrt: set[str]) -> str:
+    """D-21 AK 4: Ersatzhinweis ohne gesperrte Stämme."""
+    offen = next((e for e in elemente if e.get("status") not in GELTEN_ALS_RICHTIG), None)
+    name = (offen or {}).get("element", "")
+    kandidaten = [hinweis_aus_elementen(elemente),
+                  f"Zu «{name}» genügt deine Antwort noch nicht. Lies den Fall nochmals und überleg, was er dazu "
+                  "genau hergibt." if name else "",
+                  "Ein Teil deiner Antwort genügt noch nicht. Lies den Fall nochmals und überleg, was er dazu "
+                  "genau hergibt."]
+    return next((k for k in kandidaten if k and not didaktik.verratene_woerter(k, gesperrt)),
+                "Lies den Fall nochmals genau.")
 
 
 # D-16: fachneutral formuliert, gilt für jedes Fach

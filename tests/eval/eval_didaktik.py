@@ -4,7 +4,7 @@ Läuft NICHT in der normalen Testsuite, sondern von Hand, nachdem ein echtes
 Modell in der .env konfiguriert ist (z.B. LLM_PROVIDER=ollama mit qwen3:30b).
 Das Skript ruft die Tutorlogik direkt auf (ohne Server), prüft die
 Akzeptanzkriterien der Pakete D-01 bis D-12 (Auftrag 2: D-07 bis D-12, T-09; Auftrag 3: D-13 bis D-18
-mit den Regressionsfällen aus Anhang B) und schreibt einen lesbaren Bericht nach tests/eval/berichte/.
+mit den Regressionsfällen aus Anhang B; Auftrag 5: D-19 bis D-21 mit der Bäckerei-Aufgabe) und schreibt einen lesbaren Bericht nach tests/eval/berichte/.
 
     python tests/eval/eval_didaktik.py                  # alle Pakete
     python tests/eval/eval_didaktik.py D-01 D-05        # nur ausgewählte
@@ -12,7 +12,7 @@ mit den Regressionsfällen aus Anhang B) und schreibt einen lesbaren Bericht nac
     python tests/eval/eval_didaktik.py --mock           # Rauchtest ohne Modell
     python tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <id-der-version-3>
     python tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09        # Auftrag 3
-    python tests/eval/eval_didaktik.py D-19 D-20 --haftung <id-der-version-3>    # Auftrag 5
+    python tests/eval/eval_didaktik.py D-19 D-20 D-21 --haftung <id-der-version-3>   # Auftrag 5
 
 Mit qwen3:30b auf a9-mega dauert ein vollständiger Lauf je nach Anzahl
 etwa 30 bis 60 Minuten. Die Anzahl Aufgaben pro Niveau lässt sich mit
@@ -1104,6 +1104,30 @@ def eval_d20(b: Bericht, anzahl: int):
     art = r["elemente"][1]["status"] if len(r.get("elemente") or []) > 1 else "?"
     b.ak("D-20", "AK 3 ohne Fachbegriff bleibt die Art der Haftung ungenau oder fehlend",
          art in ("ungenau", "fehlt"), f"{r['bewertung']} · {_el(r)}")
+
+
+@paket("D-21")
+def eval_d21(b: Bericht, anzahl: int):
+    """Hinweis und Feedback nennen die erwartete Antwort nicht (Entscheid E1)."""
+    from app import didaktik, tutor
+    task, antwort = BAECKEREI["aufgabe"], BAECKEREI["antworten"]["d21_teilweise"]
+    lesson = _mit_strenge(lektion(HAFTUNG), "ausgewogen")
+    b.abschnitt("D-21 Hinweis ohne Lösung", f"Antwort «{antwort}» (ohne den gesuchten Begriff), {LAEUFE} Läufe.")
+    hinweis_ok = feedback_ok = ersetzt = 0
+    for i in range(LAEUFE):
+        r = tutor.evaluate_answer(lesson, tutor.new_profile(), task, antwort)
+        gesperrt = didaktik.gesperrte_staemme(task, r.get("elemente"), [antwort]) | {"fahrlässig"}
+        vh = didaktik.verratene_woerter(r.get("hinweis", ""), gesperrt)
+        vf = didaktik.verratene_woerter(r.get("feedback", ""), gesperrt)
+        hinweis_ok += not vh
+        feedback_ok += not vf
+        ersetzt += bool(r.get("hinweis_ersetzt") or r.get("feedback_gekuerzt"))
+        b.text(f"- Lauf {i + 1}: **{r['bewertung']}** · Hinweis: {r.get('hinweis', '')}"
+               f"{' (ersetzt)' if r.get('hinweis_ersetzt') else ''}\n  Feedback: {zitat(r.get('feedback'), 300)[2:]}"
+               + (f"\n  Verraten: {', '.join(vh + vf)}" if vh or vf else ""))
+    b.ak("D-21", "AK 1 kein Hinweis nennt den gesuchten Begriff", hinweis_ok == LAEUFE, f"{hinweis_ok} von {LAEUFE}")
+    b.ak("D-21", "AK 3 kein Feedbacktext nennt den gesuchten Begriff", feedback_ok == LAEUFE, f"{feedback_ok} von {LAEUFE}")
+    b.ak("D-21", "Ersatz nach bleibendem Verstoss (Information)", True, f"{ersetzt} von {LAEUFE}")
 
 
 def vergleich_mit_vorlauf(b: Bericht, name: str = "eval_2026-10-12_1613.md") -> None:
