@@ -5,8 +5,8 @@ zusammen. Es dient als Kontext für eine neue Claude-Session (z.B. auf einem
 anderen Rechner), damit dort ohne Unterbruch weitergearbeitet werden kann.
 Lies zusätzlich das `README.md` im Projektstamm.
 
-Stand: 15. Oktober 2026, Version 0.5.0 (nachgeführt nach Auftrag 4, Feedback von Pascal vom
-13.10.2026: Pakete L-01 bis L-03 und T-27 bis T-31)
+Stand: 22. Oktober 2026, Version 0.6.0 (nachgeführt nach Auftrag 5, Feedback zum Test vom
+20.10.2026: Pakete D-19 bis D-21, L-04 und N-06)
 
 ## 1. Projektkontext
 
@@ -153,6 +153,23 @@ der Systemprompt nennt nur die Quellen (T-30). Neue Ereignisse: `rag_abruf`,
 mit Commit-Hash aus `.git` im Fuss jeder Seite (T-31). Entscheide und Experiment in
 `docs/AUFTRAG-4.md`.
 
+Auftrag 5 (22.10.2026, Feedback zum Test vom 20.10.2026 mit «Haftungsrecht Version 3», Version 0.6.0):
+Die Bewertung misst jedes Element an der Tiefe, die die Frage erkennbar verlangt (`tutor.TIEFE_DER_FRAGE`,
+D-19), und akzeptiert sinngleiche Formulierungen mit demselben Fachbegriff (`tutor.GLEICHE_BEDEUTUNG`,
+Prüfung `didaktik.fachbegriff_trotzdem_ungenau`, D-20). Feedback und Hinweis verraten keine Schlüsselbegriffe
+oder erwarteten Inhalte noch nicht erfüllter Elemente, ausser die lernende Person hat sie selbst geschrieben
+(`didaktik.loesung_verraten`, Ersatzhinweis `tutor.hinweis_ohne_loesung`, Feedback gekürzt; nicht bei
+Multiple Choice, D-21). Testfall ist die Bäckerei-Aufgabe in `tests/daten/baeckerei.json` (Sachverhalt
+rekonstruiert). Der Editor einer archivierten Lektion zeigt kein Formular mehr, und die Materialdetails
+verlinken archivierte Lektionen nicht in den Editor (L-04). Teaching Mode (N-06): Spalte `sessions.teaching`
+(Migration), `teaching: true` beim Start (nur Lehrpersonen, zählt als Testlauf), Endpunkte
+`/api/session/{sid}/anweisung/vorschlag`, `/api/session/{sid}/anweisung` und
+`DELETE /api/teacher/lessons/{id}/anweisungen/{aid}`, Liste `tutor_anweisungen` in der Lektion (Text, Geltung
+`thema` oder `lektion`, Konzept, Schrittart, Zeitpunkt, Sequenz), Ereignis `tutor_anweisung`, Schrittart
+`ANWEISUNG_VERALLGEMEINERN`. Anweisungen für die Lektion stehen im Systemprompt, solche zu einem Thema über
+`tutor._chat(konzept=…)` im Benutzerteil aller Anfragen zu diesem Konzept; ohne Anweisungen sind alle Prompts
+zeichengleich mit dem Stand vor N-06. Entscheide in `docs/AUFTRAG-5.md`.
+
 Prüfwerkzeuge neben pytest: `tests/ui/ui_checks.py` (Playwright gegen eine
 eigens gestartete Instanz) und `tests/eval/eval_didaktik.py` (Evaluation der
 didaktischen Pakete gegen das echte Modell, schreibt einen Bericht nach
@@ -272,6 +289,7 @@ Noch offen: gleiches Tunnel-Muster später für RIB-AI-01 im Pilot.
 3. **Anpassungen aus dem zweiten Testdurchlauf – UMGESETZT (11.10.2026)**: T-08 bis T-24, D-07 bis D-12, 495 pytest-Tests und 152 Playwright-Prüfungen grün. Evaluation und Diagnose gegen qwen3:30b am 12.10.2026 auf a9-mega gelaufen: alle Kriterien D-07 bis D-12 erfüllt, 0 Fallbacks und 0 leere Antworten bei rund 200 Aufrufen; Ursache der leeren Antworten belegt, Tokenschätzung kalibriert (3.4 Zeichen pro Token). Offen: Klassentest. Ausblick laut Auftrag: lektionsspezifische Witze im Editor, Wahl auch nach falscher Antwort, automatisches Kürzen oder RAG für grosses Material.
 3b. **Anpassungen aus dem dritten Testdurchlauf – UMGESETZT (13.10.2026)**: T-25, T-26, D-13 bis D-18 nach den Entscheiden E1 bis E6 (Vorschläge), pytest und Playwright grün. Offen: Evaluation mit qwen3:30b auf a9-mega (`tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09`), Auswertung von Christians its.db vom 13.10.2026 und der Lektion «Haftungsrecht Version 3». Ausblick laut Auftrag: Musterlösungen durch die Lehrperson korrigieren, Auswertung pro Lektion nach Widerspruch, Selbstkorrekturen und unsicheren Musterlösungen, geprüfte Fallaufgaben für normative Fächer.
 3c. **Auftrag 4 (Feedback Pascal) – UMGESETZT (15.10.2026)**: L-01 bis L-03, T-27 bis T-31, Version 0.5.0. Offen: auf a9-mega `qwen3-embedding:0.6b` laden, Chroma starten, `tests/eval/eval_chunking.py --embedder its --dateien <OR.pdf>` laufen lassen und Overlap (E6) sowie die RAG-Schwelle (E5) bestätigen; danach eine Lektion mit dem ganzen OR als Material testen. Ausblick laut Feedback: Freitextsuche über die Vektordatenbank bei der Auswahl (gestrichener Punkt 2a), Umzug von Katalog und Vektoren nach PostgreSQL/pgvector, falls auch die Sessions dorthin wandern.
+3d. **Auftrag 5 (Test vom 20.10.2026) – UMGESETZT (22.10.2026)**: D-19 bis D-21, L-04, N-06, Version 0.6.0. Offen: auf a9-mega `tests/eval/eval_didaktik.py D-19 D-20 D-21 --haftung <id-der-version-3>` und die bestehenden Pakete mit qwen3:30b laufen lassen (AK mit 4 von 5 bzw. 5 Läufen), die Bäckerei-Aufgabe aus der its.db vom 20.10.2026 in `tests/daten/baeckerei.json` übernehmen und den Weg aus dem Test nachstellen, auf dem eine archivierte Lektion bearbeitet wurde (L-04 AK 5).
 4. **Prompt-Tuning** mit Roys Praxisbeobachtungen auf Basis der Evaluationsberichte (Vergleich Ollama vs. Cloud als Evaluationsergebnis).
 5. **Tutoring-Modi** (erklärend, sokratisch, prüfend, coaching) aus dem Systemkonzept; sokratische Hinweis-Treppe von LLMTutor als Vorlage.
 6. Später: RAG-Anbindung an P2 für grosse Materialmengen, KaTeX lokal bundeln, Klassenverwaltung.

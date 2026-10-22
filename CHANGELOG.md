@@ -5,6 +5,14 @@ Bis zum Pilotbetrieb bleibt die Hauptversion 0. Jeder Auftrag erhöht die Minor-
 Korrekturen ohne neue Funktion die Patch-Version. Die Oberfläche zeigt zusätzlich den
 Short-Hash des Commits, aus dem der Server läuft (`0.5.0+abc1234`).
 
+## 0.6.0 – 22.10.2026 (Auftrag 5, Feedback zum Test vom 20.10.2026)
+
+- D-19: Erwartete Begründungstiefe passt zur Frage.
+- D-20: Sinngleiche Formulierungen mit demselben Fachbegriff werden akzeptiert.
+- D-21: Hinweis und Feedback verraten die erwartete Antwort nicht.
+- L-04: Archivierte Lektionen lassen sich nicht bearbeiten.
+- N-06: Teaching Mode mit «Teach the Tutor» unter jedem Schritt des Tutors.
+
 ## 0.5.0 – 15.10.2026 (Auftrag 4, Feedback Pascal vom 13.10.2026)
 
 - L-01: Lernmaterialien global abgelegt, mit Metadaten (Name, Fächer, Niveau, Beschreibung,
