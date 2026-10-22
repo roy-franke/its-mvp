@@ -128,6 +128,14 @@
   .status.abgeschlossen { background: #f0fdf4; color: var(--ok); border-color: #bbf7d0; }
   .status.abgebrochen { background: #fef2f2; color: var(--err); border-color: #fecaca; }
   button.small { padding: 6px 12px; font-size: .85rem; }
+  /* N-06: Teaching Mode */
+  button.teach-btn { display: block; margin-top: 8px; padding: 3px 10px; font-size: .75rem; background: #fff;
+                     color: #6d28d9; border: 1px solid #c4b5fd; border-radius: 999px; }
+  .teach { margin-top: 8px; padding: 10px; border: 1px solid #c4b5fd; background: #faf5ff; border-radius: 10px;
+           font-size: .85rem; }
+  .teach textarea { width: 100%; box-sizing: border-box; min-height: 60px; font: inherit; margin: 4px 0; }
+  .teach label { display: block; margin: 4px 0; }
+  .teach .teach-meldung { margin-top: 6px; color: #6d28d9; }
   .linkbtn { background: none; border: 0; color: var(--muted); padding: 0; font: inherit;
              font-size: .85rem; text-decoration: underline; cursor: pointer; font-weight: 400; }
   .formerror { color: var(--err); font-size: .88rem; margin-top: 10px; }
@@ -428,7 +436,7 @@ function renderMath(el) {
   } catch { /* Formel im Rohtext anzeigen ist besser als Absturz */ }
 }
 
-function addMsg(cls, text, who) {
+function addMsg(cls, text, who, ohneTeach) {
   const div = document.createElement("div");
   div.className = "msg " + cls;
   if (who) {
@@ -440,10 +448,93 @@ function addMsg(cls, text, who) {
   if (/\btutor\b/.test(cls)) ITSFormat.anhaengen(div, text);
   else div.appendChild(document.createTextNode(text));
   renderMath(div);
+  if (teachingMode && /\btutor\b/.test(cls) && !ohneTeach) teachKnopf(div, text);
   $("chat").insertBefore(div, $("waiting"));
   $("chat").scrollTop = $("chat").scrollHeight;
   return div;
 }
+// ---------- N-06: Teaching Mode (nur in einer Teaching-Sequenz einer Lehrperson)
+//
+// Unter jedem Schritt des Tutors steht «Teach the Tutor». Die Anweisung gilt nur für das
+// Konzept des Schritts (Entscheid E5) oder wird für die ganze Lektion verallgemeinert (E6).
+let teachingMode = false, teachingStart = null, teachZaehler = 0;
+let schrittKontext = { art: "", konzept: "" };
+function schritt(art, konzept) { schrittKontext = { art, konzept: konzept || "" }; }
+function teachKnopf(div, text) {
+  const kontext = { ...schrittKontext, text: String(text || "").slice(0, 1500) };
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "teach-btn"; b.textContent = "Teach the Tutor";
+  b.onclick = () => { b.classList.add("hidden"); teachFormular(div, kontext, b); };
+  div.appendChild(b);
+}
+function teachFormular(div, k, knopf) {
+  const n = ++teachZaehler;
+  const box = document.createElement("div");
+  box.className = "teach";
+  box.innerHTML = `
+    <label for="teach-text-${n}"><strong>Anweisung an den Tutor</strong></label>
+    <textarea id="teach-text-${n}" class="teach-text" placeholder="Was soll der Tutor hier anders machen?"></textarea>
+    <label><input type="radio" name="teach-geltung-${n}" value="thema" ${k.konzept ? "checked" : "disabled"}>
+      Nur für dieses Thema${k.konzept ? ` («${esc(k.konzept)}»)` : " (zu diesem Schritt ist kein Thema bekannt)"}</label>
+    <label><input type="radio" name="teach-geltung-${n}" value="lektion" ${k.konzept ? "" : "checked"}>
+      Für die ganze Lektion verallgemeinern</label>
+    <div class="teach-vorschlag hidden">
+      <label for="teach-regel-${n}">Verallgemeinerte Fassung – prüfe und ändere sie bei Bedarf:</label>
+      <textarea id="teach-regel-${n}" class="teach-regel"></textarea>
+    </div>
+    <div class="btnrow">
+      <button type="button" class="small teach-ok">Speichern</button>
+      <button type="button" class="small secondary teach-abbrechen">Nicht speichern</button>
+    </div>
+    <div class="teach-meldung"></div>`;
+  div.appendChild(box);
+  const q = sel => box.querySelector(sel);
+  const geltung = () => box.querySelector(`input[name="teach-geltung-${n}"]:checked`).value;
+  const vorschlagDa = () => !q(".teach-vorschlag").classList.contains("hidden");
+  const beschriften = () => {
+    q(".teach-ok").textContent = geltung() === "thema" ? "Speichern"
+      : vorschlagDa() ? "Bestätigen und speichern" : "Verallgemeinern";
+  };
+  box.querySelectorAll(`input[name="teach-geltung-${n}"]`).forEach(r => r.onchange = () => {
+    if (geltung() === "thema") q(".teach-vorschlag").classList.add("hidden");
+    q(".teach-meldung").textContent = "";
+    beschriften();
+  });
+  beschriften();
+  q(".teach-text").focus();
+  q(".teach-abbrechen").onclick = () => { box.remove(); knopf.classList.remove("hidden"); };
+  q(".teach-ok").onclick = async () => {
+    const text = q(".teach-text").value.trim();
+    if (!text) { q(".teach-text").focus(); return; }
+    const ok = q(".teach-ok");
+    ok.disabled = true;
+    q(".teach-meldung").textContent = "";
+    try {
+      if (geltung() === "lektion" && !vorschlagDa()) {
+        const v = await api(`/session/${sessionId}/anweisung/vorschlag`,
+          { text, konzept: k.konzept, schrittart: k.art, schritt_text: k.text });
+        q(".teach-regel").value = v.vorschlag;
+        q(".teach-vorschlag").classList.remove("hidden");
+        if (v.fallback) q(".teach-meldung").textContent = "Die Verallgemeinerung hat nicht geklappt. Dein eigener " +
+          "Text steht als Vorschlag da; du kannst ihn anpassen und speichern.";
+        beschriften();
+        q(".teach-regel").focus();
+        return;
+      }
+      const lektion = geltung() === "lektion";
+      const regel = lektion ? q(".teach-regel").value.trim() : text;
+      if (!regel) { q(".teach-regel").focus(); return; }
+      const d = await api(`/session/${sessionId}/anweisung`, { text: regel, geltung: geltung(),
+        konzept: k.konzept, schrittart: k.art, original: lektion ? text : "" });
+      box.innerHTML = `<div class="teach-meldung">✔ Anweisung gespeichert (${lektion ? "für die ganze Lektion"
+        : `zum Thema «${esc(k.konzept)}»`}, Lektion jetzt Version ${d.version}). Sie gilt ab dem nächsten Schritt
+        des Tutors.</div>`;
+    } catch (e) {
+      q(".teach-meldung").textContent = e.message;
+    } finally { if (box.querySelector(".teach-ok")) ok.disabled = false; }
+  };
+}
+
 // N-01: kleine Quellenzeile unter einem Theorieschritt. Der Server liefert
 // nur Quellen, die es in der Lektion gibt; ohne Quelle entfällt die Zeile.
 function quellenZeile(div, quelle) {
@@ -668,6 +759,9 @@ async function loadMe() {
 
 async function init() {
   try { await loadMe(); } catch { me = { name: null }; }
+  // N-06: «Im Teaching Mode testen» aus der Lektionsverwaltung (nur Lehrpersonen)
+  const teaching = new URLSearchParams(location.search).get("teaching");
+  if (teaching) teachingStart = teaching;
   if (me.name) await showHome(); else show("view-start");
 }
 
@@ -734,6 +828,12 @@ async function showHome() {
   $("lesson-select").innerHTML = lessons.map(l =>
     `<option value="${esc(l.id)}">${esc(l.titel)}</option>`).join("");
   $("btn-start").disabled = lessons.length === 0;
+  if (teachingStart) {
+    const lid = teachingStart;
+    teachingStart = null;
+    history.replaceState(null, "", location.pathname);
+    try { await startLesson(lid, false, false, true); } catch (err) { showError("start-error", err.message); }
+  }
 }
 
 $("seq-list").onclick = async e => {
@@ -756,7 +856,7 @@ $("btn-start").onclick = async () => {
   finally { $("btn-start").disabled = false; }
 };
 
-async function startLesson(lessonId, neuBeginnen, fragen) {
+async function startLesson(lessonId, neuBeginnen, fragen, teaching) {
   if (fragen) {
     const ok = await confirmDialog("Neu beginnen? Deine bisherige Lernsequenz zu dieser Lektion " +
       "wird archiviert. Deine Lehrperson sieht sie weiterhin, du selbst kannst sie danach " +
@@ -768,19 +868,22 @@ async function startLesson(lessonId, neuBeginnen, fragen) {
   try {
     let d;
     try {
-      d = await api("/session/start", { lesson_id: lessonId, neu_beginnen: neuBeginnen });
+      d = await api("/session/start", { lesson_id: lessonId, neu_beginnen: neuBeginnen,
+                                         ...(teaching ? { teaching: true } : {}) });
     } catch (e) {
       if (e.status !== 409 || !e.detail || e.detail.code !== "sequenz_existiert") throw e;
       const fortsetzbar = ["aktiv", "pausiert"].includes(e.detail.status);
       const wahl = await confirmDialog("Zu dieser Lektion hast du schon eine Lernsequenz " +
         `(Status: ${STATUS_LABEL[e.detail.status] || e.detail.status}). Neu beginnen archiviert ` +
-        "den bisherigen Stand.", "Neu beginnen", fortsetzbar ? "Bisherige fortsetzen" : null,
+        "den bisherigen Stand.", "Neu beginnen", fortsetzbar && !teaching ? "Bisherige fortsetzen" : null,
         "Zurück zur Übersicht");
       if (wahl === "alt") return resumeSession(e.detail.session_id);
       if (wahl !== "ok") return;
-      d = await api("/session/start", { lesson_id: lessonId, neu_beginnen: true });
+      d = await api("/session/start", { lesson_id: lessonId, neu_beginnen: true,
+                                         ...(teaching ? { teaching: true } : {}) });
     }
     sessionId = d.session_id;
+    teachingMode = !!d.teaching;
     questions = d.questions;
     setLessonHeader(d.lesson);
     qIndex = 0; assessAnswers = [];
@@ -799,6 +902,7 @@ function setLessonHeader(lesson) {
 async function resumeSession(sid) {
   const st = await api(`/session/${sid}/fortsetzen`);
   sessionId = sid;
+  teachingMode = !!st.teaching;
   pendingNext = null;
   setLessonHeader(st.lesson);
   if (st.wartet_auf === "einstufung") {
@@ -1012,6 +1116,7 @@ async function nextTask(adaptation) {
 
 // Darstellung eines Theorie- bzw. Aufgabenschritts, live und beim Fortsetzen gleich (T-14)
 function zeigeTheorie(t) {
+  schritt("theorie", t.konzept);
   const titel = (t.nochmals_anders ? "Nochmals anders erklärt: " : "") + (t.titel || "");
   const m = addMsg("tutor theory", (titel ? "### 📖 " + titel + "\n\n" : "") + (t.inhalt || "") +
     (t.beispiel ? "\n\n💡 **Beispiel:** " + t.beispiel : ""), "Tutor – Theorie");
@@ -1019,13 +1124,15 @@ function zeigeTheorie(t) {
   return m;
 }
 function zeigeAufgabe(t) {
-  addMsg("tutor", (t.titel ? "### " + t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor");
+  schritt("aufgabe", t.konzept);
+  addMsg("tutor", (t.titel ? "### " + t.titel + "\n\n" : "") + (t.inhalt || ""), "Tutor", !!t.frage);
   if (t.frage) {
     const optionen = (t.optionen || []).map((o, i) => `${"ABCDEFGH"[i]}) ${o}`).join("\n");
     addMsg("tutor question", "❓ " + t.frage + (optionen ? "\n\n" + optionen : ""), "Tutor");
   }
 }
 function zeigeTutorAntwort(d) {
+  schritt("antwort", d.konzept || (currentTask && currentTask.konzept) || schrittKontext.konzept);
   if (d.internet) {
     // N-03: Internetrecherche mit Quellenlinks und Hinweis auf fehlende Prüfung
     const m = addMsg("tutor extern web", d.antwort ?? d.text,
@@ -1091,6 +1198,7 @@ function renderFeedback(d) {
   let fb = label + (d.feedback || "");
   if (d.hinweis) fb += "\n💡 Hinweis: " + d.hinweis;
   const cls = d.bewertung === "korrekt" ? "good" : d.bewertung === "teilweise" ? "mid" : "bad";
+  schritt("bewertung", (currentTask && currentTask.konzept) || schrittKontext.konzept);
   addMsg("tutor " + cls, fb, "Tutor");
   // N-04: nur bei deutlicher Abweichung zwischen Sicherheit und Ergebnis
   if (d.selbsteinschaetzung) addMsg("tutor selbst", "🪞 " + d.selbsteinschaetzung, "Tutor · Selbsteinschätzung");

@@ -82,6 +82,8 @@ def _migrate(c):
     _add_column(c, "sessions", "status", "TEXT NOT NULL DEFAULT 'aktiv'")
     _add_column(c, "sessions", "status_at", "REAL")
     _add_column(c, "sessions", "archived_at", "REAL")
+    # N-06: Testläufe im Teaching Mode
+    _add_column(c, "sessions", "teaching", "INTEGER NOT NULL DEFAULT 0")
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             key TEXT PRIMARY KEY,
@@ -133,16 +135,16 @@ def _migrate_t05(c):
 
 
 def create_session(name: str, lesson_id: str, profile: dict, testlauf: bool = False,
-                   user_key: str | None = None) -> str:
+                   user_key: str | None = None, teaching: bool = False) -> str:
     sid = uuid.uuid4().hex[:12]
     now = time.time()
     with _conn() as c:
         c.execute(
             "INSERT INTO sessions (id, name, lesson_id, phase, profile, created_at, updated_at, "
-            "testlauf, user_key, status, status_at) "
-            "VALUES (?, ?, ?, 'assessment', ?, ?, ?, ?, ?, 'aktiv', ?)",
+            "testlauf, user_key, status, status_at, teaching) "
+            "VALUES (?, ?, ?, 'assessment', ?, ?, ?, ?, ?, 'aktiv', ?, ?)",
             (sid, name, lesson_id, json.dumps(profile, ensure_ascii=False), now, now,
-             int(testlauf), user_key or normalize_user(name), now),
+             int(testlauf), user_key or normalize_user(name), now, int(teaching)),
         )
     return sid
 

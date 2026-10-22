@@ -1416,6 +1416,8 @@ STRUKTUR: dict[str, dict[str, tuple[str, bool]]] = {
     "MUSTERLOESUNG_PRUEFEN": {"loesung": ("text", True), "offene_punkte": ("liste", False),
                               "merkmale_im_fall": ("bool", False)},
     "MUSTERLOESUNG_VERGLEICHEN": {"uebereinstimmend": ("bool", True), "unterschied": ("text", False)},
+    # N-06: Verallgemeinerung einer Anweisung im Teaching Mode
+    "ANWEISUNG_VERALLGEMEINERN": {"regel": ("text", True)},
 }
 
 _TYPNAME = {"text": "ein Text", "liste_text": "eine Liste von Texten",

@@ -157,6 +157,7 @@ async function load() {
         <button class="secondary" data-act="duplicate">Duplizieren</button>
         ${l.archiviert ? `<button class="secondary" data-act="restore">Wiederherstellen</button>`
           : `<button class="secondary" data-act="edit">Bearbeiten</button>
+        <button class="secondary" data-act="teaching">Im Teaching Mode testen</button>
         <button class="danger" data-act="archive">Archivieren</button>`}
       </div></td>
     </tr>`).join("");
@@ -167,6 +168,8 @@ $("rows").onclick = async e => {
   if (!btn) return;
   const id = btn.closest("tr").dataset.id;
   if (btn.dataset.act === "edit") location.href = `/teacher/lessons/${encodeURIComponent(id)}/edit`;
+  // N-06: Testlauf mit «Teach the Tutor» unter jedem Schritt
+  if (btn.dataset.act === "teaching") location.href = `/?teaching=${encodeURIComponent(id)}`;
   if (btn.dataset.act === "view") showDetail(id);
   if (btn.dataset.act === "archive") confirmArchive(id);
   if (btn.dataset.act === "restore") {

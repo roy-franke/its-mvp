@@ -207,6 +207,7 @@ class StartRequest(BaseModel):
     code: str | None = None   # Zugangscode der Klasse (falls konfiguriert)
     pin: str | None = None    # optionale PIN (Entscheid E7)
     neu_beginnen: bool = False  # bestehende Sequenz dieser Lektion archivieren
+    teaching: bool = False      # N-06: Testlauf im Teaching Mode (nur Lehrpersonen)
 
 
 class AssessRequest(BaseModel):
@@ -455,6 +456,24 @@ def lesson_delete(lesson_id: str):
     _save_lesson(lesson)
     log.info("Lektion archiviert: %s", lesson_id)
     return {"ok": True, "id": lesson_id}
+
+
+@teacher_api.delete("/lessons/{lesson_id}/anweisungen/{aid}")
+def anweisung_loeschen(lesson_id: str, aid: str):
+    """N-06, Entscheid E7: einzelne Anweisung aus dem Teaching Mode löschen (erhöht die Version)."""
+    lesson = load_lesson(lesson_id)
+    if lesson.get("archiviert"):
+        raise HTTPException(409, "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten.")
+    vorher = lesson.get("tutor_anweisungen") or []
+    rest = [a for a in vorher if not (isinstance(a, dict) and a.get("id") == aid)]
+    if len(rest) == len(vorher):
+        raise HTTPException(404, "Diese Anweisung gibt es nicht.")
+    lesson["tutor_anweisungen"] = rest
+    lesson["version"] = int(lesson.get("version", 1)) + 1
+    lesson["geaendert_am"] = time.time()
+    _save_lesson(lesson)
+    log.info("Anweisung an den Tutor gelöscht: %s (Version %s)", lesson_id, lesson["version"])
+    return {"ok": True, "version": lesson["version"], "tutor_anweisungen": rest}
 
 
 # Felder, die beim Duplizieren nicht übernommen werden (T-17)
@@ -802,6 +821,8 @@ def start_session(req: StartRequest, request: Request, response: Response):
     archiviert und eine neue angelegt.
     """
     ident = auth.identity(request)
+    if req.teaching and not auth.is_teacher(request):
+        raise HTTPException(403, "Den Teaching Mode können nur Lehrpersonen starten.")
     if req.name and (ident.via != "header") and auth.normalize_user(req.name) != ident.key:
         name = _login_learner(request, response, req.name, req.code, req.pin)
     elif ident.name:
@@ -822,12 +843,13 @@ def start_session(req: StartRequest, request: Request, response: Response):
                 "message": "Zu dieser Lektion gibt es bereits eine Lernsequenz."})
         store.set_status(bestehend["id"], "archiviert", "Neu begonnen")
     profile = tutor.new_profile()
-    testlauf = ident.is_teacher
-    sid = store.create_session(name, lesson_id, profile, testlauf=testlauf, user_key=user_key)
+    testlauf = ident.is_teacher or req.teaching     # N-06: zählt wie ein Testlauf
+    sid = store.create_session(name, lesson_id, profile, testlauf=testlauf, user_key=user_key,
+                               teaching=req.teaching)
     einstufung = tutor.generate_assessment_detail(lesson)
     questions = einstufung["questions"]
     store.log_event(sid, "session_started", {"name": name, "lesson": lesson["titel"],
-                                             "testlauf": testlauf})
+                                             "testlauf": testlauf, **({"teaching": True} if req.teaching else {})})
     _log_llm_meta(sid, "EINSTUFUNGSFRAGEN", einstufung)      # T-10: Fallback sichtbar
     store.log_event(sid, "assessment_questions", {"questions": questions,
                                                   "quelle": einstufung["quelle"]})
@@ -838,6 +860,7 @@ def start_session(req: StartRequest, request: Request, response: Response):
         "lesson": {"titel": lesson["titel"], "lernziele": lesson["lernziele"]},
         "questions": questions,
         "total_steps": tutor.total_steps(),
+        **({"teaching": True} if req.teaching else {}),
     }
 
 
@@ -1675,7 +1698,77 @@ def resume(sid: str, request: Request):
     # T-14: der ganze bisherige Dialog, ohne LLM-Aufruf, nur aus dem Event-Log
     zustand = _state(store.get_session(sid))
     zustand["verlauf"] = tutor.verlauf_fuer_lernende(store.get_events(sid), fuer_fortsetzen=True)[0]
+    if s.get("teaching"):
+        zustand["teaching"] = True          # N-06
     return zustand
+
+
+# ---------------------------------------------------------------- N-06 Teaching Mode
+
+class AnweisungVorschlagRequest(BaseModel):
+    text: str
+    konzept: str = ""
+    schrittart: str = ""
+    schritt_text: str = ""
+
+
+class AnweisungRequest(BaseModel):
+    text: str
+    geltung: str                # thema | lektion
+    konzept: str = ""
+    schrittart: str = ""
+    original: str = ""          # bei «lektion»: eigener Text vor der Verallgemeinerung
+
+
+def _teaching(request: Request, sid: str) -> tuple[dict, dict]:
+    """N-06: Anweisungen gibt es nur für die Lehrperson in ihrer eigenen Teaching-Sequenz."""
+    s = _owned(request, sid)
+    ident = auth.identity(request)
+    if not auth.is_teacher(request) or ident.key != s["user_key"] or not s.get("teaching"):
+        raise HTTPException(403, "Anweisungen an den Tutor gibt es nur im Teaching Mode einer Lehrperson.")
+    lesson = load_lesson(s["lesson_id"])
+    if lesson.get("archiviert"):
+        raise HTTPException(409, "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten.")
+    return s, lesson
+
+
+@app.post("/api/session/{sid}/anweisung/vorschlag")
+def anweisung_vorschlag(sid: str, req: AnweisungVorschlagRequest, request: Request):
+    """N-06, Entscheid E6: verallgemeinerte Fassung einer Anweisung für die ganze Lektion."""
+    _, lesson = _teaching(request, sid)
+    if not req.text.strip():
+        raise HTTPException(422, "Schreib zuerst eine Anweisung.")
+    return tutor.anweisung_verallgemeinern(lesson, req.text.strip(), req.konzept.strip(),
+                                           req.schrittart.strip(), req.schritt_text)
+
+
+@app.post("/api/session/{sid}/anweisung")
+def anweisung_speichern(sid: str, req: AnweisungRequest, request: Request):
+    """N-06: Anweisung an den Tutor speichern (Entscheide E5, E7, E8).
+
+    Sie gehört zur Lektion, erhöht deren Version und wirkt ab dem nächsten Aufruf des Tutors.
+    """
+    _, lesson = _teaching(request, sid)
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(422, "Schreib zuerst eine Anweisung.")
+    if req.geltung not in tutor.GELTUNGEN:
+        raise HTTPException(422, "Wähle, ob die Anweisung für dieses Thema oder die ganze Lektion gilt.")
+    konzept = req.konzept.strip()
+    if req.geltung == "thema" and not konzept:
+        raise HTTPException(422, "Zu diesem Schritt ist kein Thema bekannt. Wähle «Für die ganze Lektion».")
+    jetzt = time.time()
+    anweisung = {"id": os.urandom(5).hex(), "text": text[:2000], "geltung": req.geltung, "konzept": konzept,
+                 "schrittart": req.schrittart.strip(), "zeitpunkt": jetzt, "sequenz": sid}
+    if req.geltung == "lektion" and req.original.strip() and req.original.strip() != text:
+        anweisung["original"] = req.original.strip()[:2000]
+    lesson.setdefault("tutor_anweisungen", []).append(anweisung)
+    lesson["version"] = int(lesson.get("version", 1)) + 1
+    lesson["geaendert_am"] = jetzt
+    _save_lesson(lesson)
+    store.log_event(sid, "tutor_anweisung", dict(anweisung, version=lesson["version"]))
+    log.info("Anweisung an den Tutor gespeichert: %s (%s, Version %s)", lesson["id"], req.geltung, lesson["version"])
+    return {"anweisung": anweisung, "version": lesson["version"]}
 
 
 def _eigene(request: Request, sid: str) -> dict:

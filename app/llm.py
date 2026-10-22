@@ -428,6 +428,11 @@ def _mock_quelle(user: str) -> dict:
 
 def _mock_text(system: str, user: str) -> str:
     """Deterministischer Fake-Provider für Entwicklung und Demos ohne LLM."""
+    if _label(user) == "ANWEISUNG_VERALLGEMEINERN":
+        # N-06: der Text der Lehrperson als allgemeine Regel (für Tests und Playwright)
+        m = re.search(r"Anweisung der Lehrperson zu diesem Schritt:\s*(.+)", user)
+        return json.dumps({"regel": "In dieser Lektion gilt allgemein: " + (m.group(1).strip() if m else "")},
+                          ensure_ascii=False)
     if _label(user) == "WITZ":
         return json.dumps({"witz": "Warum hat das Lehrbuch so gute Laune? Es hat einfach für jedes "
                                    "Problem ein Kapitel. (Mock-Witz)"}, ensure_ascii=False)

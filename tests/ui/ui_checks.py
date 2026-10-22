@@ -1587,6 +1587,115 @@ def l04_archiviert_nicht_bearbeitbar(pw):
         check("L-04 ohne Skriptfehler", not fehler, "; ".join(fehler))
 
 
+@scenario("n06")
+def n06_teaching_mode(pw):
+    """N-06: Teaching Mode starten, «Teach the Tutor» in jedem Schritt, Anweisungen im Verlauf und im Editor."""
+    with server() as base:
+        httpx.delete(base + "/api/teacher/lessons/bruchbegriff-verstehen-und-anwenden")
+        page = launch(pw).new_page(viewport={"width": 1300, "height": 900})
+        fehler = []
+        page.on("pageerror", lambda e: fehler.append(str(e)))
+        page.goto(base + "/teacher/lessons")
+        page.check("#show-archived")
+        expect(page.locator("tr[data-id='bruchbegriff-verstehen-und-anwenden']")).to_have_count(1, timeout=10000)
+        check("N-06 AK1 Start nur bei nicht archivierten Lektionen",
+              page.locator("tr[data-id='haftungsrecht'] button[data-act='teaching']").count() == 1
+              and page.locator("tr[data-id='bruchbegriff-verstehen-und-anwenden'] button[data-act='teaching']").count() == 0)
+        page.locator("tr[data-id='haftungsrecht'] button[data-act='teaching']").click()
+        page.fill("#name", "LP Teaching")
+        page.click("#btn-login")
+        expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
+        for _ in range(3):
+            page.fill("#assess-answer", "weiss ich nicht")
+            page.click("#btn-assess")
+        expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
+        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        zur_aufgabe(page)
+        tutor_msgs = page.locator(".msg.tutor:not(.waiting)")
+        ohne = [i for i in range(tutor_msgs.count())
+                if tutor_msgs.nth(i).locator(".teach-btn").count() == 0
+                and not tutor_msgs.nth(i).evaluate("e => !!(e.nextElementSibling && e.nextElementSibling.matches('.msg.tutor.question'))")]
+        check("N-06 AK2 jeder Schritt des Tutors zeigt «Teach the Tutor»", tutor_msgs.count() > 0 and not ohne,
+              f"{len(ohne)} ohne Knopf von {tutor_msgs.count()}")
+        # Anweisung nur für dieses Thema (an der Frage der Aufgabe)
+        frage = page.locator(".msg.tutor.question").last
+        frage.locator(".teach-btn").click()
+        box = frage.locator(".teach")
+        box.locator("textarea.teach-text").fill("Verlange den Gesetzesartikel.")
+        check("N-06 Thema ist vorgewählt, wenn das Konzept bekannt ist",
+              box.locator("input[value='thema']").is_checked())
+        box.locator(".teach-ok").click()
+        expect(frage.locator(".teach-meldung")).to_contain_text("zum Thema", timeout=10000)
+        # Anweisung für die ganze Lektion: Vorschlag ansehen, ändern, bestätigen
+        theorie = page.locator(".msg.tutor.theory").first
+        theorie.locator(".teach-btn").click()
+        box = theorie.locator(".teach")
+        box.locator("textarea.teach-text").fill("Hier fehlt ein Beispiel aus dem Berufsalltag.")
+        box.locator("input[value='lektion']").check()
+        check("N-06 AK4 zuerst verallgemeinern", box.locator(".teach-ok").inner_text() == "Verallgemeinern")
+        box.locator(".teach-ok").click()
+        regel = box.locator("textarea.teach-regel")
+        expect(regel).to_be_visible(timeout=10000)
+        check("N-06 AK4 verallgemeinerte Fassung wird angezeigt",
+              regel.input_value().startswith("In dieser Lektion gilt allgemein"), regel.input_value())
+        regel.fill("Gib zu jeder Erklärung ein Beispiel aus dem Berufsalltag.")
+        check("N-06 AK4 Bestätigung verlangt", box.locator(".teach-ok").inner_text() == "Bestätigen und speichern")
+        box.locator(".teach-ok").click()
+        expect(theorie.locator(".teach-meldung")).to_contain_text("für die ganze Lektion", timeout=10000)
+        lektion = httpx.get(base + "/api/teacher/lessons/haftungsrecht").json()
+        texte = [a["text"] for a in lektion.get("tutor_anweisungen") or []]
+        check("N-06 AK4/AK5 bestätigte Fassung gespeichert",
+              texte == ["Verlange den Gesetzesartikel.", "Gib zu jeder Erklärung ein Beispiel aus dem Berufsalltag."],
+              str(texte))
+        # AK 6: Lernverlauf der Teaching-Sequenz
+        page.goto(base + "/teacher")
+        page.check("#show-tests")
+        page.locator(".seq-item").first.click()
+        expect(page.locator("#detail-events")).to_contain_text("Anweisung an den Tutor", timeout=10000)
+        check("N-06 AK6 beide Anweisungen im Lernverlauf",
+              page.locator("#detail-events").inner_text().count("Anweisung an den Tutor") == 2)
+        # AK 5: Editor listet die Anweisungen und löscht einzelne
+        page.goto(base + "/teacher/lessons/haftungsrecht/edit")
+        expect(page.locator("#anweisungen-liste li")).to_have_count(2, timeout=10000)
+        page.locator("#anweisungen-liste button[data-a='anweisung-loeschen']").first.click()
+        expect(page.locator("#anweisungen-liste li")).to_have_count(1, timeout=10000)
+        check("N-06 AK5 Löschen im Editor", "gelöscht" in page.locator("#result").inner_text()
+              and len(httpx.get(base + "/api/teacher/lessons/haftungsrecht").json()["tutor_anweisungen"]) == 1)
+        # AK 2: Im normalen Testlauf fehlt «Teach the Tutor»
+        page.goto(base + "/")
+        expect(page.locator("#view-home")).to_be_visible(timeout=10000)
+        page.select_option("#lesson-select", "haftungsrecht")
+        page.click("#btn-start")
+        page.locator("#modal-ok").click()            # bestehende Sequenz: neu beginnen
+        expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
+        for _ in range(3):
+            page.fill("#assess-answer", "weiss ich nicht")
+            page.click("#btn-assess")
+        expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
+        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        check("N-06 AK2 kein «Teach the Tutor» im normalen Testlauf",
+              page.locator(".msg.tutor").count() > 0 and page.locator(".teach-btn").count() == 0)
+        check("N-06 ohne Skriptfehler", not fehler, "; ".join(fehler))
+    with server(TEACHER_PASSWORD="geheim") as base:
+        page = launch(pw).new_page()
+        page.goto(base + "/?teaching=haftungsrecht")
+        page.fill("#name", "Lernende Teaching")
+        page.click("#btn-login")
+        expect(page.locator("#start-error")).to_contain_text("nur Lehrpersonen", timeout=10000)
+        check("N-06 AK1 Lernende können den Teaching Mode nicht starten",
+              page.locator("#view-learn").is_hidden() and page.locator(".teach-btn").count() == 0)
+        page.select_option("#lesson-select", "haftungsrecht")
+        page.click("#btn-start")
+        expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
+        for _ in range(3):
+            page.fill("#assess-answer", "weiss ich nicht")
+            page.click("#btn-assess")
+        expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
+        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        check("N-06 AK2 kein «Teach the Tutor» in Sequenzen von Lernenden",
+              page.locator(".msg.tutor").count() > 0 and page.locator(".teach-btn").count() == 0)
+
+
 @scenario("t28")
 def t28_stoppen(pw):
     """T-28: «Stoppen» während der Tutor arbeitet; die Nachricht steht wieder im Feld."""
