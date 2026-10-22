@@ -63,3 +63,33 @@ def test_ak4_lektion_archivieren_und_wiederherstellen():
     assert lid in [l["id"] for l in c.get("/api/lessons").json()]
     html = Path("static/lessons.html").read_text(encoding="utf-8")
     assert "Löschen" not in html and "gelöscht" not in html and "Wiederherstellen" in html
+
+
+def test_l04_ak3_archivierte_lektion_speichern_bleibt_unveraendert():
+    """L-04 AK 3: PUT auf eine archivierte Lektion antwortet mit 409, die Datei bleibt gleich."""
+    from app import main
+    c = TestClient(app)
+    lid = c.post("/api/teacher/lessons", json={"titel": "Archiv L-04", "lernziele": ["Ziel"],
+                                               "material": "Haftung nach Art. 41 OR. " * 10}).json()["id"]
+    c.delete(f"/api/teacher/lessons/{lid}")
+    datei = main._lesson_path(lid)
+    vorher = datei.read_bytes()
+    r = c.put(f"/api/teacher/lessons/{lid}", json={"titel": "Geändert", "lernziele": ["Ziel"],
+                                                   "material": "Anderes Material. " * 10})
+    assert r.status_code == 409
+    assert "archiviert" in r.json()["detail"]
+    assert datei.read_bytes() == vorher
+    d = c.get(f"/api/teacher/lessons/{lid}").json()
+    assert d["version"] == 1 and d["titel"] == "Archiv L-04" and d["archiviert"] is True
+    # AK 6: Nach dem Wiederherstellen ist die Lektion wieder bearbeitbar
+    c.post(f"/api/teacher/lessons/{lid}/wiederherstellen")
+    r = c.put(f"/api/teacher/lessons/{lid}", json={"titel": "Geändert", "lernziele": ["Ziel"],
+                                                   "material": "Anderes Material. " * 10})
+    assert r.status_code == 200 and r.json()["version"] == 2
+
+
+def test_l04_ak2_ak4_editor_und_materialdetails_sperren_archivierte_lektionen():
+    editor = Path("static/lesson_editor.html").read_text(encoding="utf-8")
+    assert "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten." in editor
+    js = Path("static/materialien.js").read_text(encoding="utf-8")
+    assert "l.archiviert ? `${esc(l.titel)} (archiviert)`" in js

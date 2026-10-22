@@ -594,7 +594,8 @@
       <div class="itsm-aktionen" style="justify-content:flex-start;margin-top:8px">
         <button type="button" class="itsm-btn sek klein" data-a="indexieren">Neu indexieren</button></div>
       <h3 style="font-size:.85rem;color:#64748b;text-transform:uppercase;margin:18px 0 6px">Verwendet in</h3>
-      <div>${(m.lektionen || []).length ? m.lektionen.map(l => `<a href="/teacher/lessons/${encodeURIComponent(l.id)}/edit">${esc(l.titel)}</a>${l.archiviert ? " (archiviert)" : ""}`).join(" · ") : '<span class="itsm-beschr">keiner Lektion</span>'}</div>
+      <div>${(m.lektionen || []).length ? m.lektionen.map(l => l.archiviert ? `${esc(l.titel)} (archiviert)`
+        : `<a href="/teacher/lessons/${encodeURIComponent(l.id)}/edit">${esc(l.titel)}</a>`).join(" · ") : '<span class="itsm-beschr">keiner Lektion</span>'}</div>
       <h3 style="font-size:.85rem;color:#64748b;text-transform:uppercase;margin:18px 0 6px">Textvorschau</h3>
       <div class="itsm-vorschau" id="itsm-text">Wird geladen …</div>
       <div class="itsm-aktionen">

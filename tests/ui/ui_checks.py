@@ -1517,6 +1517,76 @@ def l02_auswahl_im_editor(pw):
               page.locator(".itsm-box button[data-a=ja]").is_disabled())
 
 
+@scenario("l04")
+def l04_archiviert_nicht_bearbeitbar(pw):
+    """L-04: Kein Weg in den Editor einer archivierten Lektion; Duplizieren und Wiederherstellen wie bisher."""
+    with server() as base:
+        pfade = _testdateien(Path(tempfile.mkdtemp(prefix="its_ui_dateien_")))
+        c = httpx.Client(base_url=base)
+        with open(pfade["haftung.pdf"], "rb") as f:
+            m = c.post("/api/teacher/materialien", files={"file": ("haftung.pdf", f.read())},
+                       data={"name": "OR Haftpflicht"}).json()
+        ids = {}
+        for titel in ("Aktiv L-04", "Archiv L-04"):
+            ids[titel] = c.post("/api/teacher/lessons", json={"titel": titel, "lernziele": ["Haftung verstehen"],
+                                                              "material": "", "materialien": [m["id"]]}).json()["id"]
+        archiv = ids["Archiv L-04"]
+        c.delete(f"/api/teacher/lessons/{archiv}")
+        page = launch(pw).new_page(viewport={"width": 1300, "height": 900})
+        fehler = []
+        page.on("pageerror", lambda e: fehler.append(str(e)))
+        page.goto(base + "/teacher/lessons")
+        page.check("#show-archived")
+        expect(page.locator(f"tr[data-id='{archiv}']")).to_have_count(1, timeout=10000)
+        archivierte = page.locator("tr", has=page.locator(".pill", has_text="archiviert"))
+        check("L-04 AK1 keine archivierte Lektion hat «Bearbeiten»", archivierte.count() >= 1
+              and archivierte.locator("button[data-act='edit']").count() == 0)
+        check("L-04 AK6 aktive Lektion hat weiterhin «Bearbeiten»",
+              page.locator(f"tr[data-id='{ids['Aktiv L-04']}'] button[data-act='edit']").count() == 1)
+        # AK 2: direkter Aufruf der Editor-Adresse
+        page.goto(base + f"/teacher/lessons/{archiv}/edit")
+        expect(page.locator("#edit-notice")).to_contain_text("Die Lektion ist archiviert. Stelle sie zuerst wieder "
+                                                             "her, um sie zu bearbeiten.", timeout=10000)
+        check("L-04 AK2 kein bearbeitbares Formular", not page.locator("#titel").is_visible()
+              and not page.locator("#btn-save").is_visible())
+        check("L-04 AK2 Link zur Lektionsliste",
+              page.locator("#edit-notice a").get_attribute("href") == "/teacher/lessons")
+        # AK 4: Details eines Lernmaterials
+        page.goto(base + "/teacher/materialien")
+        page.locator(".itsm-tabelle tbody tr").first.locator("button[data-a=details]").click()
+        box = page.locator(".itsm-box")
+        expect(box).to_contain_text("Archiv L-04 (archiviert)", timeout=10000)
+        check("L-04 AK4 archivierte Lektion nicht in den Editor verlinkt",
+              box.locator(f"a[href='/teacher/lessons/{archiv}/edit']").count() == 0)
+        check("L-04 AK6 aktive Lektion weiterhin verlinkt",
+              box.locator(f"a[href='/teacher/lessons/{ids['Aktiv L-04']}/edit']").count() == 1)
+        # AK 5: Editor offen, Lektion wird inzwischen archiviert, dann Speichern
+        aktiv = ids["Aktiv L-04"]
+        page.goto(base + f"/teacher/lessons/{aktiv}/edit")
+        expect(page.locator("#titel")).to_have_value("Aktiv L-04", timeout=10000)
+        c.delete(f"/api/teacher/lessons/{aktiv}")
+        page.fill("#titel", "Aktiv L-04 geändert")
+        page.click("#btn-save")
+        expect(page.locator("#result")).to_contain_text("archiviert", timeout=10000)
+        d = c.get(f"/api/teacher/lessons/{aktiv}").json()
+        check("L-04 AK5 Speichern nach dem Archivieren abgelehnt, Version unverändert",
+              d["version"] == 1 and d["titel"] == "Aktiv L-04", f"Version {d['version']}, {d['titel']}")
+        # AK 6: Duplizieren und Wiederherstellen wie bisher
+        page.goto(base + "/teacher/lessons")
+        page.check("#show-archived")
+        page.locator(f"tr[data-id='{archiv}'] button[data-act='duplicate']").click()
+        expect(page.locator("#edit-notice")).to_contain_text("Kopie angelegt", timeout=10000)
+        check("L-04 AK6 Kopie einer archivierten Lektion ist bearbeitbar", page.locator("#titel").is_visible())
+        page.goto(base + "/teacher/lessons")
+        page.check("#show-archived")
+        page.locator(f"tr[data-id='{archiv}'] button[data-act='restore']").click()
+        expect(page.locator("#banner")).to_contain_text("wiederhergestellt", timeout=10000)
+        page.goto(base + f"/teacher/lessons/{archiv}/edit")
+        expect(page.locator("#titel")).to_have_value("Archiv L-04", timeout=10000)
+        check("L-04 AK6 nach dem Wiederherstellen wieder bearbeitbar", page.locator("#btn-save").is_visible())
+        check("L-04 ohne Skriptfehler", not fehler, "; ".join(fehler))
+
+
 @scenario("t28")
 def t28_stoppen(pw):
     """T-28: «Stoppen» während der Tutor arbeitet; die Nachricht steht wieder im Feld."""

@@ -652,6 +652,14 @@ async function loadForEdit() {
   if (r.status === 401) { location.href = "/teacher/login"; return; }
   const l = await r.json();
   if (!r.ok) { showResult("error", esc(l.detail || "Lektion nicht gefunden")); return; }
+  if (l.archiviert) {
+    // L-04: Eine archivierte Lektion lässt sich nicht bearbeiten, auch nicht über die Adresse
+    document.querySelector(".card").classList.add("hidden");
+    $("edit-notice").innerHTML = "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten. " +
+      '<a href="/teacher/lessons" id="link-lektionsliste">Zur Lektionsliste</a>';
+    $("edit-notice").classList.remove("hidden");
+    return;
+  }
   $("titel").value = l.titel || "";
   $("ziele").value = (l.lernziele || []).join("\n");
   $("hinweise").value = l.tutor_hinweise || "";
