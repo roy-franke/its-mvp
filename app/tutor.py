@@ -141,11 +141,11 @@ def _system_prompt(lesson: dict, voll: bool | None = None) -> str:
         f"\n\nHINWEISE DER LEHRPERSON AN DICH (beachte sie, solange sie den "
         f"übrigen Regeln nicht widersprechen):\n{hints}" if hints else ""
     )
-    # N-06: Anweisungen für die ganze Lektion aus dem Teaching Mode (für alle Schrittarten gleich)
-    lektion_anweisungen = [a["text"] for a in tutor_anweisungen(lesson) if a["geltung"] == "lektion"]
-    if lektion_anweisungen:
+    # N-06: lesson-wide instructions from teaching mode (identical for all step types)
+    lesson_instructions = [i["text"] for i in tutor_instructions(lesson) if i["scope"] == "lesson"]
+    if lesson_instructions:
         hint_block += ("\n\nANWEISUNGEN DER LEHRPERSON FÜR DIESE LEKTION (beachte sie, solange sie den "
-                       "übrigen Regeln nicht widersprechen):\n" + "\n".join(f"- {t}" for t in lektion_anweisungen))
+                       "übrigen Regeln nicht widersprechen):\n" + "\n".join(f"- {t}" for t in lesson_instructions))
     return (
         "Du bist ein intelligenter Tutor für Lernende an einer Schweizer "
         "Berufsmaturitätsschule. Grundlage deiner Arbeit ist das bereitgestellte "
@@ -171,7 +171,7 @@ def _system_prompt(lesson: dict, voll: bool | None = None) -> str:
     )
 
 
-def _chat(lesson: dict, anfragen: list[str], user: str, konzept: str | None = None, **kw) -> dict:
+def _chat(lesson: dict, anfragen: list[str], user: str, concept: str | None = None, **kw) -> dict:
     """LLM-Aufruf mit Lektionsmaterial (T-30): ganz im Systemprompt oder als
     Auszüge aus der Vektordatenbank am Ende des Benutzerteils.
 
@@ -179,10 +179,10 @@ def _chat(lesson: dict, anfragen: list[str], user: str, konzept: str | None = No
     das Retrieval, läuft der Aufruf mit dem ganzen Material (protokolliert).
     Die Rückgabe trägt im RAG-Modus `_rag_treffer` (die verwendeten Auszüge).
 
-    N-06: `konzept` ist das Konzept des Schritts, falls es vorab feststeht. Anweisungen der
-    Lehrperson zu diesem Thema kommen in den Benutzerteil (vor die Auszüge).
+    N-06: `concept` is the concept of the step if it is known beforehand. Teacher instructions on
+    this topic are appended to the user part (before the excerpts).
     """
-    user += anweisungen_zum_thema(lesson, konzept)
+    user += topic_instructions(lesson, concept)
     schritt = llm._label(user)
     modus, grund = rag.modus(lesson)
     if modus != "rag":
@@ -201,59 +201,56 @@ def _chat(lesson: dict, anfragen: list[str], user: str, konzept: str | None = No
 
 # ---------------------------------------------------------------- N-06 Teaching Mode
 
-GELTUNGEN = ("thema", "lektion")
+INSTRUCTION_SCOPES = ("topic", "lesson")
 
 
-def tutor_anweisungen(lesson: dict) -> list[dict]:
-    """N-06, Entscheid E7: Anweisungen aus dem Teaching Mode, getrennt von den tutor_hinweise."""
-    out = []
-    for a in lesson.get("tutor_anweisungen") or []:
-        if isinstance(a, dict) and str(a.get("text") or "").strip() and a.get("geltung") in GELTUNGEN:
-            out.append(a)
-    return out
+def tutor_instructions(lesson: dict) -> list[dict]:
+    """N-06, decision E7: instructions from teaching mode, kept apart from tutor_hinweise."""
+    return [i for i in lesson.get("tutor_instructions") or []
+            if isinstance(i, dict) and str(i.get("text") or "").strip() and i.get("scope") in INSTRUCTION_SCOPES]
 
 
-def anweisungen_zum_thema(lesson: dict, konzept: str | None) -> str:
-    """N-06, Entscheid E5: Anweisungen «nur für dieses Thema» gelten in allen Schritten zum selben Konzept."""
-    if not (konzept or "").strip():
+def topic_instructions(lesson: dict, concept: str | None) -> str:
+    """N-06, decision E5: "only for this topic" applies to all steps with the same concept."""
+    if not (concept or "").strip():
         return ""
-    texte = [a["text"] for a in tutor_anweisungen(lesson)
-             if a["geltung"] == "thema" and didaktik.gleiches_konzept(a.get("konzept"), konzept)]
-    if not texte:
+    texts = [i["text"] for i in tutor_instructions(lesson)
+             if i["scope"] == "topic" and didaktik.gleiches_konzept(i.get("concept"), concept)]
+    if not texts:
         return ""
-    return (f"\nANWEISUNGEN DER LEHRPERSON ZUM THEMA «{konzept}» (beachte sie, solange sie den übrigen Regeln "
-            "nicht widersprechen):\n" + "\n".join(f"- {t}" for t in texte) + "\n")
+    return (f"\nANWEISUNGEN DER LEHRPERSON ZUM THEMA «{concept}» (beachte sie, solange sie den übrigen Regeln "
+            "nicht widersprechen):\n" + "\n".join(f"- {t}" for t in texts) + "\n")
 
 
-VERALLGEMEINERN_SYSTEM = (
+GENERALIZE_SYSTEM = (
     "Du unterstützt eine Lehrperson, die einen KI-Tutor für Lernende an einer Schweizer "
     "Berufsmaturitätsschule verbessert. Du schreibst Deutsch mit Schweizer Rechtschreibung (kein ß, immer "
     "ss). Du antwortest ausschliesslich mit einem einzigen JSON-Objekt.")
 
 
-def anweisung_verallgemeinern(lesson: dict, text: str, konzept: str = "", schrittart: str = "",
-                              schritt_text: str = "") -> dict:
-    """N-06, Entscheid E6: Der Tutor formuliert aus Anweisung und Schritt eine allgemeine Regel.
+def generalize_instruction(lesson: dict, text: str, concept: str = "", step_type: str = "",
+                           step_text: str = "") -> dict:
+    """N-06, decision E6: the tutor turns instruction and step into a general rule.
 
-    Eigener Aufruf ohne Lektionsmaterial. Im Fallback erhält die Lehrperson ihren eigenen
-    Text als Vorschlag (AK 8). Rückgabe: {vorschlag, fallback}.
+    Separate call without lesson material. On fallback the teacher gets her own text as the
+    suggestion (AK 8). Returns {suggestion, fallback, reason?}.
     """
     data = llm.chat_json(
-        VERALLGEMEINERN_SYSTEM,
-        "AUFGABE: ANWEISUNG_VERALLGEMEINERN\n"
+        GENERALIZE_SYSTEM,
+        "AUFGABE: GENERALIZE_INSTRUCTION\n"
         f"Lektion: {lesson.get('titel', '')}\n"
-        f"Schritt des Tutors ({schrittart or 'unbekannt'}, Konzept {konzept or 'unbekannt'}): "
-        f"{str(schritt_text or '')[:1500]}\n"
+        f"Schritt des Tutors ({step_type or 'unbekannt'}, Konzept {concept or 'unbekannt'}): "
+        f"{str(step_text or '')[:1500]}\n"
         f"Anweisung der Lehrperson zu diesem Schritt: {text}\n\n"
         "Formuliere daraus eine allgemeine Regel für den Tutor, die in allen Schritten dieser Lektion gilt, "
         "nicht nur in diesem Fall. Behalte die Absicht der Lehrperson bei, nenne keine Einzelheiten dieses "
         "Schritts, die nur hier zutreffen, und schreibe 1-2 Sätze als Anweisung an den Tutor.\n"
-        'Format: {"regel": "die allgemeine Regel"}',
+        'Format: {"rule": "die allgemeine Regel"}',
         fallback={})
-    regel = str(data.get("regel") or "").strip()
-    if data.get("_fallback") or not regel:
-        return {"vorschlag": text.strip(), "fallback": True, "grund": data.get("_fehler", "leere Regel")}
-    return {"vorschlag": regel, "fallback": False}
+    rule = str(data.get("rule") or "").strip()
+    if data.get("_fallback") or not rule:
+        return {"suggestion": text.strip(), "fallback": True, "reason": data.get("_fehler", "empty rule")}
+    return {"suggestion": rule, "fallback": False}
 
 
 def _ziele(lesson: dict) -> list[str]:
@@ -588,10 +585,10 @@ def generate_theory(lesson: dict, profile: dict, history: list[dict],
         anfragen = [f"{vorher.get('konzept', '')}: {vorher.get('titel', '')}"]
     else:
         anfragen = _ziele(lesson)
-    # N-06: Anweisungen zum Thema, wenn das Konzept schon vor der Erklärung feststeht
-    konzept = ziel if adaptation in ("explain", "konzept") and ziel else (
+    # N-06: topic instructions when the concept is known before the explanation
+    concept = ziel if adaptation in ("explain", "konzept") and ziel else (
         (vorher or {}).get("konzept") if adaptation == "simplify" else None)
-    data = _chat(lesson, anfragen, instruction, fallback={}, check=pruefen, konzept=konzept)
+    data = _chat(lesson, anfragen, instruction, fallback={}, check=pruefen, concept=concept)
     if data.get("_fallback"):
         return theory_fallback(lesson, profile, adaptation, data)
     data["typ"] = "theorie"
@@ -734,7 +731,7 @@ def pruefe_musterloesung(lesson: dict, task: dict, theorie: dict | None = None) 
         + '\nFormat: {"loesung": "deine Lösung in 1-3 Sätzen", "offene_punkte": ["fehlende Angabe", "..."], '
           '"mehrere_loesungen": false'
         + (', "merkmale_im_fall": true' if merkmale else "") + "}",
-        fallback={}, temperature=BEWERTUNG_TEMPERATUR, konzept=konzept)
+        fallback={}, temperature=BEWERTUNG_TEMPERATUR, concept=konzept)
     if data.get("_fallback"):
         return {"ergebnis": "nicht_geprueft", "grund": data.get("_fehler", ""), "offene_punkte": []}
     out = {"loesung": str(data.get("loesung") or "").strip(),
@@ -755,7 +752,7 @@ def pruefe_musterloesung(lesson: dict, task: dict, theorie: dict | None = None) 
         f"Sachverhalt: {task.get('inhalt', '')}\nFrage: {task.get('frage', '')}\n"
         f"Lösung A: {task.get('erwartete_antwort', '')}\nLösung B: {out['loesung']}\n\n"
         'Format: {"uebereinstimmend": true, "unterschied": "bei Abweichung in einem Satz, worin, sonst leer"}',
-        fallback={}, temperature=BEWERTUNG_TEMPERATUR, konzept=konzept)
+        fallback={}, temperature=BEWERTUNG_TEMPERATUR, concept=konzept)
     if vergleich.get("_fallback"):
         return dict(out, ergebnis="nicht_geprueft", grund=vergleich.get("_fehler", ""))
     if vergleich.get("uebereinstimmend") is True:
@@ -909,14 +906,14 @@ def _aufgabe_erzeugen(lesson: dict, profile: dict, history: list[dict],
         anfragen = [f"{theorie.get('konzept', '')}: {theorie.get('titel', '')}. {str(theorie.get('inhalt', ''))[:400]}"]
     else:
         anfragen = _ziele(lesson)
-    # N-06: Anweisungen zum Thema, wenn das Konzept der Aufgabe vorab feststeht
+    # N-06: topic instructions when the concept of the task is known beforehand
     if direkt_nach_theorie and theorie:
-        konzept = theorie.get("konzept") or theorie.get("titel")
+        concept = theorie.get("konzept") or theorie.get("titel")
     elif adaptation == "simplify":
-        konzept = (profile.get("current_task") or {}).get("konzept")
+        concept = (profile.get("current_task") or {}).get("konzept")
     else:
-        konzept = None
-    data = _chat(lesson, anfragen, instruction, fallback={}, check=pruefen, versuche=3, konzept=konzept)
+        concept = None
+    data = _chat(lesson, anfragen, instruction, fallback={}, check=pruefen, versuche=3, concept=concept)
     data.pop("_rag_treffer", None)
     if data.get("_fallback"):
         return task_fallback(lesson, profile, adaptation, data)
@@ -1025,8 +1022,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
     letzte = vorher[-1] if vorher else None
     alte_elemente = [e for e in (letzte or {}).get("elemente") or [] if isinstance(e, dict)]
     frueher_hinweise = [v.get("hinweis", "") for v in vorher if v.get("hinweis")]
-    # D-21: Was die lernende Person selbst geschrieben hat, darf der Tutor aufgreifen
-    antworten_lernende = [answer] + [str(v.get("antwort") or "") for v in vorher]
+    # D-21: the tutor may pick up what the learner has written
+    learner_answers = [answer] + [str(v.get("antwort") or "") for v in vorher]
     if letzte:
         kontext += (f"Bisheriger Versuch des Lernenden: {letzte.get('antwort', '')}\n"
                     + (f"Dein Hinweis dazu: {letzte.get('hinweis', '')}\n" if letzte.get("hinweis") else ""))
@@ -1073,8 +1070,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                 or didaktik.musterloesung_erwaehnt(f"{d.get('feedback', '')} {d.get('hinweis', '')}")
                 or didaktik.hinweis_wiederholt(d.get("hinweis", ""), frueher_hinweise)
                 or didaktik.vorsicht_bemaengelt(d, answer, offene_punkte)
-                or didaktik.fachbegriff_trotzdem_ungenau(d, task, answer)
-                or didaktik.loesung_verraten(d, task, antworten_lernende))
+                or didaktik.key_term_rated_imprecise(d, task, answer)
+                or didaktik.solution_revealed(d, task, learner_answers))
     data = _chat(
         lesson, [f"{task.get('inhalt', '')} {task.get('frage', '')}", answer],
         "AUFGABE: ANTWORT_BEWERTEN\n"
@@ -1088,7 +1085,7 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
            "nicht nach einer Begründung oder einem Gesetzesartikel, sind diese kein Element.\n") +
         "   Lege jede Dimension sinngemäss aus, nicht wörtlich: Eine «Person» kann auch eine Organisation, "
         "eine Behörde oder ein Verein sein, ein «Wert» auch ein Bruch oder ein Ausdruck.\n"
-        + TIEFE_DER_FRAGE +
+        + QUESTION_DEPTH_RULE +
         "2. Prüfe für jedes Element den Status:\n"
         "   korrekt = sachlich richtig vorhanden (gemäss der Bewertungsstrenge);\n"
         "   vertretbar = weicht von der erwarteten Lösung ab, ist aber richtig unter einer Annahme, die der "
@@ -1096,7 +1093,7 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "in annahme;\n"
         "   ungenau = sachlich zutreffend, aber allgemeiner, als die Frage es verlangt, nur umschrieben oder "
         "ohne den verlangten Fachbegriff;\n"
-        + GLEICHE_BEDEUTUNG
+        + SAME_MEANING_RULE
         + WISSEN_BEWERTUNG["allgemeinwissen" if einstellungen.allgemeinwissen_erlaubt(lesson) else "material"] +
         "   falsch = widerspricht dem Sachverhalt oder dem Lektionsmaterial (zum Beispiel ein Fahrzeug, das im "
         "Fall nicht vorkommt, oder ein Rechenergebnis, das nicht stimmt). Eine Abweichung von der erwarteten "
@@ -1129,7 +1126,7 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "Formuliere den Hinweis als Anstoss, nicht als neue Frage, die statt der Aufgabe "
         "beantwortet werden soll. Verrate die Lösung nie, auch nicht implizit, und sprich nie von "
         "der «Musterlösung»: Der Lernende kennt sie nicht.\n"
-        + OHNE_LOESUNG_REGEL + "\n"
+        + NO_SOLUTION_RULE + "\n"
         'Format: {"elemente": [{"element": "zentrales Element", '
         '"status": "korrekt|vertretbar|ungenau|nicht_beurteilbar|falsch|fehlt", '
         '"begruendung": "ein Satz", "antwort": "was der Lernende dazu schreibt", '
@@ -1138,7 +1135,7 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         '"bewertung": "korrekt|teilweise|falsch", '
         '"feedback": "2-4 Sätze direkt an den Lernenden", '
         '"hinweis": "bei teilweise/falsch ein Hinweis für die Nachbesserung, sonst leer"}',
-        fallback=dict(FALLBACK_TEXTE["bewertung"]), konzept=task.get("konzept"),
+        fallback=dict(FALLBACK_TEXTE["bewertung"]), concept=task.get("konzept"),
         check=pruefen,
         temperature=BEWERTUNG_TEMPERATUR,
     )
@@ -1167,42 +1164,42 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
     if urteil and urteil != data["bewertung"]:
         data["bewertung_modell"] = data["bewertung"]
         data["bewertung"] = urteil
-    if not didaktik.ist_multiple_choice(task):
-        # D-21 AK 4: Verrät der Text nach dem Korrekturversuch noch die Lösung, wird ersetzt bzw. gekürzt
-        gesperrt = didaktik.gesperrte_staemme(task, data["elemente"], antworten_lernende)
-        if didaktik.verratene_woerter(data.get("hinweis", ""), gesperrt):
-            data["hinweis"] = hinweis_ohne_loesung(data["elemente"], gesperrt)
+    if not didaktik.is_multiple_choice(task):
+        # D-21 AK 4: if the text still reveals the solution after the correction attempt, replace or shorten it
+        blocked = didaktik.blocked_stems(task, data["elemente"], learner_answers)
+        if didaktik.revealing_words(data.get("hinweis", ""), blocked):
+            data["hinweis"] = hint_without_solution(data["elemente"], blocked)
             data["hinweis_ersetzt"] = True
-        if didaktik.verratene_woerter(data.get("feedback", ""), gesperrt):
-            data["feedback"] = (didaktik.ohne_verratene_saetze(data.get("feedback", ""), gesperrt)
-                                or FEEDBACK_OHNE_LOESUNG.get(data["bewertung"], FEEDBACK_OHNE_LOESUNG["teilweise"]))
-            data["feedback_gekuerzt"] = True
+        if didaktik.revealing_words(data.get("feedback", ""), blocked):
+            data["feedback"] = (didaktik.without_revealing_sentences(data.get("feedback", ""), blocked)
+                                or FEEDBACK_WITHOUT_SOLUTION.get(data["bewertung"], FEEDBACK_WITHOUT_SOLUTION["teilweise"]))
+            data["feedback_shortened"] = True
     data["korrekt"] = data["bewertung"] == "korrekt"
     return data
 
 
-# D-21: Feedback und Hinweis verraten die erwartete Lösung nicht (gilt nicht für Multiple Choice)
-OHNE_LOESUNG_REGEL = (
+# D-21: feedback and hint do not reveal the expected solution (not for multiple choice)
+NO_SOLUTION_RULE = (
     "Ist ein Teil noch nicht erfüllt, nennst du in Feedback und Hinweis keinen Begriff und keinen Inhalt der "
     "erwarteten Lösung zu diesem Teil, den der Lernende nicht selbst geschrieben hat; du benennst nur, welcher Teil "
     "fehlt oder noch nicht genügt, und verweist auf den Fall oder das Material.\n")
 
-FEEDBACK_OHNE_LOESUNG = {
+FEEDBACK_WITHOUT_SOLUTION = {
     "teilweise": "Ein Teil deiner Antwort stimmt, ein Teil genügt noch nicht.",
     "falsch": "Deine Antwort trifft den Fall noch nicht.",
 }
 
 
-def hinweis_ohne_loesung(elemente: list[dict], gesperrt: set[str]) -> str:
-    """D-21 AK 4: Ersatzhinweis ohne gesperrte Stämme."""
-    offen = next((e for e in elemente if e.get("status") not in GELTEN_ALS_RICHTIG), None)
-    name = (offen or {}).get("element", "")
-    kandidaten = [hinweis_aus_elementen(elemente),
+def hint_without_solution(elements: list[dict], blocked: set[str]) -> str:
+    """D-21 AK 4: replacement hint without blocked stems."""
+    first_open = next((e for e in elements if e.get("status") not in GELTEN_ALS_RICHTIG), None)
+    name = (first_open or {}).get("element", "")
+    candidates = [hinweis_aus_elementen(elements),
                   f"Zu «{name}» genügt deine Antwort noch nicht. Lies den Fall nochmals und überleg, was er dazu "
                   "genau hergibt." if name else "",
                   "Ein Teil deiner Antwort genügt noch nicht. Lies den Fall nochmals und überleg, was er dazu "
                   "genau hergibt."]
-    return next((k for k in kandidaten if k and not didaktik.verratene_woerter(k, gesperrt)),
+    return next((c for c in candidates if c and not didaktik.revealing_words(c, blocked)),
                 "Lies den Fall nochmals genau.")
 
 
@@ -1294,8 +1291,8 @@ def hinweis_aus_elementen(elemente: list[dict]) -> str:
     return satz
 
 
-# D-19: Massstab ist die Tiefe, die die Frage erkennbar verlangt, nicht die Tiefe der erwarteten Lösung
-TIEFE_DER_FRAGE = (
+# D-19: the yardstick is the depth the question recognisably asks for, not the depth of the expected solution
+QUESTION_DEPTH_RULE = (
     "   Miss jedes Element an der Tiefe, die die Frage erkennbar verlangt, nicht an der Tiefe des erwarteten "
     "Inhalts: Beantwortet die Antwort die Frage auf dieser Ebene richtig, ist das Element korrekt, auch wenn der "
     "erwartete Inhalt feiner unterscheidet. Verlangt die Frage eine kurze Begründung, genügt eine kurze "
@@ -1303,8 +1300,8 @@ TIEFE_DER_FRAGE = (
     "höchstens als freiwillige Ergänzung; es ändert weder den Status noch das Urteil.\n")
 
 
-# D-20: verlangt ist der Fachbegriff, nicht der Wortlaut im Material
-GLEICHE_BEDEUTUNG = (
+# D-20: the key term is required, not the wording of the material
+SAME_MEANING_RULE = (
     "   Eine Formulierung mit derselben Bedeutung und demselben Fachbegriff gilt wie der Wortlaut im Material: "
     "Andere Präpositionen, Wortstellung, Beugung oder eine Zusammensetzung (etwa «Energieerhaltung» statt "
     "«Erhaltung der Energie») machen ein Element nicht ungenau. Das gilt bei jeder Bewertungsstrenge: Verlangt "
@@ -1479,7 +1476,7 @@ def answer_question(lesson: dict, profile: dict, task: dict | None,
         + (', "widerspricht_bewertung": false' if bewertung_text else "")
         + (', "niveau_wunsch": "keiner|halten|tiefer|hoeher", '
            '"niveau_ziel": "basic|intermediate|advanced|keins"' if art == "frage" else "") + '}',
-        fallback=dict(FALLBACK_TEXTE["frage"]), konzept=konzept,
+        fallback=dict(FALLBACK_TEXTE["frage"]), concept=konzept,
         check=lambda d: (didaktik.pruefe_felder(d, ("antwort",))
                          or didaktik.defensiver_einstieg(d.get("antwort", ""))
                          or (didaktik.zu_aehnlich(d.get("antwort", ""), bisherige)
@@ -1739,7 +1736,7 @@ def answer_internet(lesson: dict, profile: dict, task: dict | None) -> dict:
         "Verrate die Lösung der aktuellen Aufgabe nicht.\n"
         f"Suchergebnisse:\n{liste}\n\n"
         'Format: {"antwort": "...", "quellen": [1, 2]}',
-        fallback=dict(FALLBACK_TEXTE["frage"]), konzept=konzept,
+        fallback=dict(FALLBACK_TEXTE["frage"]), concept=konzept,
         check=lambda d: didaktik.pruefe_felder(d, ("antwort",)),
     )
     if data.get("_fallback"):

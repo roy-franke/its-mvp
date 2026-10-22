@@ -963,39 +963,39 @@ def musterloesung_erwaehnt(text: str) -> str | None:
 
 # ---------------------------------------------------------------- D-20
 #
-# «Haftung aufgrund von Fahrlässigkeit» galt als ungenau, weil das Material «Haftung für
-# Fahrlässigkeit» schreibt. Verlangt ist der Fachbegriff, nicht der Wortlaut. Die Prüfung nutzt
-# den Wortvergleich oben (Stämme, Zusammensetzungen ab sechs Zeichen) unverändert.
+# "Haftung aufgrund von Fahrlässigkeit" was rated imprecise because the material says
+# "Haftung für Fahrlässigkeit". The key term is required, not the wording. The check reuses the
+# word comparison above (stems, compounds from six characters) without changing it.
 
-def _steckt_in(stamm_begriff: str, text_staemme: set[str]) -> bool:
-    """Der Stamm eines Fachbegriffs steht in einem Wort der Antwort, gleich lang oder als Teil einer
-    Zusammensetzung («fahrlässig» in «Fahrlässigkeitshaftung»), nicht umgekehrt («schuld» ist nicht
-    «Verschuldenshaftung»)."""
-    return any(gleicher_stamm(stamm_begriff, t) and len(t) >= len(stamm_begriff) for t in text_staemme)
-
-
-def erwartete_fachbegriffe(task: dict, erwartet: str) -> list[str]:
-    """Fachbegriffe eines Elements: die Schlüsselbegriffe der Aufgabe, die im erwarteten Inhalt stehen."""
-    inhalt = staemme(erwartet)
-    return [b for b in schluesselbegriffe(task) if staemme(b) and all(_kommt_vor(t, inhalt) for t in staemme(b))]
+def _contained_in(term_stem: str, text_stems: set[str]) -> bool:
+    """The stem of a key term occurs in a word of the answer, equally long or as part of a compound
+    ("fahrlässig" in "Fahrlässigkeitshaftung"), not the other way round ("schuld" is not
+    "Verschuldenshaftung")."""
+    return any(gleicher_stamm(term_stem, t) and len(t) >= len(term_stem) for t in text_stems)
 
 
-def fachbegriff_trotzdem_ungenau(bewertung: dict, task: dict, antwort: str) -> str | None:
-    """D-20: Ein Element ist «ungenau», obwohl alle Wortstämme eines erwarteten Fachbegriffs in der
-    Antwort zu diesem Element stehen (ohne Zitat: in der ganzen Antwort)."""
-    festgelegt = elemente_normalisieren(task.get("erwartete_elemente"))
-    roh = [e for e in bewertung.get("elemente") or [] if isinstance(e, dict)]
-    if not festgelegt or len(roh) != len(festgelegt):
+def expected_key_terms(task: dict, expected: str) -> list[str]:
+    """Key terms of an element: the task's key terms that occur in the element's expected content."""
+    content = staemme(expected)
+    return [b for b in schluesselbegriffe(task) if staemme(b) and all(_kommt_vor(t, content) for t in staemme(b))]
+
+
+def key_term_rated_imprecise(evaluation: dict, task: dict, answer: str) -> str | None:
+    """D-20: An element is rated "ungenau" although all stems of an expected key term occur in the
+    answer to this element (without a quote: in the whole answer)."""
+    defined = elemente_normalisieren(task.get("erwartete_elemente"))
+    raw = [e for e in evaluation.get("elemente") or [] if isinstance(e, dict)]
+    if not defined or len(raw) != len(defined):
         return None
-    for e, f in zip(roh, festgelegt):
-        if str(e.get("status", "")).strip().lower() != "ungenau" or not f["erwartet"]:
+    for element, spec in zip(raw, defined):
+        if str(element.get("status", "")).strip().lower() != "ungenau" or not spec["erwartet"]:
             continue
-        zitat = str(e.get("antwort") or "").strip() or antwort or ""
-        vorhanden = staemme(zitat)
-        for begriff in erwartete_fachbegriffe(task, f["erwartet"]):
-            if all(_steckt_in(t, vorhanden) for t in staemme(begriff)):
-                return (f"Das Element «{f['dimension']}» ist als ungenau eingestuft, obwohl die Antwort dazu den "
-                        f"Fachbegriff «{begriff}» enthält, nur anders formuliert («{zitat}»). Eine Formulierung mit "
+        quote = str(element.get("antwort") or "").strip() or answer or ""
+        present = staemme(quote)
+        for term in expected_key_terms(task, spec["erwartet"]):
+            if all(_contained_in(t, present) for t in staemme(term)):
+                return (f"Das Element «{spec['dimension']}» ist als ungenau eingestuft, obwohl die Antwort dazu den "
+                        f"Fachbegriff «{term}» enthält, nur anders formuliert («{quote}»). Eine Formulierung mit "
                         "derselben Bedeutung und demselben Fachbegriff ist nicht ungenau, bei keiner "
                         "Bewertungsstrenge. Prüfe den Status erneut; bleibt er ungenau, nenne in der Begründung, "
                         "was ausser dem Wortlaut fehlt.")
@@ -1004,86 +1004,86 @@ def fachbegriff_trotzdem_ungenau(bewertung: dict, task: dict, antwort: str) -> s
 
 # ---------------------------------------------------------------- D-21
 #
-# «Prüfe, ob der Begriff «Haftung für Fahrlässigkeit» im Material explizit als korrekte
-# Bezeichnung genannt wird» verriet die gesuchte Antwort. Gesperrt sind die Stämme der
-# Schlüsselbegriffe und des erwarteten Inhalts der noch nicht erfüllten Elemente, ausser sie
-# stehen in der Aufgabe oder in einer Antwort der lernenden Person. Wortvergleich wie bei D-20.
+# "Prüfe, ob der Begriff «Haftung für Fahrlässigkeit» im Material explizit als korrekte
+# Bezeichnung genannt wird" gave away the expected answer. Blocked are the stems of the key terms
+# and of the expected content of elements not yet fulfilled, unless they occur in the task or in
+# an answer of the learner. Word comparison as in D-20.
 
-GESPERRT_MIN_LAENGE = 5     # kürzere Stämme («sorg», «haft») treffen zu viele harmlose Wörter
+BLOCKED_MIN_LENGTH = 5      # shorter stems ("sorg", "haft") match too many harmless words
 
 
-def ist_multiple_choice(task: dict) -> bool:
+def is_multiple_choice(task: dict) -> bool:
     return bool(task.get("optionen")) or (task.get("aufgabentyp") or "").lower() in (
         "multiple_choice", "multiple-choice", "mc")
 
 
-def _gegeben(stamm_wort: str, text_staemme: set[str]) -> bool:
-    """Steht der Stamm schon in der Aufgabe oder in einer Antwort? Gleich, gebeugt (gemeinsamer Anfang,
-    «gelockert»/«gelockerte») oder als Teil einer Zusammensetzung dort."""
-    return _steckt_in(stamm_wort, text_staemme) or any(
-        min(len(stamm_wort), len(t)) >= 4 and (t.startswith(stamm_wort) or stamm_wort.startswith(t))
-        for t in text_staemme)
+def _given(word_stem: str, text_stems: set[str]) -> bool:
+    """Does the stem already occur in the task or in an answer? Equal, inflected (common beginning,
+    "gelockert"/"gelockerte") or as part of a compound there."""
+    return _contained_in(word_stem, text_stems) or any(
+        min(len(word_stem), len(t)) >= 4 and (t.startswith(word_stem) or word_stem.startswith(t))
+        for t in text_stems)
 
 
-def gesperrte_staemme(task: dict, elemente, antworten: list[str]) -> set[str]:
-    """D-21: Stämme, die Feedback und Hinweis nicht nennen dürfen.
+def blocked_stems(task: dict, elements, answers: list[str]) -> set[str]:
+    """D-21: Stems that feedback and hint must not mention.
 
-    `elemente` ist die Bewertung je Element (Status in der Reihenfolge der festgelegten Elemente).
-    Sind alle Elemente erfüllt, ist nichts gesperrt. Ein Schlüsselbegriff, der nur zu erfüllten
-    Elementen gehört, bleibt frei (D-15: Bei «vertretbar» darf die erwartete Lösung erscheinen).
+    `elements` is the evaluation per element (status in the order of the defined elements). If all
+    elements are fulfilled, nothing is blocked. A key term that belongs only to fulfilled elements stays
+    free (D-15: with "vertretbar" the expected solution may be shown).
     """
-    if ist_multiple_choice(task):
+    if is_multiple_choice(task):
         return set()
-    status = [str(e.get("status", "")).strip().lower() for e in elemente or [] if isinstance(e, dict)]
+    status = [str(e.get("status", "")).strip().lower() for e in elements or [] if isinstance(e, dict)]
     if status and all(s in WIE_KORREKT for s in status):
         return set()
-    festgelegt = elemente_normalisieren(task.get("erwartete_elemente"))
-    if len(status) == len(festgelegt):
-        offen = [f["erwartet"] for f, s in zip(festgelegt, status) if s not in WIE_KORREKT]
-        erfuellt = [f["erwartet"] for f, s in zip(festgelegt, status) if s in WIE_KORREKT]
+    defined = elemente_normalisieren(task.get("erwartete_elemente"))
+    if len(status) == len(defined):
+        open_content = [d["erwartet"] for d, s in zip(defined, status) if s not in WIE_KORREKT]
+        fulfilled_content = [d["erwartet"] for d, s in zip(defined, status) if s in WIE_KORREKT]
     else:
-        offen, erfuellt = [f["erwartet"] for f in festgelegt], []
-    roh: set[str] = set()
-    for text in offen:
-        roh |= staemme(text)
+        open_content, fulfilled_content = [d["erwartet"] for d in defined], []
+    raw: set[str] = set()
+    for text in open_content:
+        raw |= staemme(text)
 
-    def gehoert_zu(teile: set[str], inhalt: str) -> bool:
-        return all(_kommt_vor(t, staemme(inhalt)) for t in teile)
-    for begriff in schluesselbegriffe(task):
-        teile = staemme(begriff)
-        if any(gehoert_zu(teile, x) for x in erfuellt) and not any(gehoert_zu(teile, x) for x in offen):
+    def belongs_to(parts: set[str], content: str) -> bool:
+        return all(_kommt_vor(t, staemme(content)) for t in parts)
+    for term in schluesselbegriffe(task):
+        parts = staemme(term)
+        if (any(belongs_to(parts, c) for c in fulfilled_content)
+                and not any(belongs_to(parts, c) for c in open_content)):
             continue
-        roh |= teile
-    gegeben = staemme(" ".join([task.get("titel") or "", task.get("inhalt") or "", task.get("frage") or ""]
-                               + [str(a or "") for a in antworten]))
-    return {t for t in roh if len(t) >= GESPERRT_MIN_LAENGE and not _gegeben(t, gegeben)}
+        raw |= parts
+    given = staemme(" ".join([task.get("titel") or "", task.get("inhalt") or "", task.get("frage") or ""]
+                             + [str(a or "") for a in answers]))
+    return {t for t in raw if len(t) >= BLOCKED_MIN_LENGTH and not _given(t, given)}
 
 
-def verratene_woerter(text: str, gesperrt: set[str]) -> list[str]:
-    """Wörter aus `text`, die einen gesperrten Stamm enthalten (auch gebeugt oder zusammengesetzt)."""
-    if not gesperrt:
+def revealing_words(text: str, blocked: set[str]) -> list[str]:
+    """Words of `text` that contain a blocked stem (also inflected or as part of a compound)."""
+    if not blocked:
         return []
-    return list(dict.fromkeys(w for w in woerter(text) if any(_steckt_in(t, {stamm(w)}) for t in gesperrt)))
+    return list(dict.fromkeys(w for w in woerter(text) if any(_contained_in(t, {stamm(w)}) for t in blocked)))
 
 
-def loesung_verraten(bewertung: dict, task: dict, antworten: list[str]) -> str | None:
-    """D-21: Feedback oder Hinweis nennen die erwartete Antwort, einen Schlüsselbegriff oder den
-    erwarteten Inhalt eines noch nicht erfüllten Elements, den die lernende Person nicht selbst
-    geschrieben hat. Multiple Choice ist ausgenommen."""
-    gesperrt = gesperrte_staemme(task, bewertung.get("elemente"), antworten)
-    treffer = verratene_woerter(f"{bewertung.get('feedback', '')} {bewertung.get('hinweis', '')}", gesperrt)
-    if not treffer:
+def solution_revealed(evaluation: dict, task: dict, answers: list[str]) -> str | None:
+    """D-21: Feedback or hint name the expected answer, a key term or the expected content of an element
+    not yet fulfilled that the learner has not written. Multiple choice is exempt."""
+    blocked = blocked_stems(task, evaluation.get("elemente"), answers)
+    hits = revealing_words(f"{evaluation.get('feedback', '')} {evaluation.get('hinweis', '')}", blocked)
+    if not hits:
         return None
-    return ("Feedback oder Hinweis verraten die erwartete Antwort: " + ", ".join(f"«{w}»" for w in treffer)
+    return ("Feedback oder Hinweis verraten die erwartete Antwort: " + ", ".join(f"«{w}»" for w in hits)
             + " hat der Lernende nicht selbst geschrieben. Nenne keinen Begriff und keinen Inhalt der erwarteten "
             "Lösung. Gib einen Denkanstoss, der auf den Fall oder das Material verweist, ohne das Ergebnis "
             "vorwegzunehmen; aufgreifen darfst du nur, was in der Aufgabe oder in der Antwort des Lernenden steht.")
 
 
-def ohne_verratene_saetze(text: str, gesperrt: set[str]) -> str:
-    """D-21: Entfernt die Sätze, die einen gesperrten Stamm enthalten."""
-    saetze = [s for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s]
-    return " ".join(s for s in saetze if not verratene_woerter(s, gesperrt))
+def without_revealing_sentences(text: str, blocked: set[str]) -> str:
+    """D-21: Removes the sentences that contain a blocked stem."""
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s]
+    return " ".join(s for s in sentences if not revealing_words(s, blocked))
 
 
 HINWEIS_AEHNLICH = 0.75
@@ -1416,8 +1416,8 @@ STRUKTUR: dict[str, dict[str, tuple[str, bool]]] = {
     "MUSTERLOESUNG_PRUEFEN": {"loesung": ("text", True), "offene_punkte": ("liste", False),
                               "merkmale_im_fall": ("bool", False)},
     "MUSTERLOESUNG_VERGLEICHEN": {"uebereinstimmend": ("bool", True), "unterschied": ("text", False)},
-    # N-06: Verallgemeinerung einer Anweisung im Teaching Mode
-    "ANWEISUNG_VERALLGEMEINERN": {"regel": ("text", True)},
+    # N-06: generalizing an instruction in teaching mode
+    "GENERALIZE_INSTRUCTION": {"rule": ("text", True)},
 }
 
 _TYPNAME = {"text": "ein Text", "liste_text": "eine Liste von Texten",

@@ -165,11 +165,11 @@
     <label>4. Tutorverhalten <span class="sub">– optionale Hinweise an den Tutor</span></label>
     <textarea id="hinweise" rows="3"
       placeholder="z.B. «Arbeite viel mit Alltagsbeispielen aus der Berufswelt», «Sei streng bei Fachbegriffen», «Stelle oft Rückfragen» …"></textarea>
-    <!-- N-06: Anweisungen aus dem Teaching Mode, getrennt von den Hinweisen (Entscheid E7) -->
-    <div id="anweisungen-box" class="hidden">
+    <!-- N-06: instructions from teaching mode, kept apart from the hints (decision E7) -->
+    <div id="instructions-box" class="hidden">
       <label>Anweisungen aus dem Teaching Mode <span class="sub">– mit «Teach the Tutor» gespeichert; Löschen wirkt
         ab dem nächsten Schritt des Tutors</span></label>
-      <ul id="anweisungen-liste" style="margin:0;padding-left:1.2em"></ul>
+      <ul id="instructions-list" style="margin:0;padding-left:1.2em"></ul>
     </div>
 
     <label>5. Tutor-Einstellungen <span class="sub">– fehlt eine Einstellung, gilt der Standard</span></label>
@@ -659,17 +659,17 @@ async function loadForEdit() {
   const l = await r.json();
   if (!r.ok) { showResult("error", esc(l.detail || "Lektion nicht gefunden")); return; }
   if (l.archiviert) {
-    // L-04: Eine archivierte Lektion lässt sich nicht bearbeiten, auch nicht über die Adresse
+    // L-04: an archived lesson cannot be edited, not even via the URL
     document.querySelector(".card").classList.add("hidden");
     $("edit-notice").innerHTML = "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten. " +
-      '<a href="/teacher/lessons" id="link-lektionsliste">Zur Lektionsliste</a>';
+      '<a href="/teacher/lessons" id="link-lesson-list">Zur Lektionsliste</a>';
     $("edit-notice").classList.remove("hidden");
     return;
   }
   $("titel").value = l.titel || "";
   $("ziele").value = (l.lernziele || []).join("\n");
   $("hinweise").value = l.tutor_hinweise || "";
-  zeigeAnweisungen(l.tutor_anweisungen || []);
+  showInstructions(l.tutor_instructions || []);
   // L-02: Materialien aus der Ablage als Verweise, der eigene Text wie bisher zerlegt
   const eigen = l.material_eigen !== undefined ? l.material_eigen : l.material;
   const parts = splitMaterial(eigen, (l.quellen || []).filter(q => !q.material_id));
@@ -693,25 +693,25 @@ async function loadForEdit() {
   }
 }
 
-/* ------------------------------------------- Anweisungen aus dem Teaching Mode (N-06) */
-function zeigeAnweisungen(liste) {
-  $("anweisungen-box").classList.remove("hidden");
-  $("anweisungen-liste").innerHTML = liste.length ? liste.map(a => `<li data-id="${esc(a.id)}" style="margin:6px 0">
-      <strong>${a.geltung === "lektion" ? "Ganze Lektion" : `Thema «${esc(a.konzept)}»`}</strong>
-      <span class="sub">· ${esc(new Date(a.zeitpunkt * 1000).toLocaleString("de-CH"))}</span><br>${esc(a.text)}
-      <button type="button" class="secondary small" data-a="anweisung-loeschen">Löschen</button></li>`).join("")
+/* ------------------------------------------- Instructions from teaching mode (N-06) */
+function showInstructions(list) {
+  $("instructions-box").classList.remove("hidden");
+  $("instructions-list").innerHTML = list.length ? list.map(i => `<li data-id="${esc(i.id)}" style="margin:6px 0">
+      <strong>${i.scope === "lesson" ? "Ganze Lektion" : `Thema «${esc(i.concept)}»`}</strong>
+      <span class="sub">· ${esc(new Date(i.created_at * 1000).toLocaleString("de-CH"))}</span><br>${esc(i.text)}
+      <button type="button" class="secondary small" data-a="delete-instruction">Löschen</button></li>`).join("")
     : '<li class="sub">Noch keine Anweisungen.</li>';
 }
-$("anweisungen-liste").onclick = async e => {
-  const b = e.target.closest("button[data-a=anweisung-loeschen]");
+$("instructions-list").onclick = async e => {
+  const b = e.target.closest("button[data-a=delete-instruction]");
   if (!b) return;
   b.disabled = true;
-  const r = await fetch(`/api/teacher/lessons/${encodeURIComponent(editId)}/anweisungen/` +
+  const r = await fetch(`/api/teacher/lessons/${encodeURIComponent(editId)}/instructions/` +
     encodeURIComponent(b.closest("li").dataset.id), { method: "DELETE" });
   const d = await r.json();
-  if (!r.ok) { showResult("error", esc(d.detail || "Löschen hat nicht geklappt."), "anweisungen-box"); b.disabled = false; return; }
-  zeigeAnweisungen(d.tutor_anweisungen);
-  showResult("success", `Anweisung gelöscht (Version ${d.version}).`, "anweisungen-box");
+  if (!r.ok) { showResult("error", esc(d.detail || "Löschen hat nicht geklappt."), "instructions-box"); b.disabled = false; return; }
+  showInstructions(d.tutor_instructions);
+  showResult("success", `Anweisung gelöscht (Version ${d.version}).`, "instructions-box");
 };
 
 renderSources();

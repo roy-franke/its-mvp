@@ -503,8 +503,8 @@ function renderEvent(ev, mitDatum) {
       + (p.ergaenzungen != null ? ` <span class="muted">(bisher ${p.ergaenzungen} ${p.ergaenzungen === 1 ? "Ergänzung" : "Ergänzungen"})</span>` : "")
       + (p.konzept ? ` <span class="muted">Konzept «${esc(p.konzept)}»</span>` : ""); }
     else if (ev.type === "kopie_erkannt") { cls += " regel_verstoss"; body = `✍️ <strong>Kopie erkannt</strong> (D-11): ${Math.round(p.anteil * 100)} % der Antwort wörtlich aus «${esc(p.quelle || "")}», nicht bewertet und nicht als Versuch gezählt`; }
-    // N-06: Anweisung aus dem Teaching Mode
-    else if (ev.type === "tutor_anweisung") body = `🧑‍🏫 <strong>Anweisung an den Tutor</strong> (${p.geltung === "lektion" ? "für die ganze Lektion" : `nur zum Thema «${esc(p.konzept)}»`}${p.schrittart ? `, bei Schritt «${esc(p.schrittart)}»` : ""}, Lektion jetzt Version ${esc(p.version)}): ${esc(p.text)}${p.original ? `<br><span class="muted">Ursprünglicher Text: ${esc(p.original)}</span>` : ""}`;
+    // N-06: instruction from teaching mode
+    else if (ev.type === "tutor_instruction") body = `🧑‍🏫 <strong>Anweisung an den Tutor</strong> (${p.scope === "lesson" ? "für die ganze Lektion" : `nur zum Thema «${esc(p.concept)}»`}${p.step_type ? `, bei Schritt «${esc(p.step_type)}»` : ""}, Lektion jetzt Version ${esc(p.version)}): ${esc(p.text)}${p.original ? `<br><span class="muted">Ursprünglicher Text: ${esc(p.original)}</span>` : ""}`;
     else if (ev.type === "witz") body = `😄 Witz zum Thema${p.quelle === "liste" ? ' <span class="muted">(aus der hinterlegten Liste)</span>' : ""}: ${esc(p.witz)}`;
     else if (ev.type === "anfrage_abgebrochen") body = `⏹️ <strong>Bearbeitung gestoppt</strong> (${esc({antwort: "Antwort", frage: "Verständnisfrage", theorie: "«Theorie dazu»", genauer: "«Genauer erklären»", widerspruch: "Einwand", einstufung: "Einstufung", allgemeinwissen: "Allgemeinwissen", internet: "Internetrecherche"}[p.art] || p.art)}), nichts übernommen${p.text ? `: <span class="muted">${esc(p.text)}</span>` : ""}`;
     else if (ev.type === "rag_abruf") {
@@ -593,7 +593,7 @@ const SCHRITT = {
   ABSCHLUSS: "Abschluss", LERNZIELE_VORSCHLAGEN: "Lernziele vorschlagen",
   MATERIAL_PRUEFEN: "Material prüfen", WITZ: "Witz zum Thema",
   MUSTERLOESUNG_PRUEFEN: "Musterlösung prüfen", MUSTERLOESUNG_VERGLEICHEN: "Musterlösung vergleichen",
-  ANWEISUNG_VERALLGEMEINERN: "Anweisung verallgemeinern",
+  GENERALIZE_INSTRUCTION: "Anweisung verallgemeinern",
 };
 // D-14/D-15: Status der Elemente
 const STATUS_SYMBOL = { korrekt: "✅", vertretbar: "☑️", ungenau: "🔸", nicht_beurteilbar: "❔", falsch: "❌", fehlt: "◻️" };

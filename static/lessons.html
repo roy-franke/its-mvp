@@ -168,7 +168,7 @@ $("rows").onclick = async e => {
   if (!btn) return;
   const id = btn.closest("tr").dataset.id;
   if (btn.dataset.act === "edit") location.href = `/teacher/lessons/${encodeURIComponent(id)}/edit`;
-  // N-06: Testlauf mit «Teach the Tutor» unter jedem Schritt
+  // N-06: test run with "Teach the Tutor" below every step
   if (btn.dataset.act === "teaching") location.href = `/?teaching=${encodeURIComponent(id)}`;
   if (btn.dataset.act === "view") showDetail(id);
   if (btn.dataset.act === "archive") confirmArchive(id);

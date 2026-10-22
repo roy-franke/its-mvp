@@ -65,31 +65,31 @@ def test_ak4_lektion_archivieren_und_wiederherstellen():
     assert "Löschen" not in html and "gelöscht" not in html and "Wiederherstellen" in html
 
 
-def test_l04_ak3_archivierte_lektion_speichern_bleibt_unveraendert():
-    """L-04 AK 3: PUT auf eine archivierte Lektion antwortet mit 409, die Datei bleibt gleich."""
+def test_l04_ak3_saving_an_archived_lesson_changes_nothing():
+    """L-04 AK 3: PUT on an archived lesson answers 409, the lesson file stays the same."""
     from app import main
-    c = TestClient(app)
-    lid = c.post("/api/teacher/lessons", json={"titel": "Archiv L-04", "lernziele": ["Ziel"],
-                                               "material": "Haftung nach Art. 41 OR. " * 10}).json()["id"]
-    c.delete(f"/api/teacher/lessons/{lid}")
-    datei = main._lesson_path(lid)
-    vorher = datei.read_bytes()
-    r = c.put(f"/api/teacher/lessons/{lid}", json={"titel": "Geändert", "lernziele": ["Ziel"],
-                                                   "material": "Anderes Material. " * 10})
-    assert r.status_code == 409
-    assert "archiviert" in r.json()["detail"]
-    assert datei.read_bytes() == vorher
-    d = c.get(f"/api/teacher/lessons/{lid}").json()
-    assert d["version"] == 1 and d["titel"] == "Archiv L-04" and d["archiviert"] is True
-    # AK 6: Nach dem Wiederherstellen ist die Lektion wieder bearbeitbar
-    c.post(f"/api/teacher/lessons/{lid}/wiederherstellen")
-    r = c.put(f"/api/teacher/lessons/{lid}", json={"titel": "Geändert", "lernziele": ["Ziel"],
-                                                   "material": "Anderes Material. " * 10})
-    assert r.status_code == 200 and r.json()["version"] == 2
+    client = TestClient(app)
+    lesson_id = client.post("/api/teacher/lessons", json={"titel": "Archiv L-04", "lernziele": ["Ziel"],
+                                                         "material": "Haftung nach Art. 41 OR. " * 10}).json()["id"]
+    client.delete(f"/api/teacher/lessons/{lesson_id}")
+    lesson_file = main._lesson_path(lesson_id)
+    before = lesson_file.read_bytes()
+    response = client.put(f"/api/teacher/lessons/{lesson_id}", json={"titel": "Geändert", "lernziele": ["Ziel"],
+                                                                     "material": "Anderes Material. " * 10})
+    assert response.status_code == 409
+    assert "archiviert" in response.json()["detail"]
+    assert lesson_file.read_bytes() == before
+    detail = client.get(f"/api/teacher/lessons/{lesson_id}").json()
+    assert detail["version"] == 1 and detail["titel"] == "Archiv L-04" and detail["archiviert"] is True
+    # AK 6: after restoring, the lesson can be edited again
+    client.post(f"/api/teacher/lessons/{lesson_id}/wiederherstellen")
+    response = client.put(f"/api/teacher/lessons/{lesson_id}", json={"titel": "Geändert", "lernziele": ["Ziel"],
+                                                                     "material": "Anderes Material. " * 10})
+    assert response.status_code == 200 and response.json()["version"] == 2
 
 
-def test_l04_ak2_ak4_editor_und_materialdetails_sperren_archivierte_lektionen():
+def test_l04_ak2_ak4_editor_and_material_details_lock_archived_lessons():
     editor = Path("static/lesson_editor.html").read_text(encoding="utf-8")
     assert "Die Lektion ist archiviert. Stelle sie zuerst wieder her, um sie zu bearbeiten." in editor
-    js = Path("static/materialien.js").read_text(encoding="utf-8")
-    assert "l.archiviert ? `${esc(l.titel)} (archiviert)`" in js
+    script = Path("static/materialien.js").read_text(encoding="utf-8")
+    assert "l.archiviert ? `${esc(l.titel)} (archiviert)`" in script

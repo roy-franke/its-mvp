@@ -1,6 +1,6 @@
 {
-  "_quelle": "Aufgabe «Unfall in der Bäckerei» aus dem Feedback vom 20.10.2026 (Auftrag 5, D-19 bis D-21). Titel, Frage und Antworten stammen aus dem Auftragsdokument. Sachverhalt, Musterlösung und erwartete Elemente sind rekonstruiert, weil die Lernsequenz aus der its.db nicht vorlag; sie bilden den Befund nach, dass die erwarteten Elemente den Inhalt der Musterlösung in deren Tiefe tragen. Liegt die Aufgabe aus der its.db vor, ersetzt sie diese Felder.",
-  "aufgabe": {
+  "_source": "Task «Unfall in der Bäckerei» from the feedback of 20.10.2026 (order 5, D-19 to D-21). Title, question and answers come from the order document. Case, model solution and expected elements are reconstructed because the learning sequence from its.db was not available; they reproduce the finding that the expected elements carry the content of the model solution at its depth. Once the task from its.db is available, it replaces these fields.",
+  "task": {
     "typ": "aufgabe",
     "titel": "Unfall in der Bäckerei",
     "konzept": "Verschuldenshaftung",
@@ -9,26 +9,43 @@
     "frage": "Wer ist verantwortlich für den Schaden, und welche Art der Haftung greift hier? Begründe kurz.",
     "optionen": [],
     "erwartete_antwort": "Der Bäcker haftet nach Art. 41 OR für Fahrlässigkeit (Verschuldenshaftung), weil er die gelockerte Schraube bemerkt und die Maschine trotzdem weiter benutzt hat.",
-    "schluesselbegriffe": ["Fahrlässigkeit", "Verschuldenshaftung"],
-    "erwartete_elemente": [
-      {"dimension": "verantwortliche Person", "erwartet": "der Bäcker"},
-      {"dimension": "Art der Haftung", "erwartet": "Haftung für Fahrlässigkeit (Verschuldenshaftung nach Art. 41 OR)"},
-      {"dimension": "kurze Begründung", "erwartet": "Der Bäcker hat die gebotene Sorgfalt verletzt, weil er die gelockerte Schraube bemerkt und die Maschine trotzdem benutzt hat; das ist fahrlässig."}
+    "schluesselbegriffe": [
+      "Fahrlässigkeit",
+      "Verschuldenshaftung"
     ],
-    "merkmale": [{"merkmal": "Verschulden", "im_fall": "die Maschine aber trotzdem weiter benutzt"}],
+    "erwartete_elemente": [
+      {
+        "dimension": "verantwortliche Person",
+        "erwartet": "der Bäcker"
+      },
+      {
+        "dimension": "Art der Haftung",
+        "erwartet": "Haftung für Fahrlässigkeit (Verschuldenshaftung nach Art. 41 OR)"
+      },
+      {
+        "dimension": "kurze Begründung",
+        "erwartet": "Der Bäcker hat die gebotene Sorgfalt verletzt, weil er die gelockerte Schraube bemerkt und die Maschine trotzdem benutzt hat; das ist fahrlässig."
+      }
+    ],
+    "merkmale": [
+      {
+        "merkmal": "Verschulden",
+        "im_fall": "die Maschine aber trotzdem weiter benutzt"
+      }
+    ],
     "alternative_loesungen": []
   },
-  "antworten": {
+  "answers": {
     "d19": "Der Bäcker. Verschuldenshaftung. Der Bäcker ist verantwortlich für seine Produkte.",
     "d20": [
       "Der Bäcker. Haftung aufgrund von Fahrlässigkeit. Der Bäcker ist verantwortlich für seine Produkte.",
       "Der Bäcker. Haftung wegen Fahrlässigkeit. Der Bäcker ist verantwortlich für seine Produkte.",
       "Der Bäcker. Fahrlässigkeitshaftung. Der Bäcker ist verantwortlich für seine Produkte."
     ],
-    "ohne_fachbegriff": "Der Bäcker haftet.",
-    "d21_teilweise": "Der Bäcker. Er ist verantwortlich für seine Produkte."
+    "without_key_term": "Der Bäcker haftet.",
+    "d21_partial": "Der Bäcker. Er ist verantwortlich für seine Produkte."
   },
-  "beobachtet": {
-    "hinweis_d20": "Prüfe, ob der Begriff «Haftung für Fahrlässigkeit» im Material explizit als korrekte Bezeichnung genannt wird."
+  "observed": {
+    "hint_d20": "Prüfe, ob der Begriff «Haftung für Fahrlässigkeit» im Material explizit als korrekte Bezeichnung genannt wird."
   }
 }

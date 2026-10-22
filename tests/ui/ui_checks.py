@@ -1518,73 +1518,84 @@ def l02_auswahl_im_editor(pw):
 
 
 @scenario("l04")
-def l04_archiviert_nicht_bearbeitbar(pw):
+def l04_archived_not_editable(pw):
     """L-04: Kein Weg in den Editor einer archivierten Lektion; Duplizieren und Wiederherstellen wie bisher."""
     with server() as base:
-        pfade = _testdateien(Path(tempfile.mkdtemp(prefix="its_ui_dateien_")))
-        c = httpx.Client(base_url=base)
-        with open(pfade["haftung.pdf"], "rb") as f:
-            m = c.post("/api/teacher/materialien", files={"file": ("haftung.pdf", f.read())},
-                       data={"name": "OR Haftpflicht"}).json()
+        files = _testdateien(Path(tempfile.mkdtemp(prefix="its_ui_dateien_")))
+        client = httpx.Client(base_url=base)
+        with open(files["haftung.pdf"], "rb") as f:
+            material = client.post("/api/teacher/materialien", files={"file": ("haftung.pdf", f.read())},
+                                   data={"name": "OR Haftpflicht"}).json()
         ids = {}
-        for titel in ("Aktiv L-04", "Archiv L-04"):
-            ids[titel] = c.post("/api/teacher/lessons", json={"titel": titel, "lernziele": ["Haftung verstehen"],
-                                                              "material": "", "materialien": [m["id"]]}).json()["id"]
-        archiv = ids["Archiv L-04"]
-        c.delete(f"/api/teacher/lessons/{archiv}")
+        for title in ("Aktiv L-04", "Archiv L-04"):
+            ids[title] = client.post("/api/teacher/lessons", json={
+                "titel": title, "lernziele": ["Haftung verstehen"], "material": "",
+                "materialien": [material["id"]]}).json()["id"]
+        archived = ids["Archiv L-04"]
+        client.delete(f"/api/teacher/lessons/{archived}")
         page = launch(pw).new_page(viewport={"width": 1300, "height": 900})
-        fehler = []
-        page.on("pageerror", lambda e: fehler.append(str(e)))
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(base + "/teacher/lessons")
         page.check("#show-archived")
-        expect(page.locator(f"tr[data-id='{archiv}']")).to_have_count(1, timeout=10000)
-        archivierte = page.locator("tr", has=page.locator(".pill", has_text="archiviert"))
-        check("L-04 AK1 keine archivierte Lektion hat «Bearbeiten»", archivierte.count() >= 1
-              and archivierte.locator("button[data-act='edit']").count() == 0)
+        expect(page.locator(f"tr[data-id='{archived}']")).to_have_count(1, timeout=10000)
+        archived_rows = page.locator("tr", has=page.locator(".pill", has_text="archiviert"))
+        check("L-04 AK1 keine archivierte Lektion hat «Bearbeiten»", archived_rows.count() >= 1
+              and archived_rows.locator("button[data-act='edit']").count() == 0)
         check("L-04 AK6 aktive Lektion hat weiterhin «Bearbeiten»",
               page.locator(f"tr[data-id='{ids['Aktiv L-04']}'] button[data-act='edit']").count() == 1)
-        # AK 2: direkter Aufruf der Editor-Adresse
-        page.goto(base + f"/teacher/lessons/{archiv}/edit")
+        # AK 2: calling the editor URL directly
+        page.goto(base + f"/teacher/lessons/{archived}/edit")
         expect(page.locator("#edit-notice")).to_contain_text("Die Lektion ist archiviert. Stelle sie zuerst wieder "
                                                              "her, um sie zu bearbeiten.", timeout=10000)
         check("L-04 AK2 kein bearbeitbares Formular", not page.locator("#titel").is_visible()
               and not page.locator("#btn-save").is_visible())
         check("L-04 AK2 Link zur Lektionsliste",
               page.locator("#edit-notice a").get_attribute("href") == "/teacher/lessons")
-        # AK 4: Details eines Lernmaterials
+        # AK 4: details of a learning material
         page.goto(base + "/teacher/materialien")
         page.locator(".itsm-tabelle tbody tr").first.locator("button[data-a=details]").click()
-        box = page.locator(".itsm-box")
-        expect(box).to_contain_text("Archiv L-04 (archiviert)", timeout=10000)
+        dialog = page.locator(".itsm-box")
+        expect(dialog).to_contain_text("Archiv L-04 (archiviert)", timeout=10000)
         check("L-04 AK4 archivierte Lektion nicht in den Editor verlinkt",
-              box.locator(f"a[href='/teacher/lessons/{archiv}/edit']").count() == 0)
+              dialog.locator(f"a[href='/teacher/lessons/{archived}/edit']").count() == 0)
         check("L-04 AK6 aktive Lektion weiterhin verlinkt",
-              box.locator(f"a[href='/teacher/lessons/{ids['Aktiv L-04']}/edit']").count() == 1)
-        # AK 5: Editor offen, Lektion wird inzwischen archiviert, dann Speichern
-        aktiv = ids["Aktiv L-04"]
-        page.goto(base + f"/teacher/lessons/{aktiv}/edit")
+              dialog.locator(f"a[href='/teacher/lessons/{ids['Aktiv L-04']}/edit']").count() == 1)
+        # AK 5: editor open, the lesson gets archived meanwhile, then save
+        active = ids["Aktiv L-04"]
+        page.goto(base + f"/teacher/lessons/{active}/edit")
         expect(page.locator("#titel")).to_have_value("Aktiv L-04", timeout=10000)
-        c.delete(f"/api/teacher/lessons/{aktiv}")
+        client.delete(f"/api/teacher/lessons/{active}")
         page.fill("#titel", "Aktiv L-04 geändert")
         page.click("#btn-save")
         expect(page.locator("#result")).to_contain_text("archiviert", timeout=10000)
-        d = c.get(f"/api/teacher/lessons/{aktiv}").json()
+        detail = client.get(f"/api/teacher/lessons/{active}").json()
         check("L-04 AK5 Speichern nach dem Archivieren abgelehnt, Version unverändert",
-              d["version"] == 1 and d["titel"] == "Aktiv L-04", f"Version {d['version']}, {d['titel']}")
-        # AK 6: Duplizieren und Wiederherstellen wie bisher
+              detail["version"] == 1 and detail["titel"] == "Aktiv L-04", f"Version {detail['version']}, {detail['titel']}")
+        # AK 6: duplicating and restoring as before
         page.goto(base + "/teacher/lessons")
         page.check("#show-archived")
-        page.locator(f"tr[data-id='{archiv}'] button[data-act='duplicate']").click()
+        page.locator(f"tr[data-id='{archived}'] button[data-act='duplicate']").click()
         expect(page.locator("#edit-notice")).to_contain_text("Kopie angelegt", timeout=10000)
         check("L-04 AK6 Kopie einer archivierten Lektion ist bearbeitbar", page.locator("#titel").is_visible())
         page.goto(base + "/teacher/lessons")
         page.check("#show-archived")
-        page.locator(f"tr[data-id='{archiv}'] button[data-act='restore']").click()
+        page.locator(f"tr[data-id='{archived}'] button[data-act='restore']").click()
         expect(page.locator("#banner")).to_contain_text("wiederhergestellt", timeout=10000)
-        page.goto(base + f"/teacher/lessons/{archiv}/edit")
+        page.goto(base + f"/teacher/lessons/{archived}/edit")
         expect(page.locator("#titel")).to_have_value("Archiv L-04", timeout=10000)
         check("L-04 AK6 nach dem Wiederherstellen wieder bearbeitbar", page.locator("#btn-save").is_visible())
-        check("L-04 ohne Skriptfehler", not fehler, "; ".join(fehler))
+        check("L-04 ohne Skriptfehler", not errors, "; ".join(errors))
+
+
+def _assessment_to_learning(page):
+    """Answers the three placement questions and waits for the first step."""
+    expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
+    for _ in range(3):
+        page.fill("#assess-answer", "weiss ich nicht")
+        page.click("#btn-assess")
+    expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
+    page.wait_for_selector("#waiting", state="detached", timeout=60000)
 
 
 @scenario("n06")
@@ -1593,8 +1604,8 @@ def n06_teaching_mode(pw):
     with server() as base:
         httpx.delete(base + "/api/teacher/lessons/bruchbegriff-verstehen-und-anwenden")
         page = launch(pw).new_page(viewport={"width": 1300, "height": 900})
-        fehler = []
-        page.on("pageerror", lambda e: fehler.append(str(e)))
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(base + "/teacher/lessons")
         page.check("#show-archived")
         expect(page.locator("tr[data-id='bruchbegriff-verstehen-und-anwenden']")).to_have_count(1, timeout=10000)
@@ -1604,78 +1615,71 @@ def n06_teaching_mode(pw):
         page.locator("tr[data-id='haftungsrecht'] button[data-act='teaching']").click()
         page.fill("#name", "LP Teaching")
         page.click("#btn-login")
-        expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
-        for _ in range(3):
-            page.fill("#assess-answer", "weiss ich nicht")
-            page.click("#btn-assess")
-        expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
-        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        _assessment_to_learning(page)
         zur_aufgabe(page)
-        tutor_msgs = page.locator(".msg.tutor:not(.waiting)")
-        ohne = [i for i in range(tutor_msgs.count())
-                if tutor_msgs.nth(i).locator(".teach-btn").count() == 0
-                and not tutor_msgs.nth(i).evaluate("e => !!(e.nextElementSibling && e.nextElementSibling.matches('.msg.tutor.question'))")]
-        check("N-06 AK2 jeder Schritt des Tutors zeigt «Teach the Tutor»", tutor_msgs.count() > 0 and not ohne,
-              f"{len(ohne)} ohne Knopf von {tutor_msgs.count()}")
-        # Anweisung nur für dieses Thema (an der Frage der Aufgabe)
-        frage = page.locator(".msg.tutor.question").last
-        frage.locator(".teach-btn").click()
-        box = frage.locator(".teach")
-        box.locator("textarea.teach-text").fill("Verlange den Gesetzesartikel.")
+        tutor_messages = page.locator(".msg.tutor:not(.waiting)")
+        without_button = [
+            i for i in range(tutor_messages.count())
+            if tutor_messages.nth(i).locator(".teach-btn").count() == 0
+            and not tutor_messages.nth(i).evaluate(
+                "e => !!(e.nextElementSibling && e.nextElementSibling.matches('.msg.tutor.question'))")]
+        check("N-06 AK2 jeder Schritt des Tutors zeigt «Teach the Tutor»",
+              tutor_messages.count() > 0 and not without_button,
+              f"{len(without_button)} ohne Knopf von {tutor_messages.count()}")
+        # instruction only for this topic (at the question of the task)
+        question = page.locator(".msg.tutor.question").last
+        question.locator(".teach-btn").click()
+        form = question.locator(".teach")
+        form.locator("textarea.teach-text").fill("Verlange den Gesetzesartikel.")
         check("N-06 Thema ist vorgewählt, wenn das Konzept bekannt ist",
-              box.locator("input[value='thema']").is_checked())
-        box.locator(".teach-ok").click()
-        expect(frage.locator(".teach-meldung")).to_contain_text("zum Thema", timeout=10000)
-        # Anweisung für die ganze Lektion: Vorschlag ansehen, ändern, bestätigen
-        theorie = page.locator(".msg.tutor.theory").first
-        theorie.locator(".teach-btn").click()
-        box = theorie.locator(".teach")
-        box.locator("textarea.teach-text").fill("Hier fehlt ein Beispiel aus dem Berufsalltag.")
-        box.locator("input[value='lektion']").check()
-        check("N-06 AK4 zuerst verallgemeinern", box.locator(".teach-ok").inner_text() == "Verallgemeinern")
-        box.locator(".teach-ok").click()
-        regel = box.locator("textarea.teach-regel")
-        expect(regel).to_be_visible(timeout=10000)
+              form.locator("input[value='topic']").is_checked())
+        form.locator(".teach-ok").click()
+        expect(question.locator(".teach-message")).to_contain_text("zum Thema", timeout=10000)
+        # instruction for the whole lesson: see the suggestion, change it, confirm it
+        theory = page.locator(".msg.tutor.theory").first
+        theory.locator(".teach-btn").click()
+        form = theory.locator(".teach")
+        form.locator("textarea.teach-text").fill("Hier fehlt ein Beispiel aus dem Berufsalltag.")
+        form.locator("input[value='lesson']").check()
+        check("N-06 AK4 zuerst verallgemeinern", form.locator(".teach-ok").inner_text() == "Verallgemeinern")
+        form.locator(".teach-ok").click()
+        rule = form.locator("textarea.teach-rule")
+        expect(rule).to_be_visible(timeout=10000)
         check("N-06 AK4 verallgemeinerte Fassung wird angezeigt",
-              regel.input_value().startswith("In dieser Lektion gilt allgemein"), regel.input_value())
-        regel.fill("Gib zu jeder Erklärung ein Beispiel aus dem Berufsalltag.")
-        check("N-06 AK4 Bestätigung verlangt", box.locator(".teach-ok").inner_text() == "Bestätigen und speichern")
-        box.locator(".teach-ok").click()
-        expect(theorie.locator(".teach-meldung")).to_contain_text("für die ganze Lektion", timeout=10000)
-        lektion = httpx.get(base + "/api/teacher/lessons/haftungsrecht").json()
-        texte = [a["text"] for a in lektion.get("tutor_anweisungen") or []]
+              rule.input_value().startswith("In dieser Lektion gilt allgemein"), rule.input_value())
+        rule.fill("Gib zu jeder Erklärung ein Beispiel aus dem Berufsalltag.")
+        check("N-06 AK4 Bestätigung verlangt", form.locator(".teach-ok").inner_text() == "Bestätigen und speichern")
+        form.locator(".teach-ok").click()
+        expect(theory.locator(".teach-message")).to_contain_text("für die ganze Lektion", timeout=10000)
+        lesson = httpx.get(base + "/api/teacher/lessons/haftungsrecht").json()
+        texts = [i["text"] for i in lesson.get("tutor_instructions") or []]
         check("N-06 AK4/AK5 bestätigte Fassung gespeichert",
-              texte == ["Verlange den Gesetzesartikel.", "Gib zu jeder Erklärung ein Beispiel aus dem Berufsalltag."],
-              str(texte))
-        # AK 6: Lernverlauf der Teaching-Sequenz
+              texts == ["Verlange den Gesetzesartikel.", "Gib zu jeder Erklärung ein Beispiel aus dem Berufsalltag."],
+              str(texts))
+        # AK 6: learning history of the teaching session
         page.goto(base + "/teacher")
         page.check("#show-tests")
         page.locator(".seq-item").first.click()
         expect(page.locator("#detail-events")).to_contain_text("Anweisung an den Tutor", timeout=10000)
         check("N-06 AK6 beide Anweisungen im Lernverlauf",
               page.locator("#detail-events").inner_text().count("Anweisung an den Tutor") == 2)
-        # AK 5: Editor listet die Anweisungen und löscht einzelne
+        # AK 5: the editor lists the instructions and deletes single ones
         page.goto(base + "/teacher/lessons/haftungsrecht/edit")
-        expect(page.locator("#anweisungen-liste li")).to_have_count(2, timeout=10000)
-        page.locator("#anweisungen-liste button[data-a='anweisung-loeschen']").first.click()
-        expect(page.locator("#anweisungen-liste li")).to_have_count(1, timeout=10000)
+        expect(page.locator("#instructions-list li")).to_have_count(2, timeout=10000)
+        page.locator("#instructions-list button[data-a='delete-instruction']").first.click()
+        expect(page.locator("#instructions-list li")).to_have_count(1, timeout=10000)
         check("N-06 AK5 Löschen im Editor", "gelöscht" in page.locator("#result").inner_text()
-              and len(httpx.get(base + "/api/teacher/lessons/haftungsrecht").json()["tutor_anweisungen"]) == 1)
-        # AK 2: Im normalen Testlauf fehlt «Teach the Tutor»
+              and len(httpx.get(base + "/api/teacher/lessons/haftungsrecht").json()["tutor_instructions"]) == 1)
+        # AK 2: no "Teach the Tutor" in a normal test run
         page.goto(base + "/")
         expect(page.locator("#view-home")).to_be_visible(timeout=10000)
         page.select_option("#lesson-select", "haftungsrecht")
         page.click("#btn-start")
-        page.locator("#modal-ok").click()            # bestehende Sequenz: neu beginnen
-        expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
-        for _ in range(3):
-            page.fill("#assess-answer", "weiss ich nicht")
-            page.click("#btn-assess")
-        expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
-        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        page.locator("#modal-ok").click()            # existing sequence: start again
+        _assessment_to_learning(page)
         check("N-06 AK2 kein «Teach the Tutor» im normalen Testlauf",
               page.locator(".msg.tutor").count() > 0 and page.locator(".teach-btn").count() == 0)
-        check("N-06 ohne Skriptfehler", not fehler, "; ".join(fehler))
+        check("N-06 ohne Skriptfehler", not errors, "; ".join(errors))
     with server(TEACHER_PASSWORD="geheim") as base:
         page = launch(pw).new_page()
         page.goto(base + "/?teaching=haftungsrecht")
@@ -1686,12 +1690,7 @@ def n06_teaching_mode(pw):
               page.locator("#view-learn").is_hidden() and page.locator(".teach-btn").count() == 0)
         page.select_option("#lesson-select", "haftungsrecht")
         page.click("#btn-start")
-        expect(page.locator("#view-assess")).to_be_visible(timeout=30000)
-        for _ in range(3):
-            page.fill("#assess-answer", "weiss ich nicht")
-            page.click("#btn-assess")
-        expect(page.locator("#view-learn")).to_be_visible(timeout=60000)
-        page.wait_for_selector("#waiting", state="detached", timeout=60000)
+        _assessment_to_learning(page)
         check("N-06 AK2 kein «Teach the Tutor» in Sequenzen von Lernenden",
               page.locator(".msg.tutor").count() > 0 and page.locator(".teach-btn").count() == 0)
 

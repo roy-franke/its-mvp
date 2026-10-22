@@ -4,7 +4,7 @@ Läuft NICHT in der normalen Testsuite, sondern von Hand, nachdem ein echtes
 Modell in der .env konfiguriert ist (z.B. LLM_PROVIDER=ollama mit qwen3:30b).
 Das Skript ruft die Tutorlogik direkt auf (ohne Server), prüft die
 Akzeptanzkriterien der Pakete D-01 bis D-12 (Auftrag 2: D-07 bis D-12, T-09; Auftrag 3: D-13 bis D-18
-mit den Regressionsfällen aus Anhang B; Auftrag 5: D-19 bis D-21 mit der Bäckerei-Aufgabe) und schreibt einen lesbaren Bericht nach tests/eval/berichte/.
+mit den Regressionsfällen aus Anhang B) und schreibt einen lesbaren Bericht nach tests/eval/berichte/.
 
     python tests/eval/eval_didaktik.py                  # alle Pakete
     python tests/eval/eval_didaktik.py D-01 D-05        # nur ausgewählte
@@ -12,7 +12,7 @@ mit den Regressionsfällen aus Anhang B; Auftrag 5: D-19 bis D-21 mit der Bäcke
     python tests/eval/eval_didaktik.py --mock           # Rauchtest ohne Modell
     python tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <id-der-version-3>
     python tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09        # Auftrag 3
-    python tests/eval/eval_didaktik.py D-19 D-20 D-21 --haftung <id-der-version-3>   # Auftrag 5
+    python tests/eval/eval_didaktik.py D-19 D-20 D-21 --haftung <id-der-version-3>
 
 Mit qwen3:30b auf a9-mega dauert ein vollständiger Lauf je nach Anzahl
 etwa 30 bis 60 Minuten. Die Anzahl Aufgaben pro Niveau lässt sich mit
@@ -1049,85 +1049,87 @@ def eval_d18(b: Bericht, anzahl: int):
          art.get("status") in ("korrekt", "vertretbar") and r["bewertung"] != "falsch", f"{r['bewertung']} · {_el(r)}")
 
 
-# ---------------------------------------------------------------- Auftrag 5
+# ---------------------------------------------------------------- Order 5 (D-19 to D-21)
 #
-# Aufgabe «Unfall in der Bäckerei» aus dem Feedback vom 20.10.2026. Sachverhalt und erwartete
-# Elemente sind rekonstruiert (siehe _quelle in der Datei), bis die Aufgabe aus der its.db vorliegt.
+# Task "Unfall in der Bäckerei" from the feedback of 20.10.2026. Case and expected elements are
+# reconstructed (see _source in the file) until the task from its.db is available.
 
-BAECKEREI = json.loads((ROOT / "tests" / "daten" / "baeckerei.json").read_text(encoding="utf-8"))
-LAEUFE = 5
+BAKERY = json.loads((ROOT / "tests" / "daten" / "baeckerei.json").read_text(encoding="utf-8"))
+RUNS = 5
 
 
-def _mit_strenge(lesson: dict, strenge: str) -> dict:
-    return dict(lesson, einstellungen=dict(lesson.get("einstellungen") or {}, bewertungsstrenge=strenge))
+def _with_strictness(lesson: dict, strictness: str) -> dict:
+    return dict(lesson, einstellungen=dict(lesson.get("einstellungen") or {}, bewertungsstrenge=strictness))
 
 
 @paket("D-19")
 def eval_d19(b: Bericht, anzahl: int):
     """Begründungstiefe: Die Bäckerei-Antwort auf der Ebene der Frage gilt als korrekt."""
     from app import tutor
-    task, antwort = BAECKEREI["aufgabe"], BAECKEREI["antworten"]["d19"]
-    lesson = _mit_strenge(lektion(HAFTUNG), "ausgewogen")
-    b.abschnitt("D-19 Begründungstiefe", f"Antwort «{antwort}», Bewertungsstrenge ausgewogen, {LAEUFE} Läufe.")
-    urteile = []
-    for i in range(LAEUFE):
-        r = tutor.evaluate_answer(lesson, tutor.new_profile(), task, antwort)
-        urteile.append(r["bewertung"])
-        b.text(f"- Lauf {i + 1}: **{r['bewertung']}** · {_el(r)}\n  Feedback: {zitat(r.get('feedback'), 300)[2:]}")
-    b.ak("D-19", "AK 1 Bäckerei-Antwort korrekt in mindestens 4 von 5 Läufen", urteile.count("korrekt") >= 4,
-         " ".join(urteile))
-    falsch = tutor.evaluate_answer(lesson, tutor.new_profile(), task, "Die Kundin. Tierhalterhaftung.")
-    b.ak("D-19", "AK 5 eine falsche Antwort bleibt falsch", falsch["bewertung"] == "falsch",
-         f"{falsch['bewertung']} · {_el(falsch)}")
+    task, answer = BAKERY["task"], BAKERY["answers"]["d19"]
+    lesson = _with_strictness(lektion(HAFTUNG), "ausgewogen")
+    b.abschnitt("D-19 Begründungstiefe", f"Antwort «{answer}», Bewertungsstrenge ausgewogen, {RUNS} Läufe.")
+    verdicts = []
+    for i in range(RUNS):
+        result = tutor.evaluate_answer(lesson, tutor.new_profile(), task, answer)
+        verdicts.append(result["bewertung"])
+        b.text(f"- Lauf {i + 1}: **{result['bewertung']}** · {_el(result)}\n"
+               f"  Feedback: {zitat(result.get('feedback'), 300)[2:]}")
+    b.ak("D-19", "AK 1 Bäckerei-Antwort korrekt in mindestens 4 von 5 Läufen", verdicts.count("korrekt") >= 4,
+         " ".join(verdicts))
+    wrong = tutor.evaluate_answer(lesson, tutor.new_profile(), task, "Die Kundin. Tierhalterhaftung.")
+    b.ak("D-19", "AK 5 eine falsche Antwort bleibt falsch", wrong["bewertung"] == "falsch",
+         f"{wrong['bewertung']} · {_el(wrong)}")
 
 
 @paket("D-20")
 def eval_d20(b: Bericht, anzahl: int):
     """Sinngleiche Formulierungen: drei Varianten des Fachbegriffs bei allen drei Bewertungsstrengen."""
     from app import tutor
-    task = BAECKEREI["aufgabe"]
-    b.abschnitt("D-20 Sinngleiche Formulierungen", f"Drei Varianten, drei Bewertungsstrengen, je {LAEUFE} Läufe.")
-    zeilen = ["| Strenge | Antwort | Urteile | erfüllt |", "|---|---|---|---|"]
-    alle_ok = True
-    for strenge in ("nachsichtig", "ausgewogen", "streng"):
-        lesson = _mit_strenge(lektion(HAFTUNG), strenge)
-        for antwort in BAECKEREI["antworten"]["d20"]:
-            urteile = [tutor.evaluate_answer(lesson, tutor.new_profile(), task, antwort)["bewertung"]
-                       for _ in range(LAEUFE)]
-            ok = urteile.count("korrekt") >= 4
-            alle_ok &= ok
-            zeilen.append(f"| {strenge} | {antwort} | {' '.join(urteile)} | {'ja' if ok else 'nein'} |")
-    b.text("\n".join(zeilen))
-    b.ak("D-20", "AK 1/AK 2 jede Variante bei jeder Strenge korrekt in mindestens 4 von 5 Läufen", alle_ok)
-    lesson = _mit_strenge(lektion(HAFTUNG), "ausgewogen")
-    r = tutor.evaluate_answer(lesson, tutor.new_profile(), task, BAECKEREI["antworten"]["ohne_fachbegriff"])
-    art = r["elemente"][1]["status"] if len(r.get("elemente") or []) > 1 else "?"
+    task = BAKERY["task"]
+    b.abschnitt("D-20 Sinngleiche Formulierungen", f"Drei Varianten, drei Bewertungsstrengen, je {RUNS} Läufe.")
+    rows = ["| Strenge | Antwort | Urteile | erfüllt |", "|---|---|---|---|"]
+    all_ok = True
+    for strictness in ("nachsichtig", "ausgewogen", "streng"):
+        lesson = _with_strictness(lektion(HAFTUNG), strictness)
+        for answer in BAKERY["answers"]["d20"]:
+            verdicts = [tutor.evaluate_answer(lesson, tutor.new_profile(), task, answer)["bewertung"]
+                        for _ in range(RUNS)]
+            ok = verdicts.count("korrekt") >= 4
+            all_ok &= ok
+            rows.append(f"| {strictness} | {answer} | {' '.join(verdicts)} | {'ja' if ok else 'nein'} |")
+    b.text("\n".join(rows))
+    b.ak("D-20", "AK 1/AK 2 jede Variante bei jeder Strenge korrekt in mindestens 4 von 5 Läufen", all_ok)
+    lesson = _with_strictness(lektion(HAFTUNG), "ausgewogen")
+    result = tutor.evaluate_answer(lesson, tutor.new_profile(), task, BAKERY["answers"]["without_key_term"])
+    type_status = result["elemente"][1]["status"] if len(result.get("elemente") or []) > 1 else "?"
     b.ak("D-20", "AK 3 ohne Fachbegriff bleibt die Art der Haftung ungenau oder fehlend",
-         art in ("ungenau", "fehlt"), f"{r['bewertung']} · {_el(r)}")
+         type_status in ("ungenau", "fehlt"), f"{result['bewertung']} · {_el(result)}")
 
 
 @paket("D-21")
 def eval_d21(b: Bericht, anzahl: int):
     """Hinweis und Feedback nennen die erwartete Antwort nicht (Entscheid E1)."""
     from app import didaktik, tutor
-    task, antwort = BAECKEREI["aufgabe"], BAECKEREI["antworten"]["d21_teilweise"]
-    lesson = _mit_strenge(lektion(HAFTUNG), "ausgewogen")
-    b.abschnitt("D-21 Hinweis ohne Lösung", f"Antwort «{antwort}» (ohne den gesuchten Begriff), {LAEUFE} Läufe.")
-    hinweis_ok = feedback_ok = ersetzt = 0
-    for i in range(LAEUFE):
-        r = tutor.evaluate_answer(lesson, tutor.new_profile(), task, antwort)
-        gesperrt = didaktik.gesperrte_staemme(task, r.get("elemente"), [antwort]) | {"fahrlässig"}
-        vh = didaktik.verratene_woerter(r.get("hinweis", ""), gesperrt)
-        vf = didaktik.verratene_woerter(r.get("feedback", ""), gesperrt)
-        hinweis_ok += not vh
-        feedback_ok += not vf
-        ersetzt += bool(r.get("hinweis_ersetzt") or r.get("feedback_gekuerzt"))
-        b.text(f"- Lauf {i + 1}: **{r['bewertung']}** · Hinweis: {r.get('hinweis', '')}"
-               f"{' (ersetzt)' if r.get('hinweis_ersetzt') else ''}\n  Feedback: {zitat(r.get('feedback'), 300)[2:]}"
-               + (f"\n  Verraten: {', '.join(vh + vf)}" if vh or vf else ""))
-    b.ak("D-21", "AK 1 kein Hinweis nennt den gesuchten Begriff", hinweis_ok == LAEUFE, f"{hinweis_ok} von {LAEUFE}")
-    b.ak("D-21", "AK 3 kein Feedbacktext nennt den gesuchten Begriff", feedback_ok == LAEUFE, f"{feedback_ok} von {LAEUFE}")
-    b.ak("D-21", "Ersatz nach bleibendem Verstoss (Information)", True, f"{ersetzt} von {LAEUFE}")
+    task, answer = BAKERY["task"], BAKERY["answers"]["d21_partial"]
+    lesson = _with_strictness(lektion(HAFTUNG), "ausgewogen")
+    b.abschnitt("D-21 Hinweis ohne Lösung", f"Antwort «{answer}» (ohne den gesuchten Begriff), {RUNS} Läufe.")
+    hint_ok = feedback_ok = replaced = 0
+    for i in range(RUNS):
+        result = tutor.evaluate_answer(lesson, tutor.new_profile(), task, answer)
+        blocked = didaktik.blocked_stems(task, result.get("elemente"), [answer]) | {"fahrlässig"}
+        in_hint = didaktik.revealing_words(result.get("hinweis", ""), blocked)
+        in_feedback = didaktik.revealing_words(result.get("feedback", ""), blocked)
+        hint_ok += not in_hint
+        feedback_ok += not in_feedback
+        replaced += bool(result.get("hinweis_ersetzt") or result.get("feedback_shortened"))
+        b.text(f"- Lauf {i + 1}: **{result['bewertung']}** · Hinweis: {result.get('hinweis', '')}"
+               f"{' (ersetzt)' if result.get('hinweis_ersetzt') else ''}\n"
+               f"  Feedback: {zitat(result.get('feedback'), 300)[2:]}"
+               + (f"\n  Verraten: {', '.join(in_hint + in_feedback)}" if in_hint or in_feedback else ""))
+    b.ak("D-21", "AK 1 kein Hinweis nennt den gesuchten Begriff", hint_ok == RUNS, f"{hint_ok} von {RUNS}")
+    b.ak("D-21", "AK 3 kein Feedbacktext nennt den gesuchten Begriff", feedback_ok == RUNS, f"{feedback_ok} von {RUNS}")
+    b.ak("D-21", "Ersatz nach bleibendem Verstoss (Information)", True, f"{replaced} von {RUNS}")
 
 
 def vergleich_mit_vorlauf(b: Bericht, name: str = "eval_2026-10-12_1613.md") -> None:

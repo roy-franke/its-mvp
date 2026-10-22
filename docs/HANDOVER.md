@@ -154,20 +154,20 @@ mit Commit-Hash aus `.git` im Fuss jeder Seite (T-31). Entscheide und Experiment
 `docs/AUFTRAG-4.md`.
 
 Auftrag 5 (22.10.2026, Feedback zum Test vom 20.10.2026 mit «Haftungsrecht Version 3», Version 0.6.0):
-Die Bewertung misst jedes Element an der Tiefe, die die Frage erkennbar verlangt (`tutor.TIEFE_DER_FRAGE`,
-D-19), und akzeptiert sinngleiche Formulierungen mit demselben Fachbegriff (`tutor.GLEICHE_BEDEUTUNG`,
-Prüfung `didaktik.fachbegriff_trotzdem_ungenau`, D-20). Feedback und Hinweis verraten keine Schlüsselbegriffe
+Die Bewertung misst jedes Element an der Tiefe, die die Frage erkennbar verlangt (`tutor.QUESTION_DEPTH_RULE`,
+D-19), und akzeptiert sinngleiche Formulierungen mit demselben Fachbegriff (`tutor.SAME_MEANING_RULE`,
+Prüfung `didaktik.key_term_rated_imprecise`, D-20). Feedback und Hinweis verraten keine Schlüsselbegriffe
 oder erwarteten Inhalte noch nicht erfüllter Elemente, ausser die lernende Person hat sie selbst geschrieben
-(`didaktik.loesung_verraten`, Ersatzhinweis `tutor.hinweis_ohne_loesung`, Feedback gekürzt; nicht bei
+(`didaktik.solution_revealed`, Ersatzhinweis `tutor.hint_without_solution`, Feedback gekürzt; nicht bei
 Multiple Choice, D-21). Testfall ist die Bäckerei-Aufgabe in `tests/daten/baeckerei.json` (Sachverhalt
 rekonstruiert). Der Editor einer archivierten Lektion zeigt kein Formular mehr, und die Materialdetails
 verlinken archivierte Lektionen nicht in den Editor (L-04). Teaching Mode (N-06): Spalte `sessions.teaching`
 (Migration), `teaching: true` beim Start (nur Lehrpersonen, zählt als Testlauf), Endpunkte
-`/api/session/{sid}/anweisung/vorschlag`, `/api/session/{sid}/anweisung` und
-`DELETE /api/teacher/lessons/{id}/anweisungen/{aid}`, Liste `tutor_anweisungen` in der Lektion (Text, Geltung
-`thema` oder `lektion`, Konzept, Schrittart, Zeitpunkt, Sequenz), Ereignis `tutor_anweisung`, Schrittart
-`ANWEISUNG_VERALLGEMEINERN`. Anweisungen für die Lektion stehen im Systemprompt, solche zu einem Thema über
-`tutor._chat(konzept=…)` im Benutzerteil aller Anfragen zu diesem Konzept; ohne Anweisungen sind alle Prompts
+`/api/session/{sid}/instruction/suggestion`, `/api/session/{sid}/instruction` und
+`DELETE /api/teacher/lessons/{id}/instructions/{instruction_id}`, Liste `tutor_instructions` in der Lektion
+(`text`, `scope` `topic` oder `lesson`, `concept`, `step_type`, `created_at`, `session_id`, `original`),
+Ereignis `tutor_instruction`, Schrittart `GENERALIZE_INSTRUCTION`. Anweisungen für die Lektion stehen im Systemprompt, solche zu einem Thema über
+`tutor._chat(concept=…)` im Benutzerteil aller Anfragen zu diesem Konzept; ohne Anweisungen sind alle Prompts
 zeichengleich mit dem Stand vor N-06. Entscheide in `docs/AUFTRAG-5.md`.
 
 Prüfwerkzeuge neben pytest: `tests/ui/ui_checks.py` (Playwright gegen eine

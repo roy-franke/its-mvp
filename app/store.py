@@ -82,7 +82,7 @@ def _migrate(c):
     _add_column(c, "sessions", "status", "TEXT NOT NULL DEFAULT 'aktiv'")
     _add_column(c, "sessions", "status_at", "REAL")
     _add_column(c, "sessions", "archived_at", "REAL")
-    # N-06: Testläufe im Teaching Mode
+    # N-06: test runs in teaching mode
     _add_column(c, "sessions", "teaching", "INTEGER NOT NULL DEFAULT 0")
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (

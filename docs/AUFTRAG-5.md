@@ -27,34 +27,40 @@ Die Spalte «Entscheid» im Auftragsdokument war leer, es gelten die Vorschläge
 | E4 | Start über «Im Teaching Mode testen» in der Lektionsverwaltung; der normale Testlauf bleibt unverändert. |
 | E5 | «Nur für dieses Thema» hängt am Feld `konzept` des Schritts und wirkt in allen Anfragen zu diesem Konzept (Vergleich mit `didaktik.gleiches_konzept`). |
 | E6 | «Für die ganze Lektion» lässt den Tutor eine allgemeine Fassung vorschlagen; die Lehrperson ändert sie bei Bedarf und bestätigt sie. |
-| E7 | Eigene Liste `tutor_anweisungen` in der Lektion, getrennt von `tutor_hinweise`. Der Editor zeigt sie und löscht einzelne Einträge; Speichern und Löschen erhöhen die Version. |
+| E7 | Eigene Liste `tutor_instructions` in der Lektion, getrennt von `tutor_hinweise`. Der Editor zeigt sie und löscht einzelne Einträge; Speichern und Löschen erhöhen die Version. |
 | E8 | Wirkung ab dem nächsten Aufruf des Tutors in dieser Lektion, auch in laufenden Sequenzen anderer Personen. Der aktuelle Schritt wird nicht neu erzeugt. |
 | E9 | Jede Lehrperson für jede nicht archivierte Lektion, ohne Besitzermodell. |
 
 ## 3. Umsetzung und Auslegung
 
+**Sprache im Code.** Auf Wunsch des Auftraggebers ist der neue Code auf Englisch: Bezeichner, Kommentare,
+Docstrings und Tests, ebenso die neuen Felder (`tutor_instructions` mit `text`, `scope`, `concept`,
+`step_type`, `created_at`, `session_id`, `original`), Endpunkte und das Ereignis `tutor_instruction`.
+Bestehender Code bleibt unverändert. Texte für Lernende und Lehrpersonen, Prompts und Commit-Messages
+sind Deutsch.
+
 **D-19.** Der Befund liess sich mit der Aufgabe aus der its.db nicht belegen, weil sie nicht vorlag (siehe
 Abschnitt 5). Aus dem Code: Die Bewertung erhält zu jedem Element den erwarteten Inhalt in der Tiefe der
 Musterlösung («Art der Haftung – erwartet: Haftung für Fahrlässigkeit …»), und «ungenau» hiess «zu allgemein».
-Neu misst die Bewertung jedes Element an der Tiefe, die die Frage erkennbar verlangt (`tutor.TIEFE_DER_FRAGE`,
+Neu misst die Bewertung jedes Element an der Tiefe, die die Frage erkennbar verlangt (`tutor.QUESTION_DEPTH_RULE`,
 fachneutral), «ungenau» heisst «allgemeiner, als die Frage es verlangt», und die Aufgabe legt den erwarteten
 Inhalt in der Tiefe der Frage fest. Texte zur Bewertungsstrenge, Urteilslogik und Frageformulierung sind
 unverändert; die Analyse zeigte keinen Bedarf, sie zu ändern, weil die Strenge «ausgewogen» ausdrücklich vom
 Begriff spricht, der «gefragt ist».
 
-**D-20.** Regel im Bewertungsprompt (`tutor.GLEICHE_BEDEUTUNG`) für alle drei Strengen und Prüfung
-`didaktik.fachbegriff_trotzdem_ungenau`: Ist ein Element ungenau, obwohl alle Stämme eines erwarteten
+**D-20.** Regel im Bewertungsprompt (`tutor.SAME_MEANING_RULE`) für alle drei Strengen und Prüfung
+`didaktik.key_term_rated_imprecise`: Ist ein Element ungenau, obwohl alle Stämme eines erwarteten
 Fachbegriffs in der Antwort zu diesem Element stehen, folgt ein Korrekturhinweis. Erwartete Fachbegriffe sind
 die Schlüsselbegriffe der Aufgabe, die im erwarteten Inhalt des Elements stehen. Der vorhandene Wortvergleich
 wird gerichtet genutzt: Der Stamm des Begriffs muss in einem gleich langen oder längeren Wort der Antwort stehen
 («fahrlässig» in «Fahrlässigkeitshaftung»), nicht umgekehrt («schuld» ist nicht «Verschuldenshaftung»).
 
-**D-21.** Prüfung `didaktik.loesung_verraten` für Feedback und Hinweis. Gesperrt sind die Stämme ab fünf
+**D-21.** Prüfung `didaktik.solution_revealed` für Feedback und Hinweis. Gesperrt sind die Stämme ab fünf
 Zeichen aus den Schlüsselbegriffen und aus dem erwarteten Inhalt der noch nicht erfüllten Elemente, ausser sie
 stehen in Titel, Fall oder Frage oder in einer Antwort der lernenden Person (auch einem früheren Versuch).
 Ein Schlüsselbegriff, der nur zu erfüllten Elementen gehört, bleibt frei, damit «vertretbar» weiterhin die
 naheliegendere Lösung zeigen kann (D-15). Ein Treffer führt zum Korrekturhinweis; bleibt er bestehen, ersetzt
-`tutor.hinweis_ohne_loesung` den Hinweis (geprüft ohne gesperrte Stämme), und aus dem Feedback fallen die Sätze
+`tutor.hint_without_solution` den Hinweis (geprüft ohne gesperrte Stämme), und aus dem Feedback fallen die Sätze
 mit gesperrten Stämmen weg (bleibt nichts, ein neutraler Satz). Die Kürzung des Feedbacks ist die
 Entsprechung zum Ersatzhinweis für den Feedbacktext (E1); das Dokument nennt den Ersatz nur für den Hinweis.
 
@@ -69,7 +75,7 @@ Lektionen. Anweisungen für die Lektion stehen am Ende des Systemprompts, der da
 alle Schrittarten gleich bleibt. Anweisungen zu einem Thema hängt `tutor._chat` an den Benutzerteil, wenn das
 Konzept des Schritts vor dem Aufruf feststeht: Bewertung, Gegenprüfung, Verständnisfragen, Erklärungen zu
 einem bestimmten Konzept und Aufgaben direkt nach einer Theorie oder als Vereinfachung. Die Verallgemeinerung
-ist ein eigener Aufruf (`ANWEISUNG_VERALLGEMEINERN`) ohne Lektionsmaterial; im Fallback erhält die
+ist ein eigener Aufruf (`GENERALIZE_INSTRUCTION`) ohne Lektionsmaterial; im Fallback erhält die
 Lehrperson ihren eigenen Text. «Teach the Tutor» steht unter jeder Nachricht des Tutors, bei einer Aufgabe
 unter der Frage.
 
