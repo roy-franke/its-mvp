@@ -793,7 +793,8 @@ def _aufgabe_erzeugen(lesson: dict, profile: dict, history: list[dict],
         # D-10: Die erwarteten Elemente entstehen mit der Aufgabe, nicht erst bei der Bewertung
         "Lege fest, welche Teile die Antwort enthalten soll: 1 bis 4 erwartete Elemente, jedes mit der "
         "Dimension (wie die Frage sie nennt) und dem erwarteten Inhalt (was eine richtige Antwort dazu "
-        "sagt, passend zur Musterlösung). Die Frage "
+        "sagt, passend zur Musterlösung, in der Tiefe, die die Frage nennt; feinere Unterscheidungen, nach "
+        "denen die Frage nicht fragt, gehören nicht zum erwarteten Inhalt). Die Frage "
         "nennt jeden dieser Teile ausdrücklich als gesuchte Dimension, nicht als Lösung (zum Beispiel "
         "«Nenne die verantwortliche Person und die Art der Haftung», nicht «Wer ist verantwortlich?», "
         "wenn auch die Art der Haftung erwartet wird). Verlangt die Frage sprachlich genau eine Sache "
@@ -1007,13 +1008,14 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
            "nicht nach einer Begründung oder einem Gesetzesartikel, sind diese kein Element.\n") +
         "   Lege jede Dimension sinngemäss aus, nicht wörtlich: Eine «Person» kann auch eine Organisation, "
         "eine Behörde oder ein Verein sein, ein «Wert» auch ein Bruch oder ein Ausdruck.\n"
+        + TIEFE_DER_FRAGE +
         "2. Prüfe für jedes Element den Status:\n"
         "   korrekt = sachlich richtig vorhanden (gemäss der Bewertungsstrenge);\n"
         "   vertretbar = weicht von der erwarteten Lösung ab, ist aber richtig unter einer Annahme, die der "
         "Sachverhalt offenlässt, oder entspricht einer der weiteren vertretbaren Lösungen; nenne die Annahme "
         "in annahme;\n"
-        "   ungenau = sachlich zutreffend, aber zu allgemein, nur umschrieben oder ohne den "
-        "verlangten Fachbegriff;\n"
+        "   ungenau = sachlich zutreffend, aber allgemeiner, als die Frage es verlangt, nur umschrieben oder "
+        "ohne den verlangten Fachbegriff;\n"
         + WISSEN_BEWERTUNG["allgemeinwissen" if einstellungen.allgemeinwissen_erlaubt(lesson) else "material"] +
         "   falsch = widerspricht dem Sachverhalt oder dem Lektionsmaterial (zum Beispiel ein Fahrzeug, das im "
         "Fall nicht vorkommt, oder ein Rechenergebnis, das nicht stimmt). Eine Abweichung von der erwarteten "
@@ -1173,6 +1175,15 @@ def hinweis_aus_elementen(elemente: list[dict]) -> str:
         satz = (f"Zu «{e['element']}» steht in deiner Antwort noch nichts. "
                 "Lies den Fall nochmals und überleg, was er dazu hergibt.")
     return satz
+
+
+# D-19: Massstab ist die Tiefe, die die Frage erkennbar verlangt, nicht die Tiefe der erwarteten Lösung
+TIEFE_DER_FRAGE = (
+    "   Miss jedes Element an der Tiefe, die die Frage erkennbar verlangt, nicht an der Tiefe des erwarteten "
+    "Inhalts: Beantwortet die Antwort die Frage auf dieser Ebene richtig, ist das Element korrekt, auch wenn der "
+    "erwartete Inhalt feiner unterscheidet. Verlangt die Frage eine kurze Begründung, genügt eine kurze "
+    "Begründung, die zur Antwort passt und sachlich stimmt. Was über die Tiefe der Frage hinausgeht, nennst du "
+    "höchstens als freiwillige Ergänzung; es ändert weder den Status noch das Urteil.\n")
 
 
 ELEMENTE_FESTGELEGT = (

@@ -12,6 +12,7 @@ mit den Regressionsfällen aus Anhang B) und schreibt einen lesbaren Bericht nac
     python tests/eval/eval_didaktik.py --mock           # Rauchtest ohne Modell
     python tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <id-der-version-3>
     python tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09        # Auftrag 3
+    python tests/eval/eval_didaktik.py D-19 --haftung <id-der-version-3>         # Auftrag 5
 
 Mit qwen3:30b auf a9-mega dauert ein vollständiger Lauf je nach Anzahl
 etwa 30 bis 60 Minuten. Die Anzahl Aufgaben pro Niveau lässt sich mit
@@ -1046,6 +1047,38 @@ def eval_d18(b: Bericht, anzahl: int):
     art = next((e for e in r.get("elemente", []) if "Haftung" in e.get("element", "")), {})
     b.ak("D-18", "Fall 2 als fester Testfall: Verschuldenshaftung korrekt, Eltern höchstens ungenau",
          art.get("status") in ("korrekt", "vertretbar") and r["bewertung"] != "falsch", f"{r['bewertung']} · {_el(r)}")
+
+
+# ---------------------------------------------------------------- Auftrag 5
+#
+# Aufgabe «Unfall in der Bäckerei» aus dem Feedback vom 20.10.2026. Sachverhalt und erwartete
+# Elemente sind rekonstruiert (siehe _quelle in der Datei), bis die Aufgabe aus der its.db vorliegt.
+
+BAECKEREI = json.loads((ROOT / "tests" / "daten" / "baeckerei.json").read_text(encoding="utf-8"))
+LAEUFE = 5
+
+
+def _mit_strenge(lesson: dict, strenge: str) -> dict:
+    return dict(lesson, einstellungen=dict(lesson.get("einstellungen") or {}, bewertungsstrenge=strenge))
+
+
+@paket("D-19")
+def eval_d19(b: Bericht, anzahl: int):
+    """Begründungstiefe: Die Bäckerei-Antwort auf der Ebene der Frage gilt als korrekt."""
+    from app import tutor
+    task, antwort = BAECKEREI["aufgabe"], BAECKEREI["antworten"]["d19"]
+    lesson = _mit_strenge(lektion(HAFTUNG), "ausgewogen")
+    b.abschnitt("D-19 Begründungstiefe", f"Antwort «{antwort}», Bewertungsstrenge ausgewogen, {LAEUFE} Läufe.")
+    urteile = []
+    for i in range(LAEUFE):
+        r = tutor.evaluate_answer(lesson, tutor.new_profile(), task, antwort)
+        urteile.append(r["bewertung"])
+        b.text(f"- Lauf {i + 1}: **{r['bewertung']}** · {_el(r)}\n  Feedback: {zitat(r.get('feedback'), 300)[2:]}")
+    b.ak("D-19", "AK 1 Bäckerei-Antwort korrekt in mindestens 4 von 5 Läufen", urteile.count("korrekt") >= 4,
+         " ".join(urteile))
+    falsch = tutor.evaluate_answer(lesson, tutor.new_profile(), task, "Die Kundin. Tierhalterhaftung.")
+    b.ak("D-19", "AK 5 eine falsche Antwort bleibt falsch", falsch["bewertung"] == "falsch",
+         f"{falsch['bewertung']} · {_el(falsch)}")
 
 
 def vergleich_mit_vorlauf(b: Bericht, name: str = "eval_2026-10-12_1613.md") -> None:

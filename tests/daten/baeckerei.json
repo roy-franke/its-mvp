@@ -1,0 +1,34 @@
+{
+  "_quelle": "Aufgabe «Unfall in der Bäckerei» aus dem Feedback vom 20.10.2026 (Auftrag 5, D-19 bis D-21). Titel, Frage und Antworten stammen aus dem Auftragsdokument. Sachverhalt, Musterlösung und erwartete Elemente sind rekonstruiert, weil die Lernsequenz aus der its.db nicht vorlag; sie bilden den Befund nach, dass die erwarteten Elemente den Inhalt der Musterlösung in deren Tiefe tragen. Liegt die Aufgabe aus der its.db vor, ersetzt sie diese Felder.",
+  "aufgabe": {
+    "typ": "aufgabe",
+    "titel": "Unfall in der Bäckerei",
+    "konzept": "Verschuldenshaftung",
+    "aufgabentyp": "begruenden",
+    "inhalt": "In der Bäckerei Moser fällt beim Kneten eine Schraube der alten Knetmaschine in den Teig. Der Bäcker hatte bemerkt, dass sich die Schraube gelockert hatte, die Maschine aber trotzdem weiter benutzt. Eine Kundin beisst in ein Brötchen auf die Schraube und bricht sich einen Zahn. Die Behandlung beim Zahnarzt kostet 900 Franken.",
+    "frage": "Wer ist verantwortlich für den Schaden, und welche Art der Haftung greift hier? Begründe kurz.",
+    "optionen": [],
+    "erwartete_antwort": "Der Bäcker haftet nach Art. 41 OR für Fahrlässigkeit (Verschuldenshaftung), weil er die gelockerte Schraube bemerkt und die Maschine trotzdem weiter benutzt hat.",
+    "schluesselbegriffe": ["Fahrlässigkeit", "Verschuldenshaftung"],
+    "erwartete_elemente": [
+      {"dimension": "verantwortliche Person", "erwartet": "der Bäcker"},
+      {"dimension": "Art der Haftung", "erwartet": "Haftung für Fahrlässigkeit (Verschuldenshaftung nach Art. 41 OR)"},
+      {"dimension": "kurze Begründung", "erwartet": "Der Bäcker hat die gebotene Sorgfalt verletzt, weil er die gelockerte Schraube bemerkt und die Maschine trotzdem benutzt hat; das ist fahrlässig."}
+    ],
+    "merkmale": [{"merkmal": "Verschulden", "im_fall": "die Maschine aber trotzdem weiter benutzt"}],
+    "alternative_loesungen": []
+  },
+  "antworten": {
+    "d19": "Der Bäcker. Verschuldenshaftung. Der Bäcker ist verantwortlich für seine Produkte.",
+    "d20": [
+      "Der Bäcker. Haftung aufgrund von Fahrlässigkeit. Der Bäcker ist verantwortlich für seine Produkte.",
+      "Der Bäcker. Haftung wegen Fahrlässigkeit. Der Bäcker ist verantwortlich für seine Produkte.",
+      "Der Bäcker. Fahrlässigkeitshaftung. Der Bäcker ist verantwortlich für seine Produkte."
+    ],
+    "ohne_fachbegriff": "Der Bäcker haftet.",
+    "d21_teilweise": "Der Bäcker. Er ist verantwortlich für seine Produkte."
+  },
+  "beobachtet": {
+    "hinweis_d20": "Prüfe, ob der Begriff «Haftung für Fahrlässigkeit» im Material explizit als korrekte Bezeichnung genannt wird."
+  }
+}
