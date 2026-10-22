@@ -961,6 +961,47 @@ def musterloesung_erwaehnt(text: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- D-20
+#
+# «Haftung aufgrund von Fahrlässigkeit» galt als ungenau, weil das Material «Haftung für
+# Fahrlässigkeit» schreibt. Verlangt ist der Fachbegriff, nicht der Wortlaut. Die Prüfung nutzt
+# den Wortvergleich oben (Stämme, Zusammensetzungen ab sechs Zeichen) unverändert.
+
+def _steckt_in(stamm_begriff: str, text_staemme: set[str]) -> bool:
+    """Der Stamm eines Fachbegriffs steht in einem Wort der Antwort, gleich lang oder als Teil einer
+    Zusammensetzung («fahrlässig» in «Fahrlässigkeitshaftung»), nicht umgekehrt («schuld» ist nicht
+    «Verschuldenshaftung»)."""
+    return any(gleicher_stamm(stamm_begriff, t) and len(t) >= len(stamm_begriff) for t in text_staemme)
+
+
+def erwartete_fachbegriffe(task: dict, erwartet: str) -> list[str]:
+    """Fachbegriffe eines Elements: die Schlüsselbegriffe der Aufgabe, die im erwarteten Inhalt stehen."""
+    inhalt = staemme(erwartet)
+    return [b for b in schluesselbegriffe(task) if staemme(b) and all(_kommt_vor(t, inhalt) for t in staemme(b))]
+
+
+def fachbegriff_trotzdem_ungenau(bewertung: dict, task: dict, antwort: str) -> str | None:
+    """D-20: Ein Element ist «ungenau», obwohl alle Wortstämme eines erwarteten Fachbegriffs in der
+    Antwort zu diesem Element stehen (ohne Zitat: in der ganzen Antwort)."""
+    festgelegt = elemente_normalisieren(task.get("erwartete_elemente"))
+    roh = [e for e in bewertung.get("elemente") or [] if isinstance(e, dict)]
+    if not festgelegt or len(roh) != len(festgelegt):
+        return None
+    for e, f in zip(roh, festgelegt):
+        if str(e.get("status", "")).strip().lower() != "ungenau" or not f["erwartet"]:
+            continue
+        zitat = str(e.get("antwort") or "").strip() or antwort or ""
+        vorhanden = staemme(zitat)
+        for begriff in erwartete_fachbegriffe(task, f["erwartet"]):
+            if all(_steckt_in(t, vorhanden) for t in staemme(begriff)):
+                return (f"Das Element «{f['dimension']}» ist als ungenau eingestuft, obwohl die Antwort dazu den "
+                        f"Fachbegriff «{begriff}» enthält, nur anders formuliert («{zitat}»). Eine Formulierung mit "
+                        "derselben Bedeutung und demselben Fachbegriff ist nicht ungenau, bei keiner "
+                        "Bewertungsstrenge. Prüfe den Status erneut; bleibt er ungenau, nenne in der Begründung, "
+                        "was ausser dem Wortlaut fehlt.")
+    return None
+
+
 HINWEIS_AEHNLICH = 0.75
 
 

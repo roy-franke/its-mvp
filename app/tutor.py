@@ -994,7 +994,8 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
                 or didaktik.urteil_widerspricht_text(d)
                 or didaktik.musterloesung_erwaehnt(f"{d.get('feedback', '')} {d.get('hinweis', '')}")
                 or didaktik.hinweis_wiederholt(d.get("hinweis", ""), frueher_hinweise)
-                or didaktik.vorsicht_bemaengelt(d, answer, offene_punkte))
+                or didaktik.vorsicht_bemaengelt(d, answer, offene_punkte)
+                or didaktik.fachbegriff_trotzdem_ungenau(d, task, answer))
     data = _chat(
         lesson, [f"{task.get('inhalt', '')} {task.get('frage', '')}", answer],
         "AUFGABE: ANTWORT_BEWERTEN\n"
@@ -1016,6 +1017,7 @@ def evaluate_answer(lesson: dict, profile: dict, task: dict, answer: str,
         "in annahme;\n"
         "   ungenau = sachlich zutreffend, aber allgemeiner, als die Frage es verlangt, nur umschrieben oder "
         "ohne den verlangten Fachbegriff;\n"
+        + GLEICHE_BEDEUTUNG
         + WISSEN_BEWERTUNG["allgemeinwissen" if einstellungen.allgemeinwissen_erlaubt(lesson) else "material"] +
         "   falsch = widerspricht dem Sachverhalt oder dem Lektionsmaterial (zum Beispiel ein Fahrzeug, das im "
         "Fall nicht vorkommt, oder ein Rechenergebnis, das nicht stimmt). Eine Abweichung von der erwarteten "
@@ -1184,6 +1186,14 @@ TIEFE_DER_FRAGE = (
     "erwartete Inhalt feiner unterscheidet. Verlangt die Frage eine kurze Begründung, genügt eine kurze "
     "Begründung, die zur Antwort passt und sachlich stimmt. Was über die Tiefe der Frage hinausgeht, nennst du "
     "höchstens als freiwillige Ergänzung; es ändert weder den Status noch das Urteil.\n")
+
+
+# D-20: verlangt ist der Fachbegriff, nicht der Wortlaut im Material
+GLEICHE_BEDEUTUNG = (
+    "   Eine Formulierung mit derselben Bedeutung und demselben Fachbegriff gilt wie der Wortlaut im Material: "
+    "Andere Präpositionen, Wortstellung, Beugung oder eine Zusammensetzung (etwa «Energieerhaltung» statt "
+    "«Erhaltung der Energie») machen ein Element nicht ungenau. Das gilt bei jeder Bewertungsstrenge: Verlangt "
+    "ist der Fachbegriff, nicht ein bestimmter Wortlaut;\n")
 
 
 ELEMENTE_FESTGELEGT = (

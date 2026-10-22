@@ -12,7 +12,7 @@ mit den Regressionsfällen aus Anhang B) und schreibt einen lesbaren Bericht nac
     python tests/eval/eval_didaktik.py --mock           # Rauchtest ohne Modell
     python tests/eval/eval_didaktik.py D-07 D-08 D-09 D-10 D-11 D-12 T-09 --haftung <id-der-version-3>
     python tests/eval/eval_didaktik.py D-13 D-14 D-15 D-16 D-17 D-18 T-09        # Auftrag 3
-    python tests/eval/eval_didaktik.py D-19 --haftung <id-der-version-3>         # Auftrag 5
+    python tests/eval/eval_didaktik.py D-19 D-20 --haftung <id-der-version-3>    # Auftrag 5
 
 Mit qwen3:30b auf a9-mega dauert ein vollständiger Lauf je nach Anzahl
 etwa 30 bis 60 Minuten. Die Anzahl Aufgaben pro Niveau lässt sich mit
@@ -1079,6 +1079,31 @@ def eval_d19(b: Bericht, anzahl: int):
     falsch = tutor.evaluate_answer(lesson, tutor.new_profile(), task, "Die Kundin. Tierhalterhaftung.")
     b.ak("D-19", "AK 5 eine falsche Antwort bleibt falsch", falsch["bewertung"] == "falsch",
          f"{falsch['bewertung']} · {_el(falsch)}")
+
+
+@paket("D-20")
+def eval_d20(b: Bericht, anzahl: int):
+    """Sinngleiche Formulierungen: drei Varianten des Fachbegriffs bei allen drei Bewertungsstrengen."""
+    from app import tutor
+    task = BAECKEREI["aufgabe"]
+    b.abschnitt("D-20 Sinngleiche Formulierungen", f"Drei Varianten, drei Bewertungsstrengen, je {LAEUFE} Läufe.")
+    zeilen = ["| Strenge | Antwort | Urteile | erfüllt |", "|---|---|---|---|"]
+    alle_ok = True
+    for strenge in ("nachsichtig", "ausgewogen", "streng"):
+        lesson = _mit_strenge(lektion(HAFTUNG), strenge)
+        for antwort in BAECKEREI["antworten"]["d20"]:
+            urteile = [tutor.evaluate_answer(lesson, tutor.new_profile(), task, antwort)["bewertung"]
+                       for _ in range(LAEUFE)]
+            ok = urteile.count("korrekt") >= 4
+            alle_ok &= ok
+            zeilen.append(f"| {strenge} | {antwort} | {' '.join(urteile)} | {'ja' if ok else 'nein'} |")
+    b.text("\n".join(zeilen))
+    b.ak("D-20", "AK 1/AK 2 jede Variante bei jeder Strenge korrekt in mindestens 4 von 5 Läufen", alle_ok)
+    lesson = _mit_strenge(lektion(HAFTUNG), "ausgewogen")
+    r = tutor.evaluate_answer(lesson, tutor.new_profile(), task, BAECKEREI["antworten"]["ohne_fachbegriff"])
+    art = r["elemente"][1]["status"] if len(r.get("elemente") or []) > 1 else "?"
+    b.ak("D-20", "AK 3 ohne Fachbegriff bleibt die Art der Haftung ungenau oder fehlend",
+         art in ("ungenau", "fehlt"), f"{r['bewertung']} · {_el(r)}")
 
 
 def vergleich_mit_vorlauf(b: Bericht, name: str = "eval_2026-10-12_1613.md") -> None:
